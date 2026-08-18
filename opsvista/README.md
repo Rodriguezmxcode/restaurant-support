@@ -1,0 +1,61 @@
+# OpsVista Migration v1
+
+This directory is the first version-controlled source base for migrating OpsVista away from a ChatGPT Sites-only implementation.
+
+## Why this exists
+
+The current OpsVista/PV Operations product is published from ChatGPT Sites. The exact original source project was not present in the connected GitHub account, Google Drive, or ChatGPT Library as a repository/ZIP. This migration therefore rebuilds the application shell from the documented production UI and operational requirements while preserving the existing Site until a controlled replacement is ready.
+
+## Implemented in this branch
+
+- Responsive OpsVista operations shell based on the current production navigation
+- Mobile-first navigation behavior
+- Action Center as a first-class module
+- Operational priority queue
+- Signal → likely cause → recommendation → owner → verification workflow
+- Estimated financial/operational impact
+- Location filters and search
+- Assign / Create Task / Investigate / Dismiss demo interactions
+- Verification loop concept
+- Roadmap placeholders for Evidence Audit, Ramp Compliance, Labor Intelligence, and OpsVista AI Copilot
+
+## Existing product areas represented in navigation
+
+- Resumen
+- Locaciones
+- Ventas
+- Local Intelligence
+- Finanzas
+- Gastos
+- Horarios
+- Tasks
+- Action Center
+- Prioridades
+- Pagos
+- Transferencias
+- Configuración
+
+## Important data status
+
+The Action Center metrics and alerts in this branch are representative demo values. They must not be interpreted as live operational data until the existing integrations are wired to this source base.
+
+## Integration targets
+
+1. Toast — sales, orders, discounts, voids, employees, labor
+2. 7shifts — scheduling, tasks, logbook
+3. Ramp — transactions, cardholders, departments/locations, memos, receipts
+4. Restaurant365 — invoices, accounts payable, vendors, payment status
+5. Local intelligence — weather, traffic and event demand signals
+
+## Next implementation sequence
+
+1. Connect live data adapters to Action Center
+2. Add Evidence Audit (photo requirement, approve/reject, resubmit, before/after)
+3. Add Ramp memo/receipt compliance signals
+4. Add projected labor and overtime rules
+5. Add OpsVista AI explanation layer
+6. Add mobile API contracts for native iOS/Android clients
+
+## Safety
+
+This work lives on `opsvista-migration-v1` and does not replace the current production Site. Production should only be switched after live integrations, authentication, permissions, and regression checks are completed.
