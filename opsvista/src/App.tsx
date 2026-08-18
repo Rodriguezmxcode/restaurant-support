@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import RampComplianceView from './RampComplianceView';
 
 type Severity = 'High' | 'Medium' | 'Low';
 type Status = 'Open' | 'Assigned' | 'Investigating' | 'Completed' | 'Dismissed';
@@ -16,6 +17,8 @@ type ActionItem = {
   impact: string;
   owner?: string;
 };
+
+type RampEscalation = Omit<ActionItem, 'id' | 'category' | 'status'>;
 
 const initialActions: ActionItem[] = [
   {
@@ -106,8 +109,24 @@ export default function App() {
     setActions(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
+  const escalateRamp = (item: RampEscalation) => {
+    const nextId = Math.max(0, ...actions.map(action => action.id)) + 1;
+    const nextAction: ActionItem = {
+      ...item,
+      id: nextId,
+      category: 'Ramp Compliance',
+      status: 'Open',
+    };
+    setActions(items => [...items, nextAction]);
+    setSelectedId(nextId);
+    setSection('Action Center');
+    setLocation('All locations');
+    setSearch('');
+  };
+
   const openCount = actions.filter(a => !['Completed', 'Dismissed'].includes(a.status)).length;
   const highCount = actions.filter(a => a.severity === 'High' && !['Completed', 'Dismissed'].includes(a.status)).length;
+  const isRamp = section === 'Gastos';
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -123,66 +142,68 @@ export default function App() {
 
     <main>
       <header className="topbar">
-        <div className="search-wrap"><span>⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar incidente, ubicación o responsable..." /></div>
+        <div className="search-wrap"><span>⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder={isRamp ? 'Buscar en OpsVista...' : 'Buscar incidente, ubicación o responsable...'} /></div>
         <div className="top-actions"><button>↻ Actualizar datos</button><button>Presentación OpsVista</button><button className="danger-outline">Cerrar sesión</button><button className="icon-btn">?</button><div className="avatar small">RR</div></div>
       </header>
 
       <div className="page">
         <div className="page-heading">
-          <div><div className="eyebrow">OPERATIONAL INTELLIGENCE</div><h1>{section}</h1><p>Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.</p></div>
-          <div className="filters"><select value={location} onChange={e => setLocation(e.target.value)}><option>All locations</option><option>Stamford</option><option>Orange</option><option>Fairfield</option><option>Danbury</option><option>Avon</option><option>Southington</option></select><button className="primary">+ Nueva acción</button></div>
+          <div><div className="eyebrow">{isRamp ? 'FINANCIAL ACCOUNTABILITY' : 'OPERATIONAL INTELLIGENCE'}</div><h1>{isRamp ? 'Gastos · Ramp Compliance' : section}</h1><p>{isRamp ? 'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.' : 'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.'}</p></div>
+          {!isRamp && <div className="filters"><select value={location} onChange={e => setLocation(e.target.value)}><option>All locations</option><option>Stamford</option><option>Orange</option><option>Fairfield</option><option>Danbury</option><option>Avon</option><option>Southington</option></select><button className="primary">+ Nueva acción</button></div>}
         </div>
 
-        <section className="metrics-grid">
-          <Metric label="SALES TODAY" value="$82,461" note="+7.2% vs comparable period" />
-          <Metric label="PROJECTED LABOR" value="21.3%" note="Current: 19.8% · Target: 21.0%" />
-          <Metric label="SPLH" value="$63.40" note="Across active locations" />
-          <Metric label="TASK COMPLETION" value="92.4%" note="1 location below target" />
-          <Metric label="OPEN ACTIONS" value={String(openCount)} note={`${highCount} high priority`} tone={highCount ? 'warn' : ''} />
-        </section>
-
-        <section className="score-banner">
-          <div><span>OpsVista Score</span><strong>87</strong><small>/100</small></div>
-          <div className="score-copy"><strong>6 locations healthy · 1 requires attention</strong><span>Score combines labor, tasks, exceptions, compliance and unresolved operational actions.</span></div>
-          <div className="health"><span className="dot green"></span>Healthy <span className="dot amber"></span>Watch <span className="dot red"></span>Action</div>
-        </section>
-
-        <div className="content-grid">
-          <section className="panel action-list-panel">
-            <div className="panel-header"><div><h2>Needs Action</h2><p>Prioritized by operational and financial impact.</p></div><span className="count-pill">{filtered.length}</span></div>
-            <div className="action-list">{filtered.map(a => <button key={a.id} className={`action-row ${selectedId === a.id ? 'selected' : ''}`} onClick={() => setSelectedId(a.id)}>
-              <div className={`severity ${a.severity.toLowerCase()}`}>{a.severity === 'High' ? '!' : a.severity === 'Medium' ? '•' : '○'}</div>
-              <div className="action-main"><div className="action-meta"><span>{a.location}</span><span>•</span><span>{a.category}</span></div><strong>{a.title}</strong><p>{a.signal}</p><div className="action-footer"><span className={`status ${a.status.toLowerCase()}`}>{a.status}</span><span className="impact">{a.impact}</span></div></div>
-              <span className="chev">›</span>
-            </button>)}</div>
+        {isRamp ? <RampComplianceView onEscalate={escalateRamp} /> : <>
+          <section className="metrics-grid">
+            <Metric label="SALES TODAY" value="$82,461" note="+7.2% vs comparable period" />
+            <Metric label="PROJECTED LABOR" value="21.3%" note="Current: 19.8% · Target: 21.0%" />
+            <Metric label="SPLH" value="$63.40" note="Across active locations" />
+            <Metric label="TASK COMPLETION" value="92.4%" note="1 location below target" />
+            <Metric label="OPEN ACTIONS" value={String(openCount)} note={`${highCount} high priority`} tone={highCount ? 'warn' : ''} />
           </section>
 
-          {selected && <section className="panel detail-panel">
-            <div className="detail-top"><div><span className={`severity-label ${selected.severity.toLowerCase()}`}>{selected.severity} priority</span><h2>{selected.title}</h2><p>{selected.location} · {selected.category}</p></div><button className="icon-btn">•••</button></div>
-            <div className="detail-block"><label>SIGNAL</label><p>{selected.signal}</p></div>
-            <div className="detail-block"><label>LIKELY CAUSE</label><p>{selected.cause}</p></div>
-            <div className="detail-block recommendation"><label>OPSVISTA RECOMMENDATION</label><p>{selected.recommendation}</p></div>
-            <div className="impact-box"><span>Estimated impact</span><strong>{selected.impact}</strong></div>
-            {selected.owner && <div className="owner-box"><div className="avatar small">{selected.owner.split(' ').map(x => x[0]).join('').slice(0,2)}</div><div><span>Owner</span><strong>{selected.owner}</strong></div></div>}
-            <div className="action-buttons">
-              <button className="primary" onClick={() => updateAction(selected.id, { status: 'Assigned', owner: selected.owner ?? 'Location Manager' })}>Assign owner</button>
-              <button onClick={() => updateAction(selected.id, { status: 'Assigned', owner: selected.owner ?? 'Location Manager' })}>Create task</button>
-              <button onClick={() => updateAction(selected.id, { status: 'Investigating' })}>Investigate</button>
-              <button onClick={() => updateAction(selected.id, { status: 'Dismissed' })}>Dismiss</button>
-            </div>
-            <div className="verification"><strong>Verification loop</strong><p>Once the action is completed, OpsVista should compare the next measured result against the original signal and record whether the intervention worked.</p><button onClick={() => updateAction(selected.id, { status: 'Completed' })}>Mark completed for demo</button></div>
-          </section>}
-        </div>
+          <section className="score-banner">
+            <div><span>OpsVista Score</span><strong>87</strong><small>/100</small></div>
+            <div className="score-copy"><strong>6 locations healthy · 1 requires attention</strong><span>Score combines labor, tasks, exceptions, compliance and unresolved operational actions.</span></div>
+            <div className="health"><span className="dot green"></span>Healthy <span className="dot amber"></span>Watch <span className="dot red"></span>Action</div>
+          </section>
 
-        <section className="panel roadmap-panel">
-          <div className="panel-header"><div><h2>Next intelligence layers</h2><p>These modules plug into the same Action Center workflow.</p></div></div>
-          <div className="roadmap-grid">
-            <div><span>01</span><strong>Evidence Audit</strong><p>Photo proof, approve/reject, resubmission, before/after and audit history.</p></div>
-            <div><span>02</span><strong>Ramp Compliance</strong><p>Cardholder, department, memo, receipt, duplicate and out-of-policy signals.</p></div>
-            <div><span>03</span><strong>Labor Intelligence</strong><p>Forecast vs schedule, overtime exposure, suggested cuts and verified savings.</p></div>
-            <div><span>04</span><strong>OpsVista AI Copilot</strong><p>Explain why a KPI moved and turn recommendations into assignable actions.</p></div>
+          <div className="content-grid">
+            <section className="panel action-list-panel">
+              <div className="panel-header"><div><h2>Needs Action</h2><p>Prioritized by operational and financial impact.</p></div><span className="count-pill">{filtered.length}</span></div>
+              <div className="action-list">{filtered.map(a => <button key={a.id} className={`action-row ${selectedId === a.id ? 'selected' : ''}`} onClick={() => setSelectedId(a.id)}>
+                <div className={`severity ${a.severity.toLowerCase()}`}>{a.severity === 'High' ? '!' : a.severity === 'Medium' ? '•' : '○'}</div>
+                <div className="action-main"><div className="action-meta"><span>{a.location}</span><span>•</span><span>{a.category}</span></div><strong>{a.title}</strong><p>{a.signal}</p><div className="action-footer"><span className={`status ${a.status.toLowerCase()}`}>{a.status}</span><span className="impact">{a.impact}</span></div></div>
+                <span className="chev">›</span>
+              </button>)}</div>
+            </section>
+
+            {selected && <section className="panel detail-panel">
+              <div className="detail-top"><div><span className={`severity-label ${selected.severity.toLowerCase()}`}>{selected.severity} priority</span><h2>{selected.title}</h2><p>{selected.location} · {selected.category}</p></div><button className="icon-btn">•••</button></div>
+              <div className="detail-block"><label>SIGNAL</label><p>{selected.signal}</p></div>
+              <div className="detail-block"><label>LIKELY CAUSE</label><p>{selected.cause}</p></div>
+              <div className="detail-block recommendation"><label>OPSVISTA RECOMMENDATION</label><p>{selected.recommendation}</p></div>
+              <div className="impact-box"><span>Estimated impact</span><strong>{selected.impact}</strong></div>
+              {selected.owner && <div className="owner-box"><div className="avatar small">{selected.owner.split(' ').map(x => x[0]).join('').slice(0,2)}</div><div><span>Owner</span><strong>{selected.owner}</strong></div></div>}
+              <div className="action-buttons">
+                <button className="primary" onClick={() => updateAction(selected.id, { status: 'Assigned', owner: selected.owner ?? 'Location Manager' })}>Assign owner</button>
+                <button onClick={() => updateAction(selected.id, { status: 'Assigned', owner: selected.owner ?? 'Location Manager' })}>Create task</button>
+                <button onClick={() => updateAction(selected.id, { status: 'Investigating' })}>Investigate</button>
+                <button onClick={() => updateAction(selected.id, { status: 'Dismissed' })}>Dismiss</button>
+              </div>
+              <div className="verification"><strong>Verification loop</strong><p>Once the action is completed, OpsVista should compare the next measured result against the original signal and record whether the intervention worked.</p><button onClick={() => updateAction(selected.id, { status: 'Completed' })}>Mark completed for demo</button></div>
+            </section>}
           </div>
-        </section>
+
+          <section className="panel roadmap-panel">
+            <div className="panel-header"><div><h2>Next intelligence layers</h2><p>These modules plug into the same Action Center workflow.</p></div></div>
+            <div className="roadmap-grid">
+              <div><span>01</span><strong>Evidence Audit</strong><p>Photo proof, approve/reject, resubmission, before/after and audit history.</p></div>
+              <div><span>02</span><strong>Ramp Compliance</strong><p>Cardholder, department, memo, receipt, duplicate and out-of-policy signals.</p></div>
+              <div><span>03</span><strong>Labor Intelligence</strong><p>Forecast vs schedule, overtime exposure, suggested cuts and verified savings.</p></div>
+              <div><span>04</span><strong>OpsVista AI Copilot</strong><p>Explain why a KPI moved and turn recommendations into assignable actions.</p></div>
+            </div>
+          </section>
+        </>}
       </div>
     </main>
   </div>;
