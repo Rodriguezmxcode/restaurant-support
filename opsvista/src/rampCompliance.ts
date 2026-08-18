@@ -28,6 +28,19 @@ export type RampComplianceResult = RampTransaction & {
   score: number;
 };
 
+export type RampComplianceGroup = {
+  key: string;
+  totalTransactions: number;
+  compliantTransactions: number;
+  exceptionTransactions: number;
+  totalSpend: number;
+  exposedSpend: number;
+  missingReceipts: number;
+  missingMemos: number;
+  critical: number;
+  score: number;
+};
+
 export const rampDemoTransactions: RampTransaction[] = [
   {
     id: 'ramp-1001', date: '2026-08-13', merchant: 'Concept Design', amount: 125,
@@ -137,4 +150,44 @@ export function rampComplianceSummary(results: RampComplianceResult[]) {
     duplicates: flagCount('possible_duplicate'),
     unusual: flagCount('unusual_spend'),
   };
+}
+
+export function groupRampCompliance(
+  results: RampComplianceResult[],
+  dimension: 'cardholder' | 'department'
+): RampComplianceGroup[] {
+  const groups = new Map<string, RampComplianceResult[]>();
+
+  results.forEach(tx => {
+    const raw = dimension === 'cardholder' ? tx.cardholder : tx.department;
+    const key = raw?.trim() || (dimension === 'cardholder' ? 'Not identified' : 'Unassigned');
+    const existing = groups.get(key) ?? [];
+    existing.push(tx);
+    groups.set(key, existing);
+  });
+
+  return [...groups.entries()].map(([key, rows]) => {
+    const compliantTransactions = rows.filter(tx => tx.complianceStatus === 'Compliant').length;
+    const exceptionRows = rows.filter(tx => tx.flags.length > 0);
+    const totalSpend = rows.reduce((sum, tx) => sum + tx.amount, 0);
+    const exposedSpend = exceptionRows.reduce((sum, tx) => sum + tx.amount, 0);
+    const score = rows.length ? Math.round(rows.reduce((sum, tx) => sum + tx.score, 0) / rows.length) : 100;
+
+    return {
+      key,
+      totalTransactions: rows.length,
+      compliantTransactions,
+      exceptionTransactions: rows.length - compliantTransactions,
+      totalSpend,
+      exposedSpend,
+      missingReceipts: rows.filter(tx => tx.flags.includes('missing_receipt')).length,
+      missingMemos: rows.filter(tx => tx.flags.includes('missing_memo')).length,
+      critical: rows.filter(tx => tx.complianceStatus === 'Critical').length,
+      score,
+    };
+  }).sort((a, b) => {
+    if (b.critical !== a.critical) return b.critical - a.critical;
+    if (b.exceptionTransactions !== a.exceptionTransactions) return b.exceptionTransactions - a.exceptionTransactions;
+    return b.exposedSpend - a.exposedSpend;
+  });
 }
