@@ -49,13 +49,14 @@ function GroupTable({ title, subtitle, rows, type }: {
     <div className="ramp-group-table-wrap"><table className="ramp-group-table">
       <thead><tr>
         <th>{type === 'cardholder' ? 'Cardholder' : 'Department / Restaurant'}</th>
-        <th>Score</th><th>Transactions</th><th>Exceptions</th><th>Missing receipts</th><th>Missing memos</th><th>Exposed spend</th>
+        <th>Score</th><th>Transactions</th><th>Exceptions</th><th>Overdue &gt;48h</th><th>Receipts</th><th>Memos</th><th>Exposed spend</th>
       </tr></thead>
       <tbody>{rows.map(row => <tr key={row.key}>
         <td><strong>{row.key}</strong><small>{money(row.totalSpend)} total spend</small></td>
         <td><span className={`ramp-score-pill ${row.score >= 90 ? 'good' : row.score >= 70 ? 'watch' : 'bad'}`}>{row.score}</span></td>
         <td>{row.totalTransactions}</td>
         <td><strong className={row.exceptionTransactions ? 'attention-text' : ''}>{row.exceptionTransactions}</strong>{row.critical > 0 && <small>{row.critical} critical</small>}</td>
+        <td><strong className={row.overdue ? 'overdue-text' : ''}>{row.overdue}</strong></td>
         <td>{row.missingReceipts}</td>
         <td>{row.missingMemos}</td>
         <td className="amount-cell">{money(row.exposedSpend)}</td>
@@ -89,27 +90,35 @@ export default function RampComplianceView({ onEscalate }: Props) {
   const summary = useMemo(() => rampComplianceSummary(results), [results]);
   const cardholderRows = useMemo(() => groupRampCompliance(results, 'cardholder'), [results]);
   const locationRows = useMemo(() => groupRampCompliance(results, 'department'), [results]);
+  const overdueRows = useMemo(() => results.filter(tx => tx.overdue), [results]);
 
   const filtered = results.filter(tx => {
-    const statusMatch = status === 'All' || tx.complianceStatus === status;
+    const statusMatch = status === 'All' || tx.complianceStatus === status || (status === 'Overdue >48h' && tx.overdue);
     const q = query.trim().toLowerCase();
     const queryMatch = !q || [tx.merchant, tx.cardholder, tx.department, tx.memo, ...tx.flags]
       .filter(Boolean).join(' ').toLowerCase().includes(q);
     return statusMatch && queryMatch;
   });
 
+  const escalationFor = (tx: RampComplianceResult): Escalation => ({
+    location: tx.department?.trim() || 'Corporate',
+    title: `${tx.merchant} requires Ramp compliance follow-up`,
+    signal: `${tx.flags.length} compliance issue${tx.flags.length === 1 ? '' : 's'} detected on a ${money(tx.amount)} Ramp transaction${tx.overdue ? `; evidence is ${tx.ageHours}h old` : ''}.`,
+    cause: tx.flags.map(flag => rampFlagLabels[flag]).join(', '),
+    recommendation: `Have ${tx.cardholder || 'the cardholder'} complete the missing Ramp requirements and verify the transaction before closing the action.`,
+    impact: `${money(tx.amount)} spend requiring compliance review`,
+    severity: tx.complianceStatus === 'Critical' ? 'High' : 'Medium',
+  });
+
   const escalate = (tx: RampComplianceResult) => {
-    const location = tx.department?.trim() || 'Corporate';
-    onEscalate?.({
-      location,
-      title: `${tx.merchant} requires Ramp compliance follow-up`,
-      signal: `${tx.flags.length} compliance issue${tx.flags.length === 1 ? '' : 's'} detected on a ${money(tx.amount)} Ramp transaction.`,
-      cause: tx.flags.map(flag => rampFlagLabels[flag]).join(', '),
-      recommendation: `Have ${tx.cardholder || 'the cardholder'} complete the missing Ramp requirements and verify the transaction before closing the action.`,
-      impact: `${money(tx.amount)} spend requiring compliance review`,
-      severity: tx.complianceStatus === 'Critical' ? 'High' : 'Medium',
-    });
+    onEscalate?.(escalationFor(tx));
     setEscalated(ids => ids.includes(tx.id) ? ids : [...ids, tx.id]);
+  };
+
+  const escalateOverdue = () => {
+    const pending = overdueRows.filter(tx => !escalated.includes(tx.id));
+    pending.forEach(tx => onEscalate?.(escalationFor(tx)));
+    setEscalated(ids => [...new Set([...ids, ...pending.map(tx => tx.id)])]);
   };
 
   const sourceLabel = dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'demo' ? 'DEMO DATA' : dataSource === 'error' ? 'RAMP CONNECTION ERROR' : 'CONNECTING...';
@@ -132,16 +141,16 @@ export default function RampComplianceView({ onEscalate }: Props) {
 
     <section className="ramp-summary-grid">
       <article className="ramp-summary-card hero-score"><span>RAMP COMPLIANCE SCORE</span><strong>{summary.score}</strong><small>/100</small><p>{summary.compliant} of {summary.total} transactions fully compliant</p></article>
-      <article className="ramp-summary-card"><span>SPEND REVIEWED</span><strong>{money(summary.totalSpend)}</strong><p>{summary.total} transactions in current view</p></article>
+      <article className="ramp-summary-card overdue-card"><span>OVERDUE &gt;48H</span><strong>{summary.overdue}</strong><p>{money(summary.overdueSpend)} missing receipt or memo past deadline</p></article>
       <article className="ramp-summary-card attention"><span>REQUIRES ATTENTION</span><strong>{summary.needsAttention}</strong><p>{money(summary.exposedSpend)} exposed spend</p></article>
       <article className="ramp-summary-card"><span>MISSING RECEIPTS</span><strong>{summary.missingReceipts}</strong><p>Receipt evidence required</p></article>
       <article className="ramp-summary-card"><span>MISSING MEMOS</span><strong>{summary.missingMemos}</strong><p>Purpose of spend incomplete</p></article>
-      <article className="ramp-summary-card"><span>POSSIBLE DUPLICATES</span><strong>{summary.duplicates}</strong><p>Needs human verification</p></article>
+      <article className="ramp-summary-card"><span>SPEND REVIEWED</span><strong>{money(summary.totalSpend)}</strong><p>{summary.total} transactions in current view</p></article>
     </section>
 
     <section className="ramp-policy-strip">
-      <div><strong>OpsVista Compliance Policy</strong><span>Every Ramp transaction should identify who spent, where it belongs, why it was spent, and include required evidence.</span></div>
-      <div className="ramp-policy-chips"><span>Cardholder</span><span>Department / Restaurant</span><span>Memo</span><span>Receipt</span></div>
+      <div><strong>OpsVista Compliance Policy</strong><span>Cardholder, restaurant/department, memo and receipt are required. Missing receipt or memo becomes overdue after 48 hours.</span></div>
+      <div className="ramp-policy-actions"><div className="ramp-policy-chips"><span>Cardholder</span><span>Department / Restaurant</span><span>Memo</span><span>Receipt</span><span>48h deadline</span></div><button className="ramp-escalate-all" onClick={escalateOverdue} disabled={!overdueRows.some(tx => !escalated.includes(tx.id))}>⚡ Send overdue to Action Center</button></div>
     </section>
 
     <section className="ramp-accountability-grid">
@@ -151,13 +160,13 @@ export default function RampComplianceView({ onEscalate }: Props) {
 
     <section className="ramp-table-panel">
       <div className="ramp-table-head">
-        <div><h2>Ramp Compliance Queue</h2><p>Exceptions are prioritized before they become accounting or accountability problems.</p></div>
-        <div className="ramp-controls"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search merchant, cardholder or flag..."/><select value={status} onChange={e => setStatus(e.target.value)}><option>All</option><option>Critical</option><option>Needs attention</option><option>Compliant</option></select></div>
+        <div><h2>Ramp Compliance Queue</h2><p>Exceptions are prioritized by deadline, evidence gaps and financial exposure.</p></div>
+        <div className="ramp-controls"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search merchant, cardholder or flag..."/><select value={status} onChange={e => setStatus(e.target.value)}><option>All</option><option>Overdue &gt;48h</option><option>Critical</option><option>Needs attention</option><option>Compliant</option></select></div>
       </div>
       <div className="ramp-table-wrap"><table className="ramp-table">
-        <thead><tr><th>Date</th><th>Merchant</th><th>Cardholder</th><th>Department / Restaurant</th><th>Memo</th><th>Amount</th><th>Compliance</th><th></th></tr></thead>
-        <tbody>{filtered.map(tx => <tr key={tx.id} className={tx.complianceStatus === 'Critical' ? 'critical-row' : ''}>
-          <td>{tx.date}</td><td><strong>{tx.merchant}</strong><small>Ramp · {tx.state}</small></td>
+        <thead><tr><th>Date</th><th>Age</th><th>Merchant</th><th>Cardholder</th><th>Department / Restaurant</th><th>Memo</th><th>Amount</th><th>Compliance</th><th></th></tr></thead>
+        <tbody>{filtered.map(tx => <tr key={tx.id} className={tx.overdue ? 'overdue-row' : tx.complianceStatus === 'Critical' ? 'critical-row' : ''}>
+          <td>{tx.date}</td><td><strong className={tx.overdue ? 'overdue-text' : ''}>{tx.ageHours}h</strong></td><td><strong>{tx.merchant}</strong><small>Ramp · {tx.state}</small></td>
           <td className={!tx.cardholder ? 'missing-cell' : ''}>{tx.cardholder || 'Not identified'}</td>
           <td className={!tx.department ? 'missing-cell' : ''}>{tx.department || 'Unassigned'}</td>
           <td className={!tx.memo ? 'missing-cell' : ''}>{tx.memo || 'Memo missing'}</td>
@@ -168,11 +177,11 @@ export default function RampComplianceView({ onEscalate }: Props) {
     </section>
 
     {selected && <div className="ramp-drawer-backdrop" onClick={() => setSelected(null)}><aside className="ramp-drawer" onClick={e => e.stopPropagation()}>
-      <div className="ramp-drawer-head"><div><span>RAMP TRANSACTION</span><h2>{selected.merchant}</h2><p>{selected.date} · {money(selected.amount)}</p></div><button onClick={() => setSelected(null)}>×</button></div>
+      <div className="ramp-drawer-head"><div><span>RAMP TRANSACTION</span><h2>{selected.merchant}</h2><p>{selected.date} · {money(selected.amount)} · {selected.ageHours}h old</p></div><button onClick={() => setSelected(null)}>×</button></div>
       <div className="ramp-detail-score"><span>Compliance score</span><strong>{selected.score}/100</strong><em className={selected.complianceStatus.toLowerCase().replace(' ', '-')}>{selected.complianceStatus}</em></div>
-      <div className="ramp-detail-grid"><div><label>Cardholder</label><strong>{selected.cardholder || 'Not identified'}</strong></div><div><label>Department / Restaurant</label><strong>{selected.department || 'Unassigned'}</strong></div><div><label>Memo</label><strong>{selected.memo || 'Missing'}</strong></div><div><label>Receipt</label><strong>{selected.receiptAttached ? 'Attached' : 'Missing'}</strong></div></div>
+      <div className="ramp-detail-grid"><div><label>Cardholder</label><strong>{selected.cardholder || 'Not identified'}</strong></div><div><label>Department / Restaurant</label><strong>{selected.department || 'Unassigned'}</strong></div><div><label>Memo</label><strong>{selected.memo || 'Missing'}</strong></div><div><label>Receipt</label><strong>{selected.receiptAttached ? 'Attached' : 'Missing'}</strong></div><div><label>Age</label><strong>{selected.ageHours} hours</strong></div><div><label>Deadline</label><strong>{selected.overdue ? 'Overdue' : 'Within 48h'}</strong></div></div>
       <div className="ramp-drawer-section"><label>DETECTED ISSUES</label><FlagPills transaction={selected}/></div>
-      {selected.flags.length > 0 && <div className="ramp-recommendation"><label>OPSVISTA RECOMMENDATION</label><p>Complete all missing compliance fields, verify any duplicate or anomaly signal, and retain the receipt as supporting evidence before closing this transaction.</p></div>}
+      {selected.flags.length > 0 && <div className="ramp-recommendation"><label>OPSVISTA RECOMMENDATION</label><p>{selected.overdue ? 'This transaction is past the 48-hour evidence deadline. Escalate it now and require the missing memo/receipt before the action can be closed.' : 'Complete all missing compliance fields, verify any duplicate or anomaly signal, and retain the receipt as supporting evidence before closing this transaction.'}</p></div>}
       <div className="ramp-drawer-actions">{selected.flags.length > 0 ? <button className="ramp-primary" disabled={escalated.includes(selected.id)} onClick={() => escalate(selected)}>{escalated.includes(selected.id) ? 'Added to Action Center' : 'Send to Action Center'}</button> : <button className="ramp-primary" disabled>Transaction compliant</button>}<button onClick={() => setSelected(null)}>Close</button></div>
     </aside></div>}
   </div>;
