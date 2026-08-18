@@ -12,13 +12,16 @@ type LaborEscalation = {
   severity: 'High' | 'Medium' | 'Low';
 };
 
-type Props = { onEscalate?: (item: LaborEscalation) => void };
+type Props = { onEscalate?: (item: LaborEscalation) => void; allowedLocations?: string[] };
 
 const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const pct = (value: number) => `${value.toFixed(1)}%`;
 
-export default function LaborIntelligenceView({ onEscalate }: Props) {
-  const rows = useMemo(() => evaluateLabor(laborDemoLocations), []);
+export default function LaborIntelligenceView({ onEscalate, allowedLocations }: Props) {
+  const rows = useMemo(() => {
+    const evaluated = evaluateLabor(laborDemoLocations);
+    return allowedLocations ? evaluated.filter(row => allowedLocations.includes(row.location)) : evaluated;
+  }, [allowedLocations]);
   const summary = useMemo(() => laborSummary(rows), [rows]);
   const [selected, setSelected] = useState<LaborInsight | null>(rows[0] ?? null);
   const [escalated, setEscalated] = useState<string[]>([]);
