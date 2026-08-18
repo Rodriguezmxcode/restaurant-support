@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   evaluateRampCompliance,
+  groupRampCompliance,
   rampComplianceSummary,
   rampFlagLabels,
+  type RampComplianceGroup,
   type RampComplianceResult,
   type RampTransaction,
 } from './rampCompliance';
@@ -32,6 +34,35 @@ function FlagPills({ transaction }: { transaction: RampComplianceResult }) {
   )}</div>;
 }
 
+function GroupTable({ title, subtitle, rows, type }: {
+  title: string;
+  subtitle: string;
+  rows: RampComplianceGroup[];
+  type: 'cardholder' | 'location';
+}) {
+  return <section className="ramp-group-panel">
+    <div className="ramp-group-head">
+      <div><h2>{title}</h2><p>{subtitle}</p></div>
+      <span>{rows.length} {type === 'cardholder' ? 'people' : 'groups'}</span>
+    </div>
+    <div className="ramp-group-table-wrap"><table className="ramp-group-table">
+      <thead><tr>
+        <th>{type === 'cardholder' ? 'Cardholder' : 'Department / Restaurant'}</th>
+        <th>Score</th><th>Transactions</th><th>Exceptions</th><th>Missing receipts</th><th>Missing memos</th><th>Exposed spend</th>
+      </tr></thead>
+      <tbody>{rows.map(row => <tr key={row.key}>
+        <td><strong>{row.key}</strong><small>{money(row.totalSpend)} total spend</small></td>
+        <td><span className={`ramp-score-pill ${row.score >= 90 ? 'good' : row.score >= 70 ? 'watch' : 'bad'}`}>{row.score}</span></td>
+        <td>{row.totalTransactions}</td>
+        <td><strong className={row.exceptionTransactions ? 'attention-text' : ''}>{row.exceptionTransactions}</strong>{row.critical > 0 && <small>{row.critical} critical</small>}</td>
+        <td>{row.missingReceipts}</td>
+        <td>{row.missingMemos}</td>
+        <td className="amount-cell">{money(row.exposedSpend)}</td>
+      </tr>)}</tbody>
+    </table></div>
+  </section>;
+}
+
 export default function RampComplianceView({ onEscalate }: Props) {
   const [transactions, setTransactions] = useState<RampTransaction[]>([]);
   const [dataSource, setDataSource] = useState<'loading' | 'live' | 'demo'>('loading');
@@ -55,6 +86,8 @@ export default function RampComplianceView({ onEscalate }: Props) {
 
   const results = useMemo(() => evaluateRampCompliance(transactions), [transactions]);
   const summary = useMemo(() => rampComplianceSummary(results), [results]);
+  const cardholderRows = useMemo(() => groupRampCompliance(results, 'cardholder'), [results]);
+  const locationRows = useMemo(() => groupRampCompliance(results, 'department'), [results]);
 
   const filtered = results.filter(tx => {
     const statusMatch = status === 'All' || tx.complianceStatus === status;
@@ -100,6 +133,21 @@ export default function RampComplianceView({ onEscalate }: Props) {
     <section className="ramp-policy-strip">
       <div><strong>OpsVista Compliance Policy</strong><span>Every Ramp transaction should identify who spent, where it belongs, why it was spent, and include required evidence.</span></div>
       <div className="ramp-policy-chips"><span>Cardholder</span><span>Department / Restaurant</span><span>Memo</span><span>Receipt</span></div>
+    </section>
+
+    <section className="ramp-accountability-grid">
+      <GroupTable
+        title="Compliance by Cardholder"
+        subtitle="See who is consistently closing receipts and memos — and who needs follow-up."
+        rows={cardholderRows}
+        type="cardholder"
+      />
+      <GroupTable
+        title="Compliance by Location"
+        subtitle="Compare missing evidence and exposed spend across restaurants and departments."
+        rows={locationRows}
+        type="location"
+      />
     </section>
 
     <section className="ramp-table-panel">
