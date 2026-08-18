@@ -1,11 +1,17 @@
 import { rampDemoTransactions, type RampTransaction } from './rampCompliance';
 
 export type RampDataEnvelope = {
-  source: 'live' | 'demo';
+  source: 'live' | 'demo' | 'error';
   fetchedAt?: string;
   transactions: RampTransaction[];
   warning?: string;
 };
+
+function demoFallbackAllowed() {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+}
 
 export async function loadRampTransactions(): Promise<RampDataEnvelope> {
   try {
@@ -20,10 +26,16 @@ export async function loadRampTransactions(): Promise<RampDataEnvelope> {
     if (!Array.isArray(payload.transactions)) throw new Error('Invalid Ramp payload');
     return { ...payload, source: 'live' };
   } catch (error) {
+    const warning = error instanceof Error ? error.message : 'Ramp live data unavailable';
+
+    if (demoFallbackAllowed()) {
+      return { source: 'demo', transactions: rampDemoTransactions, warning };
+    }
+
     return {
-      source: 'demo',
-      transactions: rampDemoTransactions,
-      warning: error instanceof Error ? error.message : 'Ramp live data unavailable',
+      source: 'error',
+      transactions: [],
+      warning: `${warning}. OpsVista will not substitute demo transactions in a non-local environment.`,
     };
   }
 }
