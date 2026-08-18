@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import RampComplianceView from './RampComplianceView';
+import LaborIntelligenceView from './LaborIntelligenceView';
 
 type Severity = 'High' | 'Medium' | 'Low';
 type Status = 'Open' | 'Assigned' | 'Investigating' | 'Completed' | 'Dismissed';
@@ -18,7 +19,7 @@ type ActionItem = {
   owner?: string;
 };
 
-type RampEscalation = Omit<ActionItem, 'id' | 'category' | 'status'>;
+type ExternalEscalation = Omit<ActionItem, 'id' | 'category' | 'status'>;
 
 const initialActions: ActionItem[] = [
   {
@@ -109,16 +110,13 @@ export default function App() {
     setActions(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
-  const escalateRamp = (item: RampEscalation) => {
-    const nextId = Math.max(0, ...actions.map(action => action.id)) + 1;
-    const nextAction: ActionItem = {
-      ...item,
-      id: nextId,
-      category: 'Ramp Compliance',
-      status: 'Open',
-    };
-    setActions(items => [...items, nextAction]);
-    setSelectedId(nextId);
+  const escalateExternal = (item: ExternalEscalation, category: string) => {
+    setActions(items => {
+      const nextId = Math.max(0, ...items.map(action => action.id)) + 1;
+      const nextAction: ActionItem = { ...item, id: nextId, category, status: 'Open' };
+      setSelectedId(nextId);
+      return [...items, nextAction];
+    });
     setSection('Action Center');
     setLocation('All locations');
     setSearch('');
@@ -127,6 +125,8 @@ export default function App() {
   const openCount = actions.filter(a => !['Completed', 'Dismissed'].includes(a.status)).length;
   const highCount = actions.filter(a => a.severity === 'High' && !['Completed', 'Dismissed'].includes(a.status)).length;
   const isRamp = section === 'Gastos';
+  const isLabor = section === 'Horarios';
+  const isIntelligenceModule = isRamp || isLabor;
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -142,17 +142,17 @@ export default function App() {
 
     <main>
       <header className="topbar">
-        <div className="search-wrap"><span>⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder={isRamp ? 'Buscar en OpsVista...' : 'Buscar incidente, ubicación o responsable...'} /></div>
+        <div className="search-wrap"><span>⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder={isIntelligenceModule ? 'Buscar en OpsVista...' : 'Buscar incidente, ubicación o responsable...'} /></div>
         <div className="top-actions"><button>↻ Actualizar datos</button><button>Presentación OpsVista</button><button className="danger-outline">Cerrar sesión</button><button className="icon-btn">?</button><div className="avatar small">RR</div></div>
       </header>
 
       <div className="page">
         <div className="page-heading">
-          <div><div className="eyebrow">{isRamp ? 'FINANCIAL ACCOUNTABILITY' : 'OPERATIONAL INTELLIGENCE'}</div><h1>{isRamp ? 'Gastos · Ramp Compliance' : section}</h1><p>{isRamp ? 'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.' : 'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.'}</p></div>
-          {!isRamp && <div className="filters"><select value={location} onChange={e => setLocation(e.target.value)}><option>All locations</option><option>Stamford</option><option>Orange</option><option>Fairfield</option><option>Danbury</option><option>Avon</option><option>Southington</option></select><button className="primary">+ Nueva acción</button></div>}
+          <div><div className="eyebrow">{isRamp ? 'FINANCIAL ACCOUNTABILITY' : isLabor ? 'WORKFORCE INTELLIGENCE' : 'OPERATIONAL INTELLIGENCE'}</div><h1>{isRamp ? 'Gastos · Ramp Compliance' : isLabor ? 'Horarios · Labor Intelligence' : section}</h1><p>{isRamp ? 'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.' : isLabor ? 'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.' : 'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.'}</p></div>
+          {!isIntelligenceModule && <div className="filters"><select value={location} onChange={e => setLocation(e.target.value)}><option>All locations</option><option>Stamford</option><option>Orange</option><option>Fairfield</option><option>Danbury</option><option>Avon</option><option>Southington</option></select><button className="primary">+ Nueva acción</button></div>}
         </div>
 
-        {isRamp ? <RampComplianceView onEscalate={escalateRamp} /> : <>
+        {isRamp ? <RampComplianceView onEscalate={item => escalateExternal(item, 'Ramp Compliance')} /> : isLabor ? <LaborIntelligenceView onEscalate={item => escalateExternal(item, 'Labor Intelligence')} /> : <>
           <section className="metrics-grid">
             <Metric label="SALES TODAY" value="$82,461" note="+7.2% vs comparable period" />
             <Metric label="PROJECTED LABOR" value="21.3%" note="Current: 19.8% · Target: 21.0%" />
@@ -198,7 +198,7 @@ export default function App() {
             <div className="panel-header"><div><h2>Next intelligence layers</h2><p>These modules plug into the same Action Center workflow.</p></div></div>
             <div className="roadmap-grid">
               <div><span>01</span><strong>Evidence Audit</strong><p>Photo proof, approve/reject, resubmission, before/after and audit history.</p></div>
-              <div><span>02</span><strong>Ramp Compliance</strong><p>Cardholder, department, memo, receipt, duplicate and out-of-policy signals.</p></div>
+              <div><span>02</span><strong>Ramp Compliance</strong><p>Cardholder, department, memo, receipt, deadline, duplicate and policy signals.</p></div>
               <div><span>03</span><strong>Labor Intelligence</strong><p>Forecast vs schedule, overtime exposure, suggested cuts and verified savings.</p></div>
               <div><span>04</span><strong>OpsVista AI Copilot</strong><p>Explain why a KPI moved and turn recommendations into assignable actions.</p></div>
             </div>
