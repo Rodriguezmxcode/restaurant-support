@@ -18,7 +18,12 @@ type Escalation = {
   severity: 'High' | 'Medium' | 'Low';
 };
 
-type Props = { onEscalate?: (item: Escalation) => void };
+type Props = {
+  onEscalate?: (item: Escalation) => void;
+  allowedLocations?: string[];
+  canReview?: boolean;
+  reviewerName?: string;
+};
 
 const dt = (value?: string) => value ? new Date(value).toLocaleString() : '—';
 
@@ -30,9 +35,10 @@ function EvidenceVisual({ label, variant }: { label: string; variant: 'reference
   </div>;
 }
 
-export default function EvidenceAuditView({ onEscalate }: Props) {
-  const [items, setItems] = useState<EvidenceItem[]>(demoEvidence);
-  const [selectedId, setSelectedId] = useState(demoEvidence[0].id);
+export default function EvidenceAuditView({ onEscalate, allowedLocations, canReview = true, reviewerName = 'Authorized Review' }: Props) {
+  const scopedDemo = useMemo(() => allowedLocations ? demoEvidence.filter(item => allowedLocations.includes(item.location)) : demoEvidence, [allowedLocations]);
+  const [items, setItems] = useState<EvidenceItem[]>(scopedDemo);
+  const [selectedId, setSelectedId] = useState(scopedDemo[0]?.id ?? '');
   const [status, setStatus] = useState('Needs review');
   const [location, setLocation] = useState('All locations');
   const [comment, setComment] = useState('');
@@ -53,16 +59,13 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
     return locationMatch && statusMatch;
   });
 
-  const patchSelected = (patch: Partial<EvidenceItem>) => {
-    setItems(rows => rows.map(row => row.id === selected.id ? { ...row, ...patch } : row));
-  };
-
   const approve = () => {
+    if (!selected || !canReview) return;
     const at = new Date().toISOString();
-    const updated = addAuditEvent({ ...selected, status: 'Approved', reviewer: 'Corporate Review', reviewedAt: at, managerComment: comment || 'Evidence accepted. Standard met.' }, {
+    const updated = addAuditEvent({ ...selected, status: 'Approved', reviewer: reviewerName, reviewedAt: at, managerComment: comment || 'Evidence accepted. Standard met.' }, {
       id: `audit-${Date.now()}`,
       at,
-      actor: 'Corporate Review',
+      actor: reviewerName,
       action: 'Approved',
       comment: comment || 'Evidence accepted. Standard met.',
     });
@@ -72,12 +75,12 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
   };
 
   const reject = () => {
-    if (!rejectionReason.trim() || !comment.trim()) return;
+    if (!selected || !canReview || !rejectionReason.trim() || !comment.trim()) return;
     const at = new Date().toISOString();
-    const updated = addAuditEvent({ ...selected, status: 'Rejected', reviewer: 'Corporate Review', reviewedAt: at, managerComment: comment, rejectionReason }, {
+    const updated = addAuditEvent({ ...selected, status: 'Rejected', reviewer: reviewerName, reviewedAt: at, managerComment: comment, rejectionReason }, {
       id: `audit-${Date.now()}`,
       at,
-      actor: 'Corporate Review',
+      actor: reviewerName,
       action: 'Rejected',
       comment,
     });
@@ -87,6 +90,7 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
   };
 
   const simulateResubmission = () => {
+    if (!selected) return;
     const at = new Date().toISOString();
     const updated = addAuditEvent({
       ...selected,
@@ -105,6 +109,7 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
   };
 
   const escalate = () => {
+    if (!selected) return;
     onEscalate?.({
       location: selected.location,
       title: `${selected.task} evidence requires follow-up`,
@@ -143,7 +148,7 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
           <select value={location} onChange={e => setLocation(e.target.value)}>{locations.map(option => <option key={option}>{option}</option>)}</select>
           <select value={status} onChange={e => setStatus(e.target.value)}><option>Needs review</option><option>Needs correction</option><option>Overdue</option><option>All</option><option>Pending</option><option>Submitted</option><option>Resubmitted</option><option>Approved</option><option>Rejected</option></select>
         </div>
-        <div className="evidence-list">{filtered.map(item => <button key={item.id} className={`evidence-row ${item.id === selected.id ? 'selected' : ''}`} onClick={() => setSelectedId(item.id)}>
+        <div className="evidence-list">{filtered.map(item => <button key={item.id} className={`evidence-row ${item.id === selected?.id ? 'selected' : ''}`} onClick={() => setSelectedId(item.id)}>
           <div className={`evidence-status-icon ${item.status.toLowerCase()}`}>{item.status === 'Approved' ? '✓' : item.status === 'Rejected' ? '!' : item.status === 'Pending' ? '○' : '•'}</div>
           <div><div className="evidence-row-meta"><span>{item.location}</span><span>•</span><span>{item.area}</span><span>•</span><span>{item.shift}</span></div><strong>{item.task}</strong><p>{item.employee} · Due {dt(item.dueAt)}</p><div className="evidence-row-footer"><span className={`evidence-status ${item.status.toLowerCase()}`}>{item.status}</span>{evidenceIsOverdue(item) && <span className="evidence-overdue">OVERDUE</span>}{item.resubmissionCount > 0 && <span>{item.resubmissionCount} resubmission</span>}</div></div>
         </button>)}</div>
@@ -164,14 +169,15 @@ export default function EvidenceAuditView({ onEscalate }: Props) {
 
         {(selected.rejectionReason || selected.managerComment) && <div className="evidence-feedback"><label>PREVIOUS REVIEW</label>{selected.rejectionReason && <strong>{selected.rejectionReason}</strong>}<p>{selected.managerComment}</p></div>}
 
-        {['Submitted', 'Resubmitted'].includes(selected.status) && <div className="evidence-decision">
+        {['Submitted', 'Resubmitted'].includes(selected.status) && canReview && <div className="evidence-decision">
           <label>REVIEW DECISION</label>
           <select value={rejectionReason} onChange={e => setRejectionReason(e.target.value)}><option value="">Rejection reason (required only if rejecting)</option><option>Evidence does not clearly show completion</option><option>Area still does not meet cleanliness standard</option><option>Setup is incomplete</option><option>Wrong area / wrong task evidence</option><option>Photo is too dark or unclear</option><option>Other operational standard not met</option></select>
           <textarea value={comment} onChange={e => setComment(e.target.value)} placeholder="Manager review comment..." rows={3}/>
           <div className="evidence-decision-actions"><button className="approve" onClick={approve}>✓ Approve evidence</button><button className="reject" disabled={!rejectionReason.trim() || !comment.trim()} onClick={reject}>✕ Reject & request correction</button></div>
         </div>}
 
-        {selected.status === 'Rejected' && <div className="evidence-correction-box"><strong>Correction required</strong><p>The task remains open until new evidence is submitted and approved.</p><button onClick={simulateResubmission}>Simulate employee resubmission</button></div>}
+        {['Submitted', 'Resubmitted'].includes(selected.status) && !canReview && <div className="evidence-feedback"><label>READ ONLY</label><p>Your role can view this evidence but cannot approve or reject it.</p></div>}
+        {selected.status === 'Rejected' && canReview && <div className="evidence-correction-box"><strong>Correction required</strong><p>The task remains open until new evidence is submitted and approved.</p><button onClick={simulateResubmission}>Simulate employee resubmission</button></div>}
 
         {selected.status !== 'Approved' && <button className="evidence-escalate" disabled={escalated.includes(selected.id)} onClick={escalate}>{escalated.includes(selected.id) ? 'Added to Action Center' : 'Send to Action Center'}</button>}
 
