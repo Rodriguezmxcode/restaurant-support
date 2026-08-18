@@ -22,6 +22,7 @@ type Escalation = {
 };
 
 type Props = { onEscalate?: (item: Escalation) => void };
+type RampSourceState = 'loading' | 'live' | 'demo' | 'error';
 
 const money = (value: number) => new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD'
@@ -65,7 +66,7 @@ function GroupTable({ title, subtitle, rows, type }: {
 
 export default function RampComplianceView({ onEscalate }: Props) {
   const [transactions, setTransactions] = useState<RampTransaction[]>([]);
-  const [dataSource, setDataSource] = useState<'loading' | 'live' | 'demo'>('loading');
+  const [dataSource, setDataSource] = useState<RampSourceState>('loading');
   const [dataWarning, setDataWarning] = useState<string | undefined>();
   const [fetchedAt, setFetchedAt] = useState<string | undefined>();
   const [status, setStatus] = useState('All');
@@ -111,15 +112,23 @@ export default function RampComplianceView({ onEscalate }: Props) {
     setEscalated(ids => ids.includes(tx.id) ? ids : [...ids, tx.id]);
   };
 
+  const sourceLabel = dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'demo' ? 'DEMO DATA' : dataSource === 'error' ? 'RAMP CONNECTION ERROR' : 'CONNECTING...';
+  const sourceTitle = dataSource === 'live' ? 'Connected to Ramp' : dataSource === 'demo' ? 'Local demo mode' : dataSource === 'error' ? 'Ramp data unavailable' : 'Connecting to Ramp...';
+
   return <div className="ramp-page">
-    <section className="ramp-live-strip">
+    <section className={`ramp-live-strip ${dataSource === 'error' ? 'connection-error' : ''}`}>
       <div>
-        <span className={`ramp-source-badge ${dataSource}`}>{dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'demo' ? 'DEMO DATA' : 'CONNECTING...'}</span>
-        <strong>{dataSource === 'live' ? 'Connected to Ramp' : dataSource === 'demo' ? 'Live Ramp endpoint not available yet' : 'Connecting to Ramp...'}</strong>
+        <span className={`ramp-source-badge ${dataSource}`}>{sourceLabel}</span>
+        <strong>{sourceTitle}</strong>
         <small>{fetchedAt ? `Last sync ${new Date(fetchedAt).toLocaleString()}` : dataWarning || 'Checking secure server connection'}</small>
       </div>
       <button onClick={() => void refresh()} disabled={dataSource === 'loading'}>↻ Refresh Ramp</button>
     </section>
+
+    {dataSource === 'error' && <section className="ramp-production-warning">
+      <strong>Live Ramp data is required here.</strong>
+      <span>OpsVista intentionally did not substitute demo transactions. Configure the existing Ramp credentials in the deployment environment and refresh.</span>
+    </section>}
 
     <section className="ramp-summary-grid">
       <article className="ramp-summary-card hero-score"><span>RAMP COMPLIANCE SCORE</span><strong>{summary.score}</strong><small>/100</small><p>{summary.compliant} of {summary.total} transactions fully compliant</p></article>
@@ -136,18 +145,8 @@ export default function RampComplianceView({ onEscalate }: Props) {
     </section>
 
     <section className="ramp-accountability-grid">
-      <GroupTable
-        title="Compliance by Cardholder"
-        subtitle="See who is consistently closing receipts and memos — and who needs follow-up."
-        rows={cardholderRows}
-        type="cardholder"
-      />
-      <GroupTable
-        title="Compliance by Location"
-        subtitle="Compare missing evidence and exposed spend across restaurants and departments."
-        rows={locationRows}
-        type="location"
-      />
+      <GroupTable title="Compliance by Cardholder" subtitle="See who is consistently closing receipts and memos — and who needs follow-up." rows={cardholderRows} type="cardholder" />
+      <GroupTable title="Compliance by Location" subtitle="Compare missing evidence and exposed spend across restaurants and departments." rows={locationRows} type="location" />
     </section>
 
     <section className="ramp-table-panel">
