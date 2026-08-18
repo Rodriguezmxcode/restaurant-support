@@ -1,6 +1,7 @@
 export type LiveRampRow = {
   id: string;
   date: string;
+  transactionTime?: string;
   merchant: string;
   amount: number;
   cardholder?: string;
@@ -26,10 +27,12 @@ function dollars(value: any): number {
 
 export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = false): LiveRampRow {
   const status = String(tx.state || tx.status || tx.transaction_state || '').toUpperCase();
-  const date = String(tx.user_transaction_time || tx.transaction_date || tx.created_at || '').slice(0, 10);
+  const transactionTime = String(tx.user_transaction_time || tx.transaction_time || tx.transaction_date || tx.created_at || '');
+  const date = transactionTime.slice(0, 10);
   return {
     id: String(tx.id || tx.transaction_id || ''),
     date,
+    transactionTime: transactionTime || undefined,
     merchant: tx.merchant_name || tx.merchant?.name || tx.merchant?.merchant_name || 'Unknown merchant',
     amount: dollars(tx.amount ?? tx.amount_details ?? tx.total_amount ?? tx.cardholder_amount),
     cardholder: nameOf(tx.cardholder) || nameOf(tx.user) || tx.cardholder_name || tx.user_name,
