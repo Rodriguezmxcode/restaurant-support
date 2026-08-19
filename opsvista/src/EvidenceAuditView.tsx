@@ -123,6 +123,8 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
     setEscalated(ids => ids.includes(selected.id) ? ids : [...ids, selected.id]);
   };
 
+  if (!items.length) return <div className="evidence-page"><SevenShiftsTasksPanel allowedLocations={allowedLocations}/></div>;
+
   return <div className="evidence-page">
     <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
     <section className="evidence-summary-grid">
