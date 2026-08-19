@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import SevenShiftsTasksPanel from './SevenShiftsTasksPanel';
 import {
   addAuditEvent,
   demoEvidence,
@@ -125,6 +126,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
   };
 
   return <div className="evidence-page">
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
     <section className="evidence-summary-grid">
       <article className="evidence-summary-card hero"><span>EVIDENCE APPROVAL RATE</span><strong>{summary.approvalRate}%</strong><p>Approved across reviewed submissions</p></article>
       <article className="evidence-summary-card"><span>NEEDS REVIEW</span><strong>{summary.submitted}</strong><p>Submitted or resubmitted</p></article>
