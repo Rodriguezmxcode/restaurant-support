@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import SevenShiftsTasksPanel from './SevenShiftsTasksPanel';
 import {
   addAuditEvent,
-  demoEvidence,
   evidenceIsOverdue,
   evidenceSummary,
   type EvidenceItem,
@@ -37,9 +36,8 @@ function EvidenceVisual({ label, variant }: { label: string; variant: 'reference
 }
 
 export default function EvidenceAuditView({ onEscalate, allowedLocations, canReview = true, reviewerName = 'Authorized Review' }: Props) {
-  const scopedDemo = useMemo(() => allowedLocations ? demoEvidence.filter(item => allowedLocations.includes(item.location)) : demoEvidence, [allowedLocations]);
-  const [items, setItems] = useState<EvidenceItem[]>(scopedDemo);
-  const [selectedId, setSelectedId] = useState(scopedDemo[0]?.id ?? '');
+  const [items, setItems] = useState<EvidenceItem[]>([]);
+  const [selectedId, setSelectedId] = useState('');
   const [status, setStatus] = useState('Needs review');
   const [location, setLocation] = useState('All locations');
   const [comment, setComment] = useState('');
