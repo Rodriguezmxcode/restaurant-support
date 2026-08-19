@@ -1,13 +1,7 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
+import { getManagedUser } from './managementStore';
 
 export type ServerRole = 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
-
-export type ServerLocationGrant = {
-  location: string;
-  type: 'Primary' | 'Additional';
-  expiresAt?: string;
-  note?: string;
-};
 
 export type SessionUser = {
   id: string;
@@ -16,7 +10,6 @@ export type SessionUser = {
   role: ServerRole;
   title: string;
   locations: string[];
-  locationGrants?: ServerLocationGrant[];
 };
 
 type AuthUserRecord = SessionUser & {
@@ -36,13 +29,8 @@ function secret() {
   return value;
 }
 
-function b64url(input: string | Buffer) {
-  return Buffer.from(input).toString('base64url');
-}
-
-function sign(body: string) {
-  return createHmac('sha256', secret()).update(body).digest('base64url');
-}
+function b64url(input: string | Buffer) { return Buffer.from(input).toString('base64url'); }
+function sign(body: string) { return createHmac('sha256', secret()).update(body).digest('base64url'); }
 
 function parseCookies(raw?: string) {
   const result: Record<string, string> = {};
@@ -63,14 +51,38 @@ function authUsers(): AuthUserRecord[] {
   return parsed.filter(user => user.active !== false);
 }
 
-export function authenticateUser(email: string, password: string): SessionUser | null {
+function effectiveManagedLocations(user: Awaited<ReturnType<typeof getManagedUser>>) {
+  if (!user) return [];
+  const grants = user.locationGrants?.length
+    ? user.locationGrants
+    : user.locations.map((location,index)=>({ location, type:index===0?'Primary' as const:'Additional' as const }));
+  const now = Date.now();
+  return Array.from(new Set(grants.filter(grant=>!grant.expiresAt || new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));
+}
+
+export async function authenticateUser(email: string, password: string): Promise<SessionUser | null> {
   const record = authUsers().find(user => user.email.toLowerCase() === email.trim().toLowerCase());
   if (!record) return null;
   const candidate = scryptSync(password, record.passwordSalt, 64);
   const expected = Buffer.from(record.passwordHash, 'hex');
   if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) return null;
-  const { passwordHash: _hash, passwordSalt: _salt, active: _active, ...user } = record;
-  return user;
+
+  let managed = null;
+  if (process.env.OPSVISTA_DATABASE_URL) {
+    managed = await getManagedUser(record.id);
+    if (managed && !managed.active) return null;
+  }
+
+  return managed ? {
+    id:record.id,
+    email:record.email,
+    name:managed.name || record.name,
+    role:managed.role,
+    title:managed.title,
+    locations:effectiveManagedLocations(managed),
+  } : {
+    id:record.id, email:record.email, name:record.name, role:record.role, title:record.title, locations:[...record.locations],
+  };
 }
 
 export function issueSession(user: SessionUser) {
@@ -93,36 +105,16 @@ export function readSession(cookieHeader?: string): SessionUser | null {
     if (!payload.exp || payload.exp <= Math.floor(Date.now() / 1000)) return null;
     const { exp: _exp, iat: _iat, ...user } = payload;
     return user;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export function sessionCookie(token: string) {
   return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
 }
-
-export function clearSessionCookie() {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
-}
-
-export function isRole(user: SessionUser | null, roles: ServerRole[]) {
-  return !!user && roles.includes(user.role);
-}
-
-export function activeServerLocations(user: SessionUser, now = new Date()) {
-  const grants = user.locationGrants?.length
-    ? user.locationGrants
-    : user.locations.map((location, index) => ({ location, type: index === 0 ? 'Primary' : 'Additional' } as ServerLocationGrant));
-  return Array.from(new Set(
-    grants
-      .filter(grant => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now.getTime())
-      .map(grant => grant.location),
-  ));
-}
-
+export function clearSessionCookie() { return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`; }
+export function isRole(user: SessionUser | null, roles: ServerRole[]) { return !!user && roles.includes(user.role); }
 export function canAccessServerLocation(user: SessionUser, location?: string) {
   if (!location) return true;
   if (['Corporate', 'HR', 'Administration', 'Maintenance'].includes(user.role)) return true;
-  return activeServerLocations(user).includes(location);
+  return user.locations.includes(location);
 }
