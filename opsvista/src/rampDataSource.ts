@@ -21,8 +21,8 @@ export async function loadRampTransactions(): Promise<RampDataEnvelope> {
       credentials: 'include',
     });
 
-    if (!response.ok) throw new Error(`Ramp live API returned ${response.status}`);
-    const payload = await response.json() as RampDataEnvelope;
+    const payload = await response.json().catch(() => ({})) as RampDataEnvelope & { error?: string; detail?: string };
+    if (!response.ok) throw new Error(payload.detail || payload.error || `Ramp live API returned ${response.status}`);
     if (!Array.isArray(payload.transactions)) throw new Error('Invalid Ramp payload');
     return { ...payload, source: 'live' };
   } catch (error) {
