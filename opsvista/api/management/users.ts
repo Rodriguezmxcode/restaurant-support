@@ -1,6 +1,6 @@
-import { readSession } from '../../server/authSession';
+import { readSession, type ServerRole } from '../../server/authSession';
 import { authorize } from '../../server/authorization';
-import { listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore';
+import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore';
 
 type ApiRequest = {
   method?: string;
@@ -13,6 +13,8 @@ type ApiResponse = {
   json: (body:unknown) => void;
   setHeader?: (name:string,value:string) => void;
 };
+
+const roles: ServerRole[] = ['Founder','Corporate','Location Manager','Kitchen','HR','Administration','Maintenance'];
 
 export default async function handler(req:ApiRequest,res:ApiResponse) {
   const session = readSession(req.headers?.cookie);
@@ -27,9 +29,19 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
     if (req.method === 'PUT') {
       const user = req.body?.user;
       const events = req.body?.events ?? [];
-      if (!user?.id || !user.name || !user.role) return res.status(400).json({ error:'Valid user payload required' });
+      if (!user?.id || !user.name || !roles.includes(user.role)) return res.status(400).json({ error:'Valid user payload required' });
+      if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) return res.status(400).json({ error:'Valid email required' });
       if (!events.length || events.some(event => !event.reason?.trim())) return res.status(400).json({ error:'At least one audited change with management reason is required' });
       if (events.some(event => event.targetUserId !== user.id)) return res.status(400).json({ error:'Audit target must match edited user' });
+
+      const existing = await getManagedUser(user.id);
+      const actorIsFounder = auth.user.role === 'Founder';
+      if (existing?.role === 'Founder' && !actorIsFounder) return res.status(403).json({ error:'Founder accounts can only be managed by a Founder' });
+      if (user.role === 'Founder' && !actorIsFounder) return res.status(403).json({ error:'Only a Founder can assign Founder access' });
+      if (auth.user.id === user.id && existing?.role === 'Founder' && (!user.active || user.role !== 'Founder')) {
+        return res.status(400).json({ error:'A Founder cannot deactivate or remove their own Founder access' });
+      }
+
       await saveManagedUser(user,events,auth.user);
       return res.status(200).json({ user });
     }
