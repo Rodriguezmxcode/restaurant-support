@@ -117,7 +117,7 @@ async function discoverToastLocations():Promise<Record<string,string>>{
   const locations:Record<string,string>={};
   for(const restaurant of accessibleRestaurantList(payload)){
     const guid=String(restaurant.restaurantGuid||'').trim();
-    const name=String(restaurant.restaurantName||restaurant.locationName||'').trim();
+    const name=String(restaurant.locationName||restaurant.restaurantName||'').trim();
     if(guid&&name)locations[name]=guid;
   }
   return locations;
