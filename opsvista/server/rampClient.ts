@@ -34,7 +34,8 @@ async function getAccessToken(): Promise<string> {
   });
 
   if (!response.ok) {
-    throw new Error(`Ramp token request failed: ${response.status}`);
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Ramp token request failed: ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`);
   }
 
   const json = await response.json() as RampTokenResponse;
