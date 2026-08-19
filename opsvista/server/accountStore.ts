@@ -44,6 +44,7 @@ async function ensureSchema() {
 }
 
 const tokenHash=(token:string)=>createHash('sha256').update(token).digest('hex');
+const auditId=(prefix:string)=>`${prefix}_${randomBytes(12).toString('hex')}`;
 
 export async function createInvitation(userId:string,email:string,createdBy:string) {
   await ensureSchema();
@@ -51,11 +52,17 @@ export async function createInvitation(userId:string,email:string,createdBy:stri
   const token=randomBytes(32).toString('base64url');
   const id=`inv_${randomBytes(12).toString('hex')}`;
   const expiresAt=new Date(Date.now()+48*60*60*1000);
+  const [actor,target]=await Promise.all([getManagedUser(createdBy),getManagedUser(userId)]);
   await db.begin(async tx=>{
     await tx`update opsvista_auth_invitations set status='superseded' where user_id=${userId} and status='pending'`;
     await tx`
       insert into opsvista_auth_invitations (id,user_id,email,token_hash,status,expires_at,created_by)
       values (${id},${userId},${email.toLowerCase()},${tokenHash(token)},'pending',${expiresAt.toISOString()},${createdBy})
+    `;
+    if(actor&&target) await tx`
+      insert into opsvista_management_audit
+      (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
+      values (${auditId('invite')},now(),${actor.id},${actor.name},${target.id},${target.name},'Invitation created','No active invitation',${`Invitation pending · expires ${expiresAt.toISOString()}`},'Account onboarding invitation created.',false)
     `;
   });
   return {id,token,expiresAt:expiresAt.toISOString()};
@@ -100,6 +107,11 @@ export async function acceptInvitation(token:string,password:string) {
       on conflict (user_id) do update set email=excluded.email,password_salt=excluded.password_salt,password_hash=excluded.password_hash,password_set_at=now(),updated_at=now()
     `;
     await tx`update opsvista_auth_invitations set status='accepted',accepted_at=now() where id=${String(invitation.id)}`;
+    await tx`
+      insert into opsvista_management_audit
+      (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
+      values (${auditId('invite_accept')},now(),${managed.id},${managed.name},${managed.id},${managed.name},'Invitation accepted','Password not established','Password established','User accepted onboarding invitation and created their password.',true)
+    `;
   });
   return managed;
 }
