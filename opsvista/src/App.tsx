@@ -9,6 +9,7 @@ import InvitationManager from './InvitationManager';
 import ChangePasswordPanel from './ChangePasswordPanel';
 import OperationalOverview from './OperationalOverview';
 import TransferLedgerView from './TransferLedgerView';
+import PaymentRequestsView from './PaymentRequestsView';
 import { demoAutomationSignals, runActionRules, type SignalSource } from './actionRules';
 import type { VerificationStatus } from './verificationLoop';
 import { canAccessLocation, demoUsers, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
@@ -58,12 +59,13 @@ export default function App(){
   const isRamp=section==='Gastos';
   const isLabor=section==='Horarios';
   const isEvidence=section==='Tasks';
+  const isPayments=section==='Pagos';
   const isTransfers=section==='Transferencias';
   const isSettings=section==='Configuración';
-  const isDedicated=isOverview||isRamp||isLabor||isEvidence||isTransfers||isSettings;
-  const eyebrow=isOverview?'OPERATING PERFORMANCE':isRamp?'FINANCIAL ACCOUNTABILITY':isLabor?'WORKFORCE INTELLIGENCE':isEvidence?'OPERATIONAL VERIFICATION':isTransfers?'INVENTORY CHAIN OF CUSTODY':isSettings?'ACCESS & SECURITY':'OPERATIONAL INTELLIGENCE';
-  const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isRamp?'Gastos · Ramp Compliance':isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · Evidence Audit':isTransfers?'Transferencias · Restaurant Ledger':isSettings?'Configuración · Roles & Permissions':section;
-  const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isRamp?'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.':isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Verifica que las tareas realmente cumplan el estándar mediante evidencia, revisión humana, corrección y trazabilidad.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.';
+  const isDedicated=isOverview||isRamp||isLabor||isEvidence||isPayments||isTransfers||isSettings;
+  const eyebrow=isOverview?'OPERATING PERFORMANCE':isRamp?'FINANCIAL ACCOUNTABILITY':isLabor?'WORKFORCE INTELLIGENCE':isEvidence?'OPERATIONAL VERIFICATION':isPayments?'PAYMENT CONTROL':isTransfers?'INVENTORY CHAIN OF CUSTODY':isSettings?'ACCESS & SECURITY':'OPERATIONAL INTELLIGENCE';
+  const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isRamp?'Gastos · Ramp Compliance':isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · Evidence Audit':isPayments?'Pagos · Approval Workflow':isTransfers?'Transferencias · Restaurant Ledger':isSettings?'Configuración · Roles & Permissions':section;
+  const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isRamp?'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.':isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Verifica que las tareas realmente cumplan el estándar mediante evidencia, revisión humana, corrección y trazabilidad.':isPayments?'Managers solicitan; Corporate aprueba; Administration emite únicamente pagos aprobados, con bitácora completa.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.';
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -81,7 +83,7 @@ export default function App(){
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{!isDedicated&&<div className="filters"><select value={location} onChange={e=>setLocation(e.target.value)}><option>All locations</option>{allowedLocations.map(loc=><option key={loc}>{loc}</option>)}</select>{permissions.canEscalateActions&&<button className="primary">+ Nueva acción</button>}</div>}</div>
 
-        {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isTransfers?<TransferLedgerView/>:isSettings?<><ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser}/></>:isRamp?<RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isEvidence?<EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/>:<>
+        {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isPayments?<PaymentRequestsView currentUser={currentUser} allowedLocations={allowedLocations}/>:isTransfers?<TransferLedgerView/>:isSettings?<><ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser}/></>:isRamp?<RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isEvidence?<EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/>:<>
           <section className="metrics-grid">
             <Metric label="ACCESS SCOPE" value={permissions.allLocations?'All':String(allowedLocations.length)} note={permissions.allLocations?'All locations authorized':`${allowedLocations.join(', ')||'No locations'} only`}/>
             <Metric label="AUTO ACTIONS" value={String(autoCount)} note={`${lastRuleRun.suppressed} duplicates suppressed`}/>
