@@ -118,11 +118,18 @@ async function bootstrapInitialDirectory() {
   const db = sql();
   const countRows = await db`select count(*)::int as count from opsvista_management_users`;
   if (Number(countRows[0]?.count ?? 0) === 0) {
+    const at = new Date().toISOString();
     await db.begin(async tx => {
       for (const user of initialManagedDirectory) {
         await tx`
           insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
           values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},'initial-directory-v1')
+          on conflict (id) do nothing
+        `;
+        await tx`
+          insert into opsvista_management_audit
+          (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
+          values (${`bootstrap-${user.id}`},${at},'initial-directory-v1','OpsVista Initial Migration',${user.id},${user.name},'User created','No account',${`${user.role}${user.email?` · ${user.email}`:''}`},'Initial management directory approved for OpsVista migration.',true)
           on conflict (id) do nothing
         `;
       }
