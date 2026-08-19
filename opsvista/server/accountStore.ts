@@ -125,6 +125,31 @@ export async function bootstrapFounderCredential(email:string,password:string,bo
   return founder;
 }
 
+// One-time first-login recovery. Only the hash/salt are committed; the temporary password is never stored in source.
+const FIRST_FOUNDER_SALT='f202d880e1d52c662da0888ae01c5420';
+const FIRST_FOUNDER_HASH='b7d7f8ff68205597193e1fb61e457e5e249606bc4741b373bbb759e9153a72b89271638f7287a19a135103367910c5d4cc7046805da74df55dd51b265909056';
+
+export async function claimFounderOnFirstLogin(email:string,password:string) {
+  const normalized=email.trim().toLowerCase();
+  if (normalized!=='rodriguez.evolife@gmail.com') return false;
+  await ensureSchema();
+  const founder=await getManagedUser('usr-founder-roberto');
+  if (!founder || founder.role!=='Founder' || !founder.active || founder.email?.toLowerCase()!==normalized) return false;
+  const db=sql();
+  const existing=await db`select user_id from opsvista_auth_credentials where user_id=${founder.id} limit 1`;
+  if (existing.length) return false;
+  const candidate=scryptSync(password,FIRST_FOUNDER_SALT,64);
+  const expected=Buffer.from(FIRST_FOUNDER_HASH,'hex');
+  if (candidate.length!==expected.length || !timingSafeEqual(candidate,expected)) return false;
+  const salt=randomBytes(16).toString('hex');
+  const hash=scryptSync(password,salt,64).toString('hex');
+  await db.begin(async tx=>{
+    await tx`insert into opsvista_auth_credentials (user_id,email,password_salt,password_hash,password_set_at,updated_at) values (${founder.id},${normalized},${salt},${hash},now(),now())`;
+    await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('founder_first_login')},now(),${founder.id},${founder.name},${founder.id},${founder.name},'Founder first login','Password not established','Founder credential established','One-time simplified Founder login initialization.',true)`;
+  });
+  return true;
+}
+
 export async function authenticateStoredCredential(email:string,password:string) {
   await ensureSchema();
   const rows=await sql()`select * from opsvista_auth_credentials where lower(email)=lower(${email}) limit 1`;
