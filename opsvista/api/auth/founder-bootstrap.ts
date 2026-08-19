@@ -1,12 +1,14 @@
-import { authenticateUser, issueSession, sessionCookie } from '../../server/authSession';
-import { bootstrapFounderCredential, founderBootstrapAvailable } from '../../server/accountStore';
-
 type ApiRequest = { method?: string; body?: { email?: string; password?: string; bootstrapSecret?: string } };
 type ApiResponse = { status:(code:number)=>ApiResponse; json:(body:unknown)=>void; setHeader?:(name:string,value:string)=>void };
 
 export default async function handler(req:ApiRequest,res:ApiResponse) {
   res.setHeader?.('Cache-Control','no-store');
   try {
+    const [{ authenticateUser, issueSession, sessionCookie }, { bootstrapFounderCredential, founderBootstrapAvailable }] = await Promise.all([
+      import('../../server/authSession'),
+      import('../../server/accountStore'),
+    ]);
+
     if (!req.method || req.method==='GET') {
       return res.status(200).json({ available: await founderBootstrapAvailable() });
     }
@@ -26,6 +28,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
     return res.status(200).json({ ok:true, user });
   } catch (error) {
     const message=error instanceof Error?error.message:'Founder bootstrap failed';
+    console.error('[OpsVista Founder Bootstrap]', message);
     const conflict=message.includes('already been completed');
     const unauthorized=message.includes('Invalid Founder bootstrap code') || message.includes('does not match');
     return res.status(conflict?409:unauthorized?403:400).json({ error:message });
