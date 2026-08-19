@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
 import { getManagedUser } from './managementStore';
+import { authenticateStoredCredential } from './accountStore';
 
 export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
@@ -65,8 +66,29 @@ function effectiveManagedLocations(user: Awaited<ReturnType<typeof getManagedUse
   return Array.from(new Set(grants.filter(grant=>!grant.expiresAt || new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));
 }
 
+function sessionFromManaged(record:{userId:string;email:string}, managed:NonNullable<Awaited<ReturnType<typeof getManagedUser>>>):SessionUser {
+  return {
+    id:managed.id,
+    email:managed.email || record.email,
+    name:managed.name,
+    role:managed.role,
+    title:managed.title,
+    locations:effectiveManagedLocations(managed),
+  };
+}
+
 export async function authenticateUser(email: string, password: string): Promise<SessionUser | null> {
   const normalizedEmail = email.trim().toLowerCase();
+
+  if (process.env.OPSVISTA_DATABASE_URL) {
+    const stored = await authenticateStoredCredential(normalizedEmail,password);
+    if (stored) {
+      const managed = await getManagedUser(stored.userId);
+      if (!managed || !managed.active) return null;
+      return sessionFromManaged(stored,managed);
+    }
+  }
+
   const record = authUsers().find(user => user.email.toLowerCase() === normalizedEmail);
   if (!record) return null;
   const candidate = scryptSync(password, record.passwordSalt, 64);
@@ -79,14 +101,7 @@ export async function authenticateUser(email: string, password: string): Promise
     if (managed && !managed.active) return null;
   }
 
-  return managed ? {
-    id:record.id,
-    email:managed.email || record.email,
-    name:managed.name || record.name,
-    role:managed.role,
-    title:managed.title,
-    locations:effectiveManagedLocations(managed),
-  } : {
+  return managed ? sessionFromManaged({userId:record.id,email:record.email},managed) : {
     id:record.id, email:record.email, name:record.name, role:record.role, title:record.title, locations:[...record.locations],
   };
 }
@@ -101,12 +116,8 @@ export function issueSession(user: SessionUser) {
 export function readSession(cookieHeader?: string): SessionUser | null {
   const token = parseCookies(cookieHeader)[COOKIE_NAME];
   if (!token) return null;
-
-  // Fail closed as signed-out when authentication has not been configured yet.
-  // This avoids turning a stale browser cookie into a 503 while never granting access.
   const key = configuredSecret();
   if (!key) return null;
-
   const [body, signature] = token.split('.');
   if (!body || !signature) return null;
   const expected = Buffer.from(sign(body, key));
