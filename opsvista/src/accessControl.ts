@@ -32,9 +32,7 @@ export type OpsVistaUser = {
   email?: string;
   role: OpsVistaRole;
   title: string;
-  /** Legacy/permanent scope kept for backwards-compatible auth payloads. */
   locations: string[];
-  /** Preferred model: one principal location plus explicit additional grants. */
   locationGrants?: LocationAccessGrant[];
   active: boolean;
 };
@@ -55,7 +53,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
   },
   'Location Manager': {
-    modules: ['Resumen','Locaciones','Ventas','Local Intelligence','Horarios','Tasks','Action Center','Prioridades','Transferencias'],
+    modules: ['Resumen','Locaciones','Ventas','Local Intelligence','Horarios','Tasks','Action Center','Prioridades','Pagos','Transferencias'],
     allLocations: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
@@ -76,7 +74,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     modules: ['Resumen','Finanzas','Gastos','Action Center','Pagos','Transferencias','Configuración'],
     allLocations: true, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
-    canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
+    canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Maintenance: {
     modules: ['Resumen','Locaciones','Tasks','Action Center','Prioridades'],
@@ -88,7 +86,6 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
 
 const grants = (locations: string[]): LocationAccessGrant[] => locations.map((location,index)=>({ location, type:index===0?'Primary':'Additional', note:index===0?'Home location':'Permanent management coverage' }));
 
-/** Finalized initial directory for database bootstrap. No credentials or password material live here. */
 export const seedUsers: OpsVistaUser[] = [
   { id:'usr-founder-roberto', name:'Roberto Rodríguez', email:'rodriguez.evolife@gmail.com', role:'Founder', title:'Founder / Owner / Super Admin', locations:[], active:true },
   { id:'usr-roberto-ops', name:'Roberto Rodríguez', email:'roberto@puertovallartausa.com', role:'Corporate', title:'Operations', locations:[], active:true },
@@ -116,7 +113,6 @@ function cloneUser(user: OpsVistaUser): OpsVistaUser {
   return { ...user, locations:[...user.locations], locationGrants:user.locationGrants?.map(grant=>({...grant})) };
 }
 
-/** Mutable preview/session directory. Authentication replaces this with the signed-in identity. */
 export const demoUsers: OpsVistaUser[] = seedUsers.map(cloneUser);
 
 export function permissionsFor(user: OpsVistaUser) { return rolePermissions[user.role]; }
