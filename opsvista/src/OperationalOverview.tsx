@@ -4,6 +4,7 @@ type RangeKey='today'|'this-week'|'previous-week'|'this-month'|'last-month'|'cus
 type BaselineRow={location:string;sales:number;tasks?:number;voidPct?:number;discountPct?:number};
 type LiveRow={location:string;netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
 type LiveResponse={source:string;start:string;end:string;salaryLaborConfigured:boolean;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};notes?:{salaryLabor?:string;tasks?:string}};
+type SevenShiftsResponse={source:string;totals:{completed:number;total:number;compliancePct:number};locations:Array<{location:string;completed:number;total:number;compliancePct:number}>};
 type Props={allowedLocations:string[];allLocations:boolean;initialLocation?:string};
 
 const baselineRows:BaselineRow[]=[
@@ -22,6 +23,7 @@ function Kpi({label,value,note,status='ready'}:{label:string;value:string;note:s
 export default function OperationalOverview({allowedLocations,allLocations,initialLocation='All locations'}:Props){
   const [range,setRange]=useState<RangeKey>('today');const [customStart,setCustomStart]=useState('2026-08-01');const [customEnd,setCustomEnd]=useState('2026-08-19');const [location,setLocation]=useState(initialLocation);
   const [live,setLive]=useState<LiveResponse|null>(null);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
+  const [tasks,setTasks]=useState<SevenShiftsResponse|null>(null);const [tasksError,setTasksError]=useState('');
   const resolved=resolveRange(range,customStart,customEnd);
   const visibleBaselineRows=useMemo(()=>baselineRows.filter(r=>allLocations||allowedLocations.includes(r.location)),[allLocations,allowedLocations]);
 
@@ -32,6 +34,13 @@ export default function OperationalOverview({allowedLocations,allLocations,initi
     return()=>controller.abort();
   },[resolved.start,resolved.end,location]);
 
+  useEffect(()=>{
+    const controller=new AbortController();setTasks(null);setTasksError('');
+    const params=new URLSearchParams({start:resolved.start,end:resolved.end});
+    fetch(`/api/sevenshifts/tasks?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as SevenShiftsResponse&{error?:string};if(!response.ok)throw new Error(body.error||'7shifts task source unavailable');setTasks(body)}).catch(err=>{if(err?.name!=='AbortError')setTasksError(err instanceof Error?err.message:'7shifts task source unavailable')});
+    return()=>controller.abort();
+  },[resolved.start,resolved.end]);
+
   const total=live?.totals;
   return <div style={{display:'grid',gap:16}}>
     <section style={{background:'#fff',border:'1px solid #dce6f0',borderRadius:14,padding:16}}><div style={{display:'flex',gap:10,alignItems:'end',justifyContent:'space-between',flexWrap:'wrap'}}><div><div style={{fontSize:11,fontWeight:900,letterSpacing:'.07em',color:'#0f766e'}}>OPERATIONAL PERFORMANCE</div><h2 style={{fontSize:22,margin:'5px 0 3px',color:'#142235'}}>Performance Dashboard</h2><div style={{fontSize:13,color:'#64748b'}}>Wednesday–Tuesday operating week · live Toast data follows the selected range.</div></div><div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}><select value={location} onChange={e=>setLocation(e.target.value)} style={{padding:'9px 11px',border:'1px solid #cbd8e6',borderRadius:9,fontWeight:700,color:'#233247',background:'#fff'}}>{allLocations&&<option>All locations</option>}{visibleBaselineRows.map(r=><option key={r.location}>{r.location}</option>)}</select><select value={range} onChange={e=>setRange(e.target.value as RangeKey)} style={{padding:'9px 11px',border:'1px solid #cbd8e6',borderRadius:9,fontWeight:700,color:'#233247',background:'#fff'}}><option value="today">Today</option><option value="this-week">This week</option><option value="previous-week">Previous week</option><option value="this-month">This month</option><option value="last-month">Last month</option><option value="custom">Custom range</option></select>{range==='custom'&&<><input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} style={{padding:8,border:'1px solid #cbd8e6',borderRadius:9}}/><input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} style={{padding:8,border:'1px solid #cbd8e6',borderRadius:9}}/></>}</div></div><div style={{marginTop:13,padding:'9px 11px',borderRadius:9,background:error?'#fff7ed':'#f0fdfa',fontSize:12.5,color:error?'#9a3412':'#115e59',display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><span><strong>{resolved.label}</strong> · {resolved.start} → {resolved.end}</span><span>{loading?'Loading live Toast data…':error?error:live?`Live · ${live.source}`:'Waiting for source'}</span></div></section>
@@ -41,7 +50,7 @@ export default function OperationalOverview({allowedLocations,allLocations,initi
       <Kpi label="HOURLY LABOR" value={loading?'Loading…':total?money2.format(total.hourlyLaborCost):'Pending source'} note={total?`${total.hourlyHours.toFixed(1)} hrs · OT ${total.overtimeHours.toFixed(1)} hrs · ${total.laborPct.toFixed(2)}%`:'Toast time entries required'} status={total&&total.laborPct>30?'warning':total?'ready':'pending'} />
       <Kpi label="SALARY LABOR" value={loading?'Loading…':total?money2.format(total.salaryLaborCost):'Pending source'} note={total?`${total.salaryLaborPct.toFixed(2)}% · ${live?.notes?.salaryLabor||'Salary allocation'}`:'Weekly salary allocation required'} status={live?.salaryLaborConfigured?'ready':'pending'} />
       <Kpi label="TOTAL LABOR" value={loading?'Loading…':total?money2.format(total.totalLaborCost):'Pending source'} note={total?`${total.totalLaborPct.toFixed(2)}% · Hourly ${total.hourlyLaborPct.toFixed(2)}% + Salary ${total.salaryLaborPct.toFixed(2)}%`:'Hourly + salary labor combined automatically'} status={total&&total.totalLaborPct>30?'warning':total?'ready':'pending'} />
-      <Kpi label="TASKS COMPLIANCE" value="Pending source" note={live?.notes?.tasks||'7shifts production task feed required'} status="pending" />
+      <Kpi label="TASKS COMPLIANCE" value={tasks?`${tasks.totals.compliancePct.toFixed(1)}%`:tasksError?'Connection error':'Loading…'} note={tasks?`${tasks.totals.completed} of ${tasks.totals.total} tasks completed · Live 7shifts`:tasksError} status={tasks?(tasks.totals.compliancePct>=80?'ready':'warning'):'pending'} />
       <Kpi label="VOIDS" value={total?`${money2.format(total.voidAmount)} · ${total.voidPct.toFixed(2)}%`:'Pending source'} note="Live Toast order void calculation" status={total&&total.voidPct>.5?'warning':total?'ready':'pending'} />
       <Kpi label="DISCOUNTS" value={total?`${money2.format(total.discountAmount)} · ${total.discountPct.toFixed(2)}%`:'Pending source'} note="Live active check + item discounts · target ≤ 2.00%" status={total&&total.discountPct>2?'warning':total?'ready':'pending'} />
     </section>
