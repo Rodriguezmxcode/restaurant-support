@@ -3,6 +3,9 @@ type ToastAuthResponse={token?:{accessToken?:string;expiresIn?:number}};
 type TokenCache={accessToken:string;expiresAt:number};
 let standardToken:TokenCache|undefined;
 let analyticsToken:TokenCache|undefined;
+let standardRequestQueue:Promise<void>=Promise.resolve();
+let lastStandardRequestAt=0;
+const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function cleanHost(value:string|undefined){return (value||'').replace(/\/$/,'');}
 
@@ -41,9 +44,26 @@ export async function standardToastRequest(path:string,restaurantGuid?:string){
   standardToken=await authenticate(host,clientId,clientSecret,standardToken);
   const headers:Record<string,string>={Authorization:`Bearer ${standardToken.accessToken}`};
   if(restaurantGuid)headers['Toast-Restaurant-External-ID']=restaurantGuid;
-  const response=await fetch(`${host}${path}`,{headers});
-  if(!response.ok){const detail=await response.text().catch(()=>"");throw new Error(`Toast API request failed (${response.status}) for ${path}${detail?`: ${detail.slice(0,500)}`:""}`);}
-  return response.json();
+  const execute=async()=>{
+    const spacing=Math.max(0,175-(Date.now()-lastStandardRequestAt));
+    if(spacing)await wait(spacing);
+    for(let attempt=0;attempt<5;attempt++){
+      lastStandardRequestAt=Date.now();
+      const response=await fetch(`${host}${path}`,{headers});
+      if(response.ok)return response.json();
+      const detail=await response.text().catch(()=>"");
+      if(response.status===429&&attempt<4){
+        const retryHeader=Number(response.headers.get('retry-after')||0);
+        await wait(retryHeader>0?retryHeader*1000:500*Math.pow(2,attempt));
+        continue;
+      }
+      throw new Error(`Toast API request failed (${response.status}) for ${path}${detail?`: ${detail.slice(0,500)}`:""}`);
+    }
+    throw new Error(`Toast API request failed after retries for ${path}`);
+  };
+  const queued=standardRequestQueue.then(execute);
+  standardRequestQueue=queued.then(()=>undefined,()=>undefined);
+  return queued;
 }
 
 export async function analyticsToastRequest(path:string,init?:RequestInit){
