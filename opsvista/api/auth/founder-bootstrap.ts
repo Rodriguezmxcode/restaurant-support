@@ -5,8 +5,8 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
   res.setHeader?.('Cache-Control','no-store');
   try {
     const [{ authenticateUser, issueSession, sessionCookie }, { bootstrapFounderCredential, founderBootstrapAvailable }] = await Promise.all([
-      import('../../server/authSession'),
-      import('../../server/accountStore'),
+      import('../../server/authSession.js'),
+      import('../../server/accountStore.js'),
     ]);
 
     if (!req.method || req.method==='GET') {
