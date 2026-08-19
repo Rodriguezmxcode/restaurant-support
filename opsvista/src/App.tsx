@@ -5,6 +5,7 @@ import EvidenceAuditView from './EvidenceAuditView';
 import OpsVistaCopilot from './OpsVistaCopilot';
 import VerificationLoopPanel from './VerificationLoopPanel';
 import AccessControlPanel from './AccessControlPanel';
+import InvitationManager from './InvitationManager';
 import { demoAutomationSignals, runActionRules, type SignalSource } from './actionRules';
 import type { VerificationStatus } from './verificationLoop';
 import { canAccessLocation, demoUsers, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
@@ -127,7 +128,7 @@ export default function App() {
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{!isIntelligenceModule&&<div className="filters"><select value={location} onChange={e=>setLocation(e.target.value)}><option>All locations</option>{allowedLocations.map(loc=><option key={loc}>{loc}</option>)}</select>{permissions.canEscalateActions&&<button className="primary">+ Nueva acción</button>}</div>}</div>
 
-        {isSettings ? <AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser} /> : isRamp ? <RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined} /> : isLabor ? <LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined} /> : isEvidence ? <EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined} /> : <>
+        {isSettings ? <><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser} /></> : isRamp ? <RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined} /> : isLabor ? <LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined} /> : isEvidence ? <EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined} /> : <>
           <section className="metrics-grid">
             <Metric label="ACCESS SCOPE" value={permissions.allLocations?'All':String(allowedLocations.length)} note={permissions.allLocations?'All locations authorized':`${allowedLocations.join(', ') || 'No locations'} only`} />
             <Metric label="AUTO ACTIONS" value={String(autoCount)} note={`${lastRuleRun.suppressed} duplicates suppressed`} />
