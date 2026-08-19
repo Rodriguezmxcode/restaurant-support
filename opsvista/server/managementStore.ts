@@ -11,6 +11,7 @@ export type StoredLocationGrant = {
 export type ManagedDirectoryUser = {
   id: string;
   name: string;
+  email?: string;
   role: ServerRole;
   title: string;
   locations: string[];
@@ -35,6 +36,34 @@ export type StoredAuditEvent = {
 
 let sqlClient: ReturnType<typeof postgres> | undefined;
 let initialized = false;
+let bootstrapped = false;
+
+const locations = ['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
+const grants = (items:string[]):StoredLocationGrant[] => items.map((location,index)=>({location,type:index===0?'Primary':'Additional',note:index===0?'Home location':'Permanent management coverage'}));
+
+/** Initial management directory only. Passwords and password hashes are intentionally excluded. */
+export const initialManagedDirectory: ManagedDirectoryUser[] = [
+  {id:'usr-founder-roberto',name:'Roberto Rodríguez',email:'rodriguez.evolife@gmail.com',role:'Founder',title:'Founder / Owner / Super Admin',locations:[],active:true},
+  {id:'usr-roberto-ops',name:'Roberto Rodríguez',email:'roberto@puertovallartausa.com',role:'Corporate',title:'Operations',locations:[],active:true},
+  {id:'usr-jacob',name:'Jacob Rodríguez',email:'jacob@puertovallartausa.com',role:'Corporate',title:'President',locations:[],active:true},
+  {id:'usr-esaul',name:'Esaul Rodríguez',email:'esaul08@gmail.com',role:'Corporate',title:'CEO',locations:[],active:true},
+  {id:'usr-caleb',name:'Caleb Kyllo',email:'caleb@puertovallartausa.com',role:'Corporate',title:'Corporate',locations:[],active:true},
+  {id:'usr-gladys',name:'Gladys Valdez',email:'gvaldez1223@outlook.com',role:'HR',title:'Human Resources & Payroll',locations:[],active:true},
+  {id:'usr-eduardo',name:'Eduardo Santos',email:'lalo@puertovallartausa.com',role:'Kitchen',title:'Kitchen Operations',locations,locationGrants:grants(locations),active:true},
+  {id:'usr-miguel',name:'Miguel Bello',email:'miguel@puertovallartausa.com',role:'Maintenance',title:'Maintenance',locations:[],active:true},
+  {id:'usr-samantha',name:'Samantha Lora',email:'invoicepv@puertovallartausa.com',role:'Administration',title:'Administration',locations:[],active:true},
+  {id:'usr-jonathan',name:'Jonathan Rodríguez',email:'jonathan@puertovallartausa.com',role:'Administration',title:'Administration',locations:[],active:true},
+  {id:'usr-ali',name:'Ali Vinicio',email:'ali@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Avon'],locationGrants:grants(['Avon']),active:true},
+  {id:'usr-christopher',name:'Christopher Guerrero',email:'cristopher@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Danbury'],locationGrants:grants(['Danbury']),active:true},
+  {id:'usr-daniel',name:'Daniel Castro',email:'daniel@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Danbury'],locationGrants:grants(['Danbury']),active:true},
+  {id:'usr-janneth',name:'Janneth Domínguez',email:'janneth@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Orange'],locationGrants:grants(['Orange']),active:true},
+  {id:'usr-jhohan',name:'Jhohan Hernández',email:'jhohan@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Southington','Avon'],locationGrants:grants(['Southington','Avon']),active:true},
+  {id:'usr-juan-delgado',name:'Juan Delgado',email:'juandelgado@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Stamford'],locationGrants:grants(['Stamford']),active:true},
+  {id:'usr-juan-sebastian',name:'Juan Sebastián Zuleta',email:'jzuleta@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Southington'],locationGrants:grants(['Southington']),active:true},
+  {id:'usr-juan-zuleta',name:'Juan Zuleta',email:'juanzuleta@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Stamford','Southington'],locationGrants:grants(['Stamford','Southington']),active:true},
+  {id:'usr-michael',name:'Michael Monsalve',email:'michael@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Fairfield'],locationGrants:grants(['Fairfield']),active:true},
+  {id:'usr-pedro',name:'Pedro Santiago',email:'pedro@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Orange'],locationGrants:grants(['Orange']),active:true},
+];
 
 function sql() {
   const url = process.env.OPSVISTA_DATABASE_URL;
@@ -50,6 +79,7 @@ async function ensureSchema() {
     create table if not exists opsvista_management_users (
       id text primary key,
       name text not null,
+      email text,
       role text not null,
       title text not null default '',
       active boolean not null default true,
@@ -59,6 +89,7 @@ async function ensureSchema() {
       updated_by text
     )
   `;
+  await db`alter table opsvista_management_users add column if not exists email text`;
   await db`
     create table if not exists opsvista_management_audit (
       id text primary key,
@@ -77,15 +108,35 @@ async function ensureSchema() {
   `;
   await db`create index if not exists opsvista_management_audit_at_idx on opsvista_management_audit (at desc)`;
   await db`create index if not exists opsvista_management_audit_target_idx on opsvista_management_audit (target_user_id, at desc)`;
+  await db`create unique index if not exists opsvista_management_users_email_idx on opsvista_management_users (lower(email)) where email is not null`;
   initialized = true;
+}
+
+async function bootstrapInitialDirectory() {
+  if (bootstrapped) return;
+  await ensureSchema();
+  const db = sql();
+  const countRows = await db`select count(*)::int as count from opsvista_management_users`;
+  if (Number(countRows[0]?.count ?? 0) === 0) {
+    await db.begin(async tx => {
+      for (const user of initialManagedDirectory) {
+        await tx`
+          insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
+          values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},'initial-directory-v1')
+          on conflict (id) do nothing
+        `;
+      }
+    });
+  }
+  bootstrapped = true;
 }
 
 function normalizeUser(row: Record<string, unknown>): ManagedDirectoryUser {
   return {
-    id: String(row.id), name: String(row.name), role: row.role as ServerRole,
-    title: String(row.title ?? ''), active: Boolean(row.active),
-    locations: Array.isArray(row.locations) ? row.locations.map(String) : [],
-    locationGrants: Array.isArray(row.location_grants) ? row.location_grants as StoredLocationGrant[] : [],
+    id:String(row.id), name:String(row.name), email:row.email ? String(row.email) : undefined, role:row.role as ServerRole,
+    title:String(row.title ?? ''), active:Boolean(row.active),
+    locations:Array.isArray(row.locations) ? row.locations.map(String) : [],
+    locationGrants:Array.isArray(row.location_grants) ? row.location_grants as StoredLocationGrant[] : [],
   };
 }
 
@@ -99,13 +150,13 @@ function normalizeAudit(row: Record<string, unknown>): StoredAuditEvent {
 }
 
 export async function listManagedUsers() {
-  await ensureSchema();
-  const rows = await sql()`select * from opsvista_management_users order by name asc`;
-  return rows.map(row => normalizeUser(row));
+  await bootstrapInitialDirectory();
+  const rows = await sql()`select * from opsvista_management_users order by name asc, email asc nulls last`;
+  return rows.map(row=>normalizeUser(row));
 }
 
 export async function getManagedUser(id: string) {
-  await ensureSchema();
+  await bootstrapInitialDirectory();
   const rows = await sql()`select * from opsvista_management_users where id=${id} limit 1`;
   return rows[0] ? normalizeUser(rows[0]) : null;
 }
@@ -114,20 +165,19 @@ export async function listManagementAudit(limit = 500) {
   await ensureSchema();
   const safeLimit = Math.max(1, Math.min(1000, limit));
   const rows = await sql()`select * from opsvista_management_audit order by at desc limit ${safeLimit}`;
-  return rows.map(row => normalizeAudit(row));
+  return rows.map(row=>normalizeAudit(row));
 }
 
 export async function saveManagedUser(user: ManagedDirectoryUser, events: StoredAuditEvent[], actor: SessionUser) {
-  await ensureSchema();
+  await bootstrapInitialDirectory();
   const db = sql();
   await db.begin(async tx => {
     await tx`
-      insert into opsvista_management_users (id,name,role,title,active,locations,location_grants,updated_at,updated_by)
-      values (${user.id},${user.name},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},now(),${actor.id})
+      insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_at,updated_by)
+      values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},now(),${actor.id})
       on conflict (id) do update set
-        name=excluded.name, role=excluded.role, title=excluded.title, active=excluded.active,
-        locations=excluded.locations, location_grants=excluded.location_grants,
-        updated_at=now(), updated_by=excluded.updated_by
+        name=excluded.name, email=excluded.email, role=excluded.role, title=excluded.title, active=excluded.active,
+        locations=excluded.locations, location_grants=excluded.location_grants, updated_at=now(), updated_by=excluded.updated_by
     `;
     for (const event of events) {
       await tx`
@@ -144,8 +194,8 @@ export async function seedManagedUsers(users: ManagedDirectoryUser[], actorId = 
   await ensureSchema();
   for (const user of users) {
     await sql()`
-      insert into opsvista_management_users (id,name,role,title,active,locations,location_grants,updated_by)
-      values (${user.id},${user.name},${user.role},${user.title},${user.active},${sql().json(user.locations)},${sql().json(user.locationGrants ?? [])},${actorId})
+      insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
+      values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${sql().json(user.locations)},${sql().json(user.locationGrants ?? [])},${actorId})
       on conflict (id) do nothing
     `;
   }
