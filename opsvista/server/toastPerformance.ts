@@ -16,7 +16,10 @@ export type PerformanceLocation={
   voidPct:number;
   hourlyHours:number;
   overtimeHours:number;
+  regularLaborCost:number;
+  overtimeLaborCost:number;
   hourlyLaborCost:number;
+  overtimeLaborPct:number;
   laborPct:number;
   splh:number|null;
 };
@@ -80,15 +83,18 @@ async function getLaborForRange(restaurantGuid:string,start:string,end:string){
 }
 
 function summarizeLabor(entries:TimeEntry[]){
-  let regularHours=0,overtimeHours=0,cost=0;
+  let regularHours=0,overtimeHours=0,regularLaborCost=0,overtimeLaborCost=0;
   for(const entry of entries){
     if(entry.deleted)continue;
     const wage=entry.hourlyWage;
-    if(wage===null||wage===undefined)continue; // Salary entries are intentionally excluded from hourly labor.
+    if(wage===null||wage===undefined)continue;
     const regular=Number(entry.regularHours||0),overtime=Number(entry.overtimeHours||0),rate=Number(wage||0);
-    regularHours+=regular;overtimeHours+=overtime;cost+=regular*rate+overtime*rate*1.5;
+    regularHours+=regular;overtimeHours+=overtime;
+    regularLaborCost+=regular*rate;
+    overtimeLaborCost+=overtime*rate*1.5;
   }
-  return {hourlyHours:round(regularHours+overtimeHours),overtimeHours:round(overtimeHours),hourlyLaborCost:round(cost)};
+  const hourlyLaborCost=regularLaborCost+overtimeLaborCost;
+  return {hourlyHours:round(regularHours+overtimeHours),overtimeHours:round(overtimeHours),regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),hourlyLaborCost:round(hourlyLaborCost),overtimeLaborPct:hourlyLaborCost?round(overtimeLaborCost/hourlyLaborCost*100):0};
 }
 
 export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
