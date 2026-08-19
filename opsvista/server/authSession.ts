@@ -1,0 +1,109 @@
+import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
+
+export type ServerRole = 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
+
+export type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: ServerRole;
+  title: string;
+  locations: string[];
+};
+
+type AuthUserRecord = SessionUser & {
+  active?: boolean;
+  passwordSalt: string;
+  passwordHash: string;
+};
+
+type SessionPayload = SessionUser & { exp: number; iat: number };
+
+const COOKIE_NAME = 'opsvista_session';
+const SESSION_TTL_SECONDS = 60 * 60 * 12;
+
+function secret() {
+  const value = process.env.OPSVISTA_SESSION_SECRET;
+  if (!value || value.length < 32) throw new Error('OPSVISTA_SESSION_SECRET must be configured with at least 32 characters');
+  return value;
+}
+
+function b64url(input: string | Buffer) {
+  return Buffer.from(input).toString('base64url');
+}
+
+function sign(body: string) {
+  return createHmac('sha256', secret()).update(body).digest('base64url');
+}
+
+function parseCookies(raw?: string) {
+  const result: Record<string, string> = {};
+  for (const pair of (raw || '').split(';')) {
+    const index = pair.indexOf('=');
+    if (index < 0) continue;
+    const key = pair.slice(0, index).trim();
+    const value = pair.slice(index + 1).trim();
+    if (key) result[key] = decodeURIComponent(value);
+  }
+  return result;
+}
+
+function authUsers(): AuthUserRecord[] {
+  const raw = process.env.OPSVISTA_AUTH_USERS_JSON;
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as AuthUserRecord[];
+  return parsed.filter(user => user.active !== false);
+}
+
+export function authenticateUser(email: string, password: string): SessionUser | null {
+  const record = authUsers().find(user => user.email.toLowerCase() === email.trim().toLowerCase());
+  if (!record) return null;
+  const candidate = scryptSync(password, record.passwordSalt, 64);
+  const expected = Buffer.from(record.passwordHash, 'hex');
+  if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) return null;
+  const { passwordHash: _hash, passwordSalt: _salt, active: _active, ...user } = record;
+  return user;
+}
+
+export function issueSession(user: SessionUser) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload: SessionPayload = { ...user, iat: now, exp: now + SESSION_TTL_SECONDS };
+  const body = b64url(JSON.stringify(payload));
+  return `${body}.${sign(body)}`;
+}
+
+export function readSession(cookieHeader?: string): SessionUser | null {
+  const token = parseCookies(cookieHeader)[COOKIE_NAME];
+  if (!token) return null;
+  const [body, signature] = token.split('.');
+  if (!body || !signature) return null;
+  const expected = Buffer.from(sign(body));
+  const actual = Buffer.from(signature);
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
+    if (!payload.exp || payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    const { exp: _exp, iat: _iat, ...user } = payload;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+export function sessionCookie(token: string) {
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
+}
+
+export function clearSessionCookie() {
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+export function isRole(user: SessionUser | null, roles: ServerRole[]) {
+  return !!user && roles.includes(user.role);
+}
+
+export function canAccessServerLocation(user: SessionUser, location?: string) {
+  if (!location) return true;
+  if (['Corporate', 'HR', 'Administration', 'Maintenance'].includes(user.role)) return true;
+  return user.locations.includes(location);
+}
