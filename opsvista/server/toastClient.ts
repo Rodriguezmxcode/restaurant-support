@@ -30,7 +30,6 @@ export function toastLocations():Record<string,string>{
   try{parsed=JSON.parse(raw);}catch{throw new Error('TOAST_LOCATION_GUIDS_JSON must be valid JSON');}
   if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw new Error('TOAST_LOCATION_GUIDS_JSON must map each location name to its Toast restaurant GUID');
   const locations=Object.fromEntries(Object.entries(parsed as Record<string,unknown>).filter(([,guid])=>isRestaurantGuid(guid)).map(([name,guid])=>[name,(guid as string).trim()]));
-  if(!Object.keys(locations).length)throw new Error('TOAST_LOCATION_GUIDS_JSON has no valid restaurant GUIDs. Use {"Stamford":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}; do not include clientId, clientSecret, or userAccessType.');
   return locations;
 }
 
