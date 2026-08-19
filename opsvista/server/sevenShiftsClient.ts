@@ -194,3 +194,38 @@ export async function weeklyTaskCompliance(start:string,end:string,locationNames
   for(const a of accountability){const key=String(a.userId??a.userName??'Unassigned');const row=byUser.get(key)??{userId:a.userId,userName:a.userName||'Unassigned / unknown',completed:0,incomplete:0,late:0,tasks:0};row.tasks++;if(a.completed)row.completed++;else row.incomplete++;if(a.late)row.late++;byUser.set(key,row);}
   return {companyId:await resolveCompanyId(),start,end,total,completed,incomplete:Math.max(0,total-completed),completionPct:total>0?completed/total*100:null,detailAvailable:accountability.length>0,accountability,people:Array.from(byUser.values()).sort((a,b)=>b.incomplete-a.incomplete||b.late-a.late||b.tasks-a.tasks),locations};
 }
+
+export type SevenShiftsLogbookEntry={
+  id:number;
+  date:string;
+  locationId:number;
+  locationName:string;
+  userId?:number;
+  author:string;
+  categoryId?:number;
+  category:string;
+  message:string;
+  attachments:number;
+};
+
+export async function listSevenShiftsLogbook(start:string,end:string,locationNames?:string[]):Promise<SevenShiftsLogbookEntry[]>{
+  const cid=await resolveCompanyId();
+  const locations=await listSevenShiftsLocations();
+  const wanted=locationNames?.length?locations.filter(l=>locationNames.some(n=>n.toLowerCase()===l.name.toLowerCase()||l.name.toLowerCase().includes(n.toLowerCase())||n.toLowerCase().includes(l.name.toLowerCase()))):locations;
+  const locationMap=new Map(wanted.map(l=>[l.id,l.name]));
+  const [postsRaw,categoriesRaw,usersRaw]=await Promise.all([
+    request(`/company/${cid}/log_book_posts?posted_date_gte=${encodeURIComponent(start)}&posted_date_lte=${encodeURIComponent(end)}&order_field=date&order_dir=desc&limit=200`),
+    request(`/company/${cid}/log_book_categories`),
+    request(`/company/${cid}/users?limit=500`),
+  ]);
+  const categories=new Map(arrayFrom(categoriesRaw).map(row=>[Number(row.id),String(row.name||'Logbook')]));
+  const users=new Map(arrayFrom(usersRaw).map(row=>[Number(row.id),[row.preferred_first_name||row.first_name,row.preferred_last_name||row.last_name].filter(Boolean).join(' ').trim()||String(row.email||`User ${row.id}`)]));
+  return arrayFrom(postsRaw).flatMap(row=>{
+    const locationId=Number(row.location_id);if(!locationMap.has(locationId))return [];
+    const id=Number(row.id);const userId=numberField(row,['user_id','created_by_user_id','author_user_id']);
+    const categoryId=numberField(row,['log_book_category_id','category_id']);
+    const attachments=Array.isArray(row.attachments)?row.attachments.length:0;
+    return [{id:Number.isFinite(id)?id:0,date:stringField(row,['date','posted_date','created'])?.slice(0,10)||start,locationId,locationName:locationMap.get(locationId)||`Location ${locationId}`,userId,author:userId!==undefined?(users.get(userId)||`User ${userId}`):'Unknown author',categoryId,category:categoryId!==undefined?(categories.get(categoryId)||'Logbook'):'Logbook',message:stringField(row,['message','content','text'])||'',attachments}];
+  });
+}
+
