@@ -65,14 +65,17 @@ function summarizeOrders(orders:ToastOrder[],start:string,end:string){
 
 async function getOrdersForRange(restaurantGuid:string,start:string,end:string){
   const all:ToastOrder[]=[];
-  let page=1;
   const pageSize=100;
-  while(page<=50){
-    const query=new URLSearchParams({startDate:rangeStart(start),endDate:dayAfter(end),page:String(page),pageSize:String(pageSize)});
-    const data=await standardToastRequest(`/orders/v2/ordersBulk?${query.toString()}`,restaurantGuid) as ToastOrder[];
-    all.push(...data);
-    if(data.length<pageSize)break;
-    page++;
+  for(let cursor=start;cursor<=end;){
+    let page=1;
+    while(page<=50){
+      const query=new URLSearchParams({businessDate:String(ymd(cursor)),page:String(page),pageSize:String(pageSize)});
+      const data=await standardToastRequest(`/orders/v2/ordersBulk?${query.toString()}`,restaurantGuid) as ToastOrder[];
+      all.push(...data);
+      if(data.length<pageSize)break;
+      page++;
+    }
+    const next=new Date(`${cursor}T12:00:00.000Z`);next.setUTCDate(next.getUTCDate()+1);cursor=next.toISOString().slice(0,10);
   }
   return all;
 }
