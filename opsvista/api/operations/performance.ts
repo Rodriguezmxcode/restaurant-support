@@ -1,6 +1,7 @@
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastPerformance } from '../../server/toastPerformance.js';
+import { getSevenShiftsTaskCompliance } from '../../server/sevenShiftsTasks.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -24,6 +25,9 @@ export default async function handler(req:Req,res:Res){
   }else if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role))requested=user.locations;
   try{
     const toastLocations=await getToastPerformance(start,end,requested);
+    let taskCompliance:Awaited<ReturnType<typeof getSevenShiftsTaskCompliance>>|null=null;
+    let taskComplianceError='';
+    try{taskCompliance=await getSevenShiftsTaskCompliance(start,end);}catch(taskError){taskComplianceError=taskError instanceof Error?taskError.message:'7shifts data unavailable';}
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
@@ -48,7 +52,7 @@ export default async function handler(req:Req,res:Res){
     }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
       source:'Toast Standard API + OpsVista salary allocation',start,end,locations,
-      salaryLaborConfigured:salary.configured,
+      salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,
