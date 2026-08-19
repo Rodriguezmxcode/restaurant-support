@@ -1,0 +1,23 @@
+import { useEffect, useMemo, useState } from 'react';
+
+type Day={date:string;total:number;completed:number;incomplete:number;completionPct:number|null};
+type LocationWeek={locationId:number;locationName:string;total:number;completed:number;incomplete:number;completionPct:number|null;days:Day[]};
+type Response={source?:string;start?:string;end?:string;total?:number;completed?:number;incomplete?:number;completionPct?:number|null;locations?:LocationWeek[];error?:string;configured?:boolean};
+const pct=(v:number|null|undefined)=>v===null||v===undefined?'—':`${v.toFixed(1)}%`;
+const fmtDate=(v:string)=>new Date(`${v}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+
+function operationalWeek(){const now=new Date();const day=now.getDay();const sinceWed=(day-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-sinceWed);const end=new Date(start);end.setDate(start.getDate()+6);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return {start:iso(start),end:iso(end)};}
+
+export default function SevenShiftsTasksPanel({allowedLocations}:{allowedLocations?:string[]}){
+ const week=useMemo(operationalWeek,[]);const [data,setData]=useState<Response>({});const [loading,setLoading]=useState(true);const [selected,setSelected]=useState('All locations');
+ useEffect(()=>{let cancelled=false;const run=async()=>{setLoading(true);try{const params=new URLSearchParams({start:week.start,end:week.end});if(selected!=='All locations')params.set('location',selected);const r=await fetch(`/api/tasks/weekly?${params}`,{credentials:'include',cache:'no-store'});const b=await r.json().catch(()=>({})) as Response;if(!cancelled)setData(b);}catch{if(!cancelled)setData({error:'Unable to load 7shifts Tasks'});}finally{if(!cancelled)setLoading(false);}};void run();return()=>{cancelled=true};},[selected,week.start,week.end]);
+ const locations=data.locations||[];const options=allowedLocations?.length?allowedLocations:Array.from(new Set(locations.map(x=>x.locationName)));
+ return <section className="panel" style={{marginBottom:16}}><div className="panel-header"><div><h2>7shifts Tasks · Weekly Accountability</h2><p>{fmtDate(week.start)}–{fmtDate(week.end)} · Wednesday–Tuesday · Bonus minimum 80%</p></div><select value={selected} onChange={e=>setSelected(e.target.value)}><option>All locations</option>{options.map(x=><option key={x}>{x}</option>)}</select></div>
+ <div style={{padding:18,display:'grid',gap:14}}>
+  {loading?<div className="detail-block"><label>7SHIFTS</label><p>Loading live task compliance…</p></div>:data.error?<div className="detail-block"><label>7SHIFTS CONNECTION</label><p>{data.error}</p><p style={{color:'#64748b'}}>Configure the 7shifts credentials in Vercel; no demo task percentage is shown as live.</p></div>:<>
+   <div className="metrics-grid"><div className="metric-card"><div className="metric-label">TASK COMPLETION</div><div className="metric-value">{pct(data.completionPct)}</div><div className="metric-note">{(data.completed||0)} of {(data.total||0)} completed</div></div><div className="metric-card"><div className="metric-label">INCOMPLETE</div><div className="metric-value">{data.incomplete||0}</div><div className="metric-note">Current operational week</div></div><div className="metric-card"><div className="metric-label">BONUS GATE</div><div className="metric-value" style={{fontSize:24}}>{data.completionPct===null||data.completionPct===undefined?'Pending':data.completionPct>=80?'PASS':'FAIL'}</div><div className="metric-note">Requires Tasks ≥ 80%</div></div></div>
+   <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',minWidth:760}}><thead><tr>{['LOCATION','COMPLETED','TOTAL','INCOMPLETE','COMPLIANCE','BONUS TASK GATE'].map(h=><th key={h} style={{textAlign:'left',padding:10,borderBottom:'1px solid #e2e8f0'}}>{h}</th>)}</tr></thead><tbody>{locations.map(l=><tr key={l.locationId}><td style={{padding:10,fontWeight:800}}>{l.locationName}</td><td style={{padding:10}}>{l.completed}</td><td style={{padding:10}}>{l.total}</td><td style={{padding:10}}>{l.incomplete}</td><td style={{padding:10,fontWeight:850}}>{pct(l.completionPct)}</td><td style={{padding:10,fontWeight:850}}>{l.completionPct===null?'Pending':l.completionPct>=80?'PASS':'FAIL'}</td></tr>)}</tbody></table></div>
+   <div style={{fontSize:12,color:'#64748b'}}>Next accountability layer: map the live task-list/user detail from your 7shifts account so OpsVista can show exactly who completed, missed or completed late—not just the location percentage.</div>
+  </>}
+ </div></section>;
+}
