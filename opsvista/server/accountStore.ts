@@ -1,6 +1,6 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import postgres from 'postgres';
-import { getManagedUser } from './managementStore';
+import { getManagedUser } from './managementStore.js';
 
 let client: ReturnType<typeof postgres> | undefined;
 let initialized = false;
