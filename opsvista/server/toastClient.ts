@@ -34,7 +34,7 @@ export async function standardToastRequest(path:string,restaurantGuid?:string){
   const headers:Record<string,string>={Authorization:`Bearer ${standardToken.accessToken}`};
   if(restaurantGuid)headers['Toast-Restaurant-External-ID']=restaurantGuid;
   const response=await fetch(`${host}${path}`,{headers});
-  if(!response.ok)throw new Error(`Toast API request failed (${response.status}) for ${path}`);
+  if(!response.ok){const detail=await response.text().catch(()=>"");throw new Error(`Toast API request failed (${response.status}) for ${path}${detail?`: ${detail.slice(0,500)}`:""}`);}
   return response.json();
 }
 
