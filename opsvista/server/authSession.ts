@@ -23,14 +23,19 @@ type SessionPayload = SessionUser & { exp: number; iat: number };
 const COOKIE_NAME = 'opsvista_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
-function secret() {
+function configuredSecret() {
   const value = process.env.OPSVISTA_SESSION_SECRET;
-  if (!value || value.length < 32) throw new Error('OPSVISTA_SESSION_SECRET must be configured with at least 32 characters');
+  return value && value.length >= 32 ? value : null;
+}
+
+function requiredSecret() {
+  const value = configuredSecret();
+  if (!value) throw new Error('OPSVISTA_SESSION_SECRET must be configured with at least 32 characters');
   return value;
 }
 
 function b64url(input: string | Buffer) { return Buffer.from(input).toString('base64url'); }
-function sign(body: string) { return createHmac('sha256', secret()).update(body).digest('base64url'); }
+function sign(body: string, key = requiredSecret()) { return createHmac('sha256', key).update(body).digest('base64url'); }
 
 function parseCookies(raw?: string) {
   const result: Record<string, string> = {};
@@ -96,9 +101,15 @@ export function issueSession(user: SessionUser) {
 export function readSession(cookieHeader?: string): SessionUser | null {
   const token = parseCookies(cookieHeader)[COOKIE_NAME];
   if (!token) return null;
+
+  // Fail closed as signed-out when authentication has not been configured yet.
+  // This avoids turning a stale browser cookie into a 503 while never granting access.
+  const key = configuredSecret();
+  if (!key) return null;
+
   const [body, signature] = token.split('.');
   if (!body || !signature) return null;
-  const expected = Buffer.from(sign(body));
+  const expected = Buffer.from(sign(body, key));
   const actual = Buffer.from(signature);
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
   try {
