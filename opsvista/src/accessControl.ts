@@ -75,7 +75,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   },
 };
 
-export const demoUsers: OpsVistaUser[] = [
+export const seedUsers: OpsVistaUser[] = [
   { id:'usr-corp', name:'Roberto Rodríguez', role:'Corporate', title:'Operaciones corporativas', locations:[], active:true },
   {
     id:'usr-manager', name:'Location Manager', role:'Location Manager', title:'Restaurant Manager', locations:['Orange'], active:true,
@@ -92,6 +92,17 @@ export const demoUsers: OpsVistaUser[] = [
   { id:'usr-admin', name:'Administration', role:'Administration', title:'Administration', locations:[], active:true },
   { id:'usr-maint', name:'Maintenance', role:'Maintenance', title:'Maintenance', locations:[], active:true },
 ];
+
+function cloneUser(user: OpsVistaUser): OpsVistaUser {
+  return {
+    ...user,
+    locations: [...user.locations],
+    locationGrants: user.locationGrants?.map(grant => ({ ...grant })),
+  };
+}
+
+/** Mutable preview/session directory. Authentication replaces this with the signed-in identity. */
+export const demoUsers: OpsVistaUser[] = seedUsers.map(cloneUser);
 
 export function permissionsFor(user: OpsVistaUser) { return rolePermissions[user.role]; }
 export function canAccessModule(user: OpsVistaUser, module: string) { return permissionsFor(user).modules.includes(module as OpsVistaModule); }
