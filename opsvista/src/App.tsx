@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import RampComplianceView from './RampComplianceView';
 import LaborIntelligenceView from './LaborIntelligenceView';
 import EvidenceAuditView from './EvidenceAuditView';
-import WeeklyBonusPanel from './WeeklyBonusPanel';
+import WeeklyBonusLivePanel from './WeeklyBonusLivePanel';
 import OpsVistaCopilot from './OpsVistaCopilot';
 import VerificationLoopPanel from './VerificationLoopPanel';
 import AccessControlPanel from './AccessControlPanel';
@@ -23,7 +23,7 @@ type ExternalEscalation=Omit<ActionItem,'id'|'category'|'status'>;
 const seededRules=runActionRules(demoAutomationSignals);
 const initialActions:ActionItem[]=seededRules.actions.map((action,index)=>({...action,id:index+1,status:'Open',verificationStatus:'Pending'}));
 const allLocations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
-const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Action Center':'⚡',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Configuración:'⚙'};
+const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Bono semanal':'★','Action Center':'⚡',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Configuración:'⚙'};
 
 function Metric({label,value,note,tone}:{label:string;value:string;note:string;tone?:string}){return <div className="metric-card"><div className="metric-label">{label}</div><div className={`metric-value ${tone??''}`}>{value}</div><div className="metric-note">{note}</div></div>}
 
@@ -61,13 +61,14 @@ export default function App(){
   const isRamp=section==='Gastos';
   const isLabor=section==='Horarios';
   const isEvidence=section==='Tasks';
+  const isBonus=section==='Bono semanal';
   const isPayments=section==='Pagos';
   const isTransfers=section==='Transferencias';
   const isSettings=section==='Configuración';
-  const isDedicated=isOverview||isRamp||isLabor||isEvidence||isPayments||isTransfers||isSettings;
-  const eyebrow=isOverview?'OPERATING PERFORMANCE':isRamp?'FINANCIAL ACCOUNTABILITY':isLabor?'WORKFORCE INTELLIGENCE':isEvidence?'OPERATIONAL VERIFICATION':isPayments?'PAYMENT CONTROL':isTransfers?'INVENTORY CHAIN OF CUSTODY':isSettings?'ACCESS & SECURITY':'OPERATIONAL INTELLIGENCE';
-  const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isRamp?'Gastos Ramp':isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · Evidence Audit':isPayments?'Pagos · Approval Workflow':isTransfers?'Transferencias · Restaurant Ledger':isSettings?'Configuración · Roles & Permissions':section;
-  const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isRamp?'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.':isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Controla cumplimiento de Tasks, responsables, evidencia y elegibilidad para el bono semanal.':isPayments?'Managers solicitan; Corporate aprueba; Administration emite únicamente pagos aprobados, con bitácora completa.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.';
+  const isDedicated=isOverview||isRamp||isLabor||isEvidence||isBonus||isPayments||isTransfers||isSettings;
+  const eyebrow=isOverview?'OPERATING PERFORMANCE':isRamp?'FINANCIAL ACCOUNTABILITY':isLabor?'WORKFORCE INTELLIGENCE':isEvidence?'OPERATIONAL VERIFICATION':isBonus?'PERFORMANCE INCENTIVES':isPayments?'PAYMENT CONTROL':isTransfers?'INVENTORY CHAIN OF CUSTODY':isSettings?'ACCESS & SECURITY':'OPERATIONAL INTELLIGENCE';
+  const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isRamp?'Gastos Ramp':isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · 7shifts & Logbook':isBonus?'Bono semanal':isPayments?'Pagos · Approval Workflow':isTransfers?'Transferencias · Restaurant Ledger':isSettings?'Configuración · Roles & Permissions':section;
+  const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isRamp?'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.':isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Controla Tasks, responsables y Logbook por ubicación y periodo.':isBonus?'Scorecard semanal con Tasks, descuentos, voids, overtime y reglas de elegibilidad.':isPayments?'Managers solicitan; Corporate aprueba; Administration emite únicamente pagos aprobados, con bitácora completa.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'Detecta qué requiere atención, entiende la causa y convierte la señal en una acción verificable.';
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -85,7 +86,7 @@ export default function App(){
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{!isDedicated&&<div className="filters"><select value={location} onChange={e=>setLocation(e.target.value)}><option>All locations</option>{allowedLocations.map(loc=><option key={loc}>{loc}</option>)}</select>{permissions.canEscalateActions&&<button className="primary">+ Nueva acción</button>}</div>}</div>
 
-        {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isPayments?<PaymentRequestsView currentUser={currentUser} allowedLocations={allowedLocations}/>:isTransfers?<TransferLedgerView/>:isSettings?<><ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser}/></>:isRamp?<RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isEvidence?<><WeeklyBonusPanel allowedLocations={permissions.allLocations?undefined:allowedLocations}/><EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/></>:<>
+        {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isPayments?<PaymentRequestsView currentUser={currentUser} allowedLocations={allowedLocations}/>:isTransfers?<TransferLedgerView/>:isSettings?<><ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser}/></>:isRamp?<RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isBonus?<WeeklyBonusLivePanel allowedLocations={permissions.allLocations?undefined:allowedLocations}/>:isEvidence?<EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/>:<>
           <section className="metrics-grid">
             <Metric label="ACCESS SCOPE" value={permissions.allLocations?'All':String(allowedLocations.length)} note={permissions.allLocations?'All locations authorized':`${allowedLocations.join(', ')||'No locations'} only`}/>
             <Metric label="AUTO ACTIONS" value={String(autoCount)} note={`${lastRuleRun.suppressed} duplicates suppressed`}/>
