@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
 import { getManagedUser } from './managementStore.js';
 import { authenticateStoredCredential } from './accountStore.js';
+import { getOrganizationMembership } from './organizationStore.js';
 
 export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
@@ -11,6 +12,10 @@ export type SessionUser = {
   role: ServerRole;
   title: string;
   locations: string[];
+  organizationId?: string;
+  organizationName?: string;
+  organizationSlug?: string;
+  clientNumber?: number;
 };
 
 type AuthUserRecord = SessionUser & {
@@ -66,7 +71,8 @@ function effectiveManagedLocations(user: Awaited<ReturnType<typeof getManagedUse
   return Array.from(new Set(grants.filter(grant=>!grant.expiresAt || new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));
 }
 
-function sessionFromManaged(record:{userId:string;email:string}, managed:NonNullable<Awaited<ReturnType<typeof getManagedUser>>>):SessionUser {
+async function sessionFromManaged(record:{userId:string;email:string}, managed:NonNullable<Awaited<ReturnType<typeof getManagedUser>>>):Promise<SessionUser> {
+  const membership = managed.role==='Founder' ? null : await getOrganizationMembership(managed.id);
   return {
     id:managed.id,
     email:managed.email || record.email,
@@ -74,6 +80,7 @@ function sessionFromManaged(record:{userId:string;email:string}, managed:NonNull
     role:managed.role,
     title:managed.title,
     locations:effectiveManagedLocations(managed),
+    ...(membership ?? {}),
   };
 }
 
@@ -103,6 +110,7 @@ export async function authenticateUser(email: string, password: string): Promise
 
   return managed ? sessionFromManaged({userId:record.id,email:record.email},managed) : {
     id:record.id, email:record.email, name:record.name, role:record.role, title:record.title, locations:[...record.locations],
+    organizationId:record.organizationId, organizationName:record.organizationName, organizationSlug:record.organizationSlug, clientNumber:record.clientNumber,
   };
 }
 
