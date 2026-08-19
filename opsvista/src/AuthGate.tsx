@@ -4,9 +4,6 @@ import { demoUsers, type OpsVistaUser } from './accessControl';
 type SessionResponse = { authenticated?: boolean; user?: OpsVistaUser & { email?: string }; error?: string };
 
 function bindAuthenticatedUser(user: OpsVistaUser) {
-  // The current App reads its session identity from demoUsers[0]. Once real auth is active,
-  // replace the preview directory with the one authenticated identity so role switching
-  // cannot be used to elevate the client-side view.
   demoUsers.splice(0, demoUsers.length, user);
 }
 
@@ -40,6 +37,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         setState('error');
       });
   }, []);
+
+  useEffect(() => {
+    if (state !== 'authenticated') return;
+    const logout = async (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const button = target?.closest('button.danger-outline');
+      if (!button || button.textContent?.trim() !== 'Cerrar sesión') return;
+      event.preventDefault();
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined);
+      window.location.reload();
+    };
+    document.addEventListener('click', logout, true);
+    return () => document.removeEventListener('click', logout, true);
+  }, [state]);
 
   const login = async (event: FormEvent) => {
     event.preventDefault();
