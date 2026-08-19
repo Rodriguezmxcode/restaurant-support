@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
-import { getManagedUser } from './managementStore';
-import { authenticateStoredCredential } from './accountStore';
+import { getManagedUser } from './managementStore.js';
+import { authenticateStoredCredential } from './accountStore.js';
 
 export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
@@ -80,7 +80,7 @@ function sessionFromManaged(record:{userId:string;email:string}, managed:NonNull
 export async function authenticateUser(email: string, password: string): Promise<SessionUser | null> {
   const normalizedEmail = email.trim().toLowerCase();
 
-  if (process.env.OPSVISTA_DATABASE_URL) {
+  if (process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL) {
     const stored = await authenticateStoredCredential(normalizedEmail,password);
     if (stored) {
       const managed = await getManagedUser(stored.userId);
@@ -96,7 +96,7 @@ export async function authenticateUser(email: string, password: string): Promise
   if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) return null;
 
   let managed = null;
-  if (process.env.OPSVISTA_DATABASE_URL) {
+  if (process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL) {
     managed = await getManagedUser(record.id);
     if (managed && !managed.active) return null;
   }
