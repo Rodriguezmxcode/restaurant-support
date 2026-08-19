@@ -32,7 +32,7 @@ export default function App(){
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const nav=permissions.modules;
-  const [section,setSection]=useState<OpsVistaModule>('Resumen');
+  const [section,setSection]=useState<OpsVistaModule>(()=>{const saved=typeof window!=='undefined'?window.sessionStorage.getItem('opsvista-section'):null;return (saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
   const [location,setLocation]=useState('All locations');
   const [actions,setActions]=useState(initialActions);
   const [selectedId,setSelectedId]=useState(initialActions[0]?.id??1);
@@ -40,6 +40,7 @@ export default function App(){
   const [lastRuleRun,setLastRuleRun]=useState({evaluated:seededRules.evaluatedSignals,suppressed:seededRules.suppressedDuplicates,created:seededRules.actions.length});
 
   useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);setLocation('All locations')},[currentUser]);
+  useEffect(()=>{window.sessionStorage.setItem('opsvista-section',section)},[section]);
 
   const scopedActions=useMemo(()=>actions.filter(action=>canAccessLocation(currentUser,action.location)),[actions,currentUser]);
   const selected=scopedActions.find(a=>a.id===selectedId)??scopedActions[0];
