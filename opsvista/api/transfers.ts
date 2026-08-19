@@ -7,7 +7,7 @@ const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington']
 function bodyString(value:unknown){return typeof value==='string'?value.trim():'';}
 function isCorporate(role:string){return role==='Founder'||role==='Corporate';}
 function canUseLocation(user:NonNullable<ReturnType<typeof readSession>>,location:string){return isCorporate(user.role)||user.role==='Kitchen'||user.locations.includes(location);}
-function validItems(value:unknown):value is TransferItem[]{return Array.isArray(value)&&value.length>0&&value.every(item=>item&&typeof item==='object'&&typeof (item as TransferItem).name==='string'&&Number.isFinite(Number((item as TransferItem).expectedQty)));}
+function validItems(value:unknown):value is TransferItem[]{return Array.isArray(value)&&value.length>0&&value.every(item=>item&&typeof item==='object'&&typeof (item as TransferItem).name==='string'&&Number.isFinite(Number((item as TransferItem).expectedQty))&&Number.isFinite(Number((item as TransferItem).unitPrice??0)));}
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
   const user=readSession(req.headers?.cookie); if(!user)return res.status(401).json({error:'Authentication required'});
@@ -23,7 +23,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       if(!locations.includes(source)||!locations.includes(destination)||source===destination)return res.status(400).json({error:'Valid source and destination locations are required'});
       if(!canUseLocation(user,source))return res.status(403).json({error:'You cannot dispatch from this location'});
       if(!validItems(req.body?.items))return res.status(400).json({error:'At least one valid transfer item is required'});
-      const items=(req.body?.items as TransferItem[]).map((item,index)=>({id:item.id||`item-${index+1}`,name:item.name.trim(),unit:item.unit?.trim(),expectedQty:Number(item.expectedQty),note:item.note?.trim()}));
+      const items=(req.body?.items as TransferItem[]).map((item,index)=>({id:item.id||`item-${index+1}`,name:item.name.trim(),unit:item.unit?.trim(),unitPrice:Math.max(0,Number(item.unitPrice??0)),expectedQty:Number(item.expectedQty),note:item.note?.trim()}));
       return res.status(201).json({transfer:await createTransfer({sourceLocation:source,destinationLocation:destination,items,notes:notes||undefined},user)});
     }
     if(req.method==='PUT'){
@@ -34,7 +34,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
         const receiptStatus=bodyString(req.body?.receiptStatus) as TransferReceiptStatus; if(!['Complete','Partial','Incomplete'].includes(receiptStatus))return res.status(400).json({error:'Receipt status must be Complete, Partial or Incomplete'});
         const receiverName=bodyString(req.body?.receiverName);if(!receiverName)return res.status(400).json({error:'Receiver name is required'});
         const receivedAt=bodyString(req.body?.receivedAt)||new Date().toISOString(); if(!validItems(req.body?.items))return res.status(400).json({error:'Received item quantities are required'});
-        const items=(req.body?.items as TransferItem[]).map((item,index)=>{const expected=Number(item.expectedQty);const received=Math.max(0,Number(item.receivedQty??0));return {id:item.id||`item-${index+1}`,name:item.name.trim(),unit:item.unit?.trim(),expectedQty:expected,receivedQty:received,shortageQty:Math.max(0,expected-received),note:item.note?.trim()};});
+        const items=(req.body?.items as TransferItem[]).map((item,index)=>{const expected=Number(item.expectedQty);const received=Math.max(0,Number(item.receivedQty??0));return {id:item.id||`item-${index+1}`,name:item.name.trim(),unit:item.unit?.trim(),unitPrice:Math.max(0,Number(item.unitPrice??0)),expectedQty:expected,receivedQty:received,shortageQty:Math.max(0,expected-received),note:item.note?.trim()};});
         const hasShortage=items.some(item=>(item.shortageQty??0)>0); if(receiptStatus==='Complete'&&hasShortage)return res.status(400).json({error:'A Complete receipt cannot contain shortages'});
         return res.status(200).json({transfer:await receiveTransfer(id,{receiptStatus:receiptStatus as Exclude<TransferReceiptStatus,'Pending'>,receiverName,receivedAt,items,notes:bodyString(req.body?.notes)||undefined},user)});
       }
