@@ -21,7 +21,7 @@ function resolveRange(key:RangeKey,customStart:string,customEnd:string){const no
 function Kpi({label,value,note,status='ready'}:{label:string;value:string;note:string;status?:'ready'|'pending'|'warning'}){const accent=status==='warning'?'#b45309':status==='pending'?'#64748b':'#0f766e';return <div style={{background:'#fff',border:'1px solid #dce6f0',borderRadius:14,padding:'16px 17px',minHeight:120,boxShadow:'0 2px 8px rgba(15,23,42,.035)'}}><div style={{fontSize:11,fontWeight:850,letterSpacing:'.055em',color:'#526174'}}>{label}</div><div style={{fontSize:27,fontWeight:850,letterSpacing:'-.035em',color:'#142235',marginTop:9}}>{value}</div><div style={{fontSize:12.5,lineHeight:1.4,color:accent,fontWeight:650,marginTop:7}}>{note}</div></div>}
 
 export default function OperationalOverview({allowedLocations,allLocations,initialLocation='All locations'}:Props){
-  const [range,setRange]=useState<RangeKey>('this-month');const [customStart,setCustomStart]=useState('2026-08-01');const [customEnd,setCustomEnd]=useState('2026-08-19');const [location,setLocation]=useState(initialLocation);
+  const [range,setRange]=useState<RangeKey>('today');const [customStart,setCustomStart]=useState('2026-08-01');const [customEnd,setCustomEnd]=useState('2026-08-19');const [location,setLocation]=useState(initialLocation);
   const [live,setLive]=useState<LiveResponse|null>(null);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
   const resolved=resolveRange(range,customStart,customEnd);
   const visibleBaselineRows=useMemo(()=>baselineRows.filter(r=>allLocations||allowedLocations.includes(r.location)),[allLocations,allowedLocations]);
