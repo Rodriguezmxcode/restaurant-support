@@ -13,7 +13,8 @@
     "vite": "latest",
     "typescript": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "postgres": "^3.4.7"
   },
   "devDependencies": {
     "@types/react": "latest",
