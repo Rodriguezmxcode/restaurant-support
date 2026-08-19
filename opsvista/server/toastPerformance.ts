@@ -107,7 +107,8 @@ export async function getToastPerformance(start:string,end:string,requestedLocat
   if(!entries.length)throw new Error('No Toast restaurant GUIDs are configured for the requested locations');
   const output:PerformanceLocation[]=[];
   for(const [location,guid] of entries){
-    const [orders,labor]=await Promise.all([getOrdersForRange(guid,start,end),getLaborForRange(guid,start,end)]);
+    let orders:ToastOrder[],labor:TimeEntry[];
+    try{[orders,labor]=await Promise.all([getOrdersForRange(guid,start,end),getLaborForRange(guid,start,end)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:"Toast request failed"}`);}
     const sales=summarizeOrders(orders,start,end);
     const laborTotals=summarizeLabor(labor);
     const discountPct=sales.netSales?round(sales.discountAmount/sales.netSales*100):0;
