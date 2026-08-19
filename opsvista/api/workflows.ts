@@ -42,7 +42,12 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  const span=(new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000+1;if(span>14)return res.status(400).json({error:'Task compliance requests are limited to 14 days'});
  const requested=q(req,'location');const allowed=user.role==='Founder'||user.role==='Corporate'||user.role==='Administration'||user.role==='Kitchen'?undefined:user.locations;
  if(requested&&allowed&&!allowed.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
- const scope=requested?[requested]:allowed;const [data,logbook]=await Promise.all([weeklyTaskCompliance(start,end,scope),listSevenShiftsLogbook(start,end,scope)]);return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...data,logbook});
+ const scope=requested?[requested]:allowed;
+ const [tasksResult,logbookResult]=await Promise.allSettled([weeklyTaskCompliance(start,end,scope),listSevenShiftsLogbook(start,end,scope)]);
+ if(tasksResult.status==='rejected')throw tasksResult.reason;
+ const logbook=logbookResult.status==='fulfilled'?logbookResult.value:[];
+ const logbookError=logbookResult.status==='rejected'?(logbookResult.reason instanceof Error?logbookResult.reason.message:'7shifts Logbook unavailable'):undefined;
+ return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...tasksResult.value,logbook,...(logbookError?{logbookError}:{})});
 }
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
