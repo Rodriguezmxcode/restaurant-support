@@ -7,6 +7,7 @@ export type TransferItem = {
   id:string;
   name:string;
   unit?:string;
+  unitPrice?:number;
   expectedQty:number;
   receivedQty?:number;
   shortageQty?:number;
@@ -30,9 +31,7 @@ export type TransferRecord = {
   items:TransferItem[];
   updatedAt:string;
 };
-export type TransferAudit = {
-  id:string;transferId:string;at:string;actorId:string;actorName:string;action:string;before?:string;after?:string;reason:string;
-};
+export type TransferAudit = { id:string;transferId:string;at:string;actorId:string;actorName:string;action:string;before?:string;after?:string;reason:string; };
 
 let client:ReturnType<typeof postgres>|undefined;
 let initialized=false;
@@ -69,17 +68,18 @@ export async function listTransferAudit(transferId:string){await ensureSchema();
 function auditId(){return `tra-${Date.now()}-${Math.random().toString(36).slice(2,9)}`;}
 export async function createTransfer(input:{sourceLocation:string;destinationLocation:string;items:TransferItem[];notes?:string},actor:SessionUser){
   await ensureSchema(); const db=sql(); const id=`TR-${Date.now().toString(36).toUpperCase()}`; const at=new Date().toISOString(); const org=actor.organizationId||'org-puerto-vallarta';
+  const totalValue=input.items.reduce((sum,item)=>sum+(Number(item.unitPrice)||0)*Number(item.expectedQty||0),0);
   await db.begin(async tx=>{
     await tx`insert into opsvista_transfers (id,organization_id,source_location,destination_location,status,receipt_status,created_by_id,created_by_name,created_at,dispatched_at,notes,items)
       values (${id},${org},${input.sourceLocation},${input.destinationLocation},'In Transit','Pending',${actor.id},${actor.name},${at},${at},${input.notes??null},${tx.json(input.items)})`;
     await tx`insert into opsvista_transfer_audit (id,transfer_id,at,actor_id,actor_name,action,after_value,reason)
-      values (${auditId()},${id},${at},${actor.id},${actor.name},'Transfer created',${`${input.sourceLocation} → ${input.destinationLocation}`},'Transfer dispatched')`;
+      values (${auditId()},${id},${at},${actor.id},${actor.name},'Transfer created',${`${input.sourceLocation} → ${input.destinationLocation} · $${totalValue.toFixed(2)}`},'Transfer dispatched')`;
   });
   return getTransfer(id);
 }
 export async function receiveTransfer(id:string,input:{receiptStatus:Exclude<TransferReceiptStatus,'Pending'>;receiverName:string;receivedAt:string;items:TransferItem[];notes?:string},actor:SessionUser){
   await ensureSchema(); const existing=await getTransfer(id); if(!existing)throw new Error('Transfer not found');
-  const status:TransferStatus=input.receiptStatus==='Complete'?'Received':'Received'; const before=`${existing.receiptStatus} · ${existing.receiverName??'No receiver'}`; const after=`${input.receiptStatus} · ${input.receiverName}`;
+  const status:TransferStatus='Received'; const before=`${existing.receiptStatus} · ${existing.receiverName??'No receiver'}`; const receivedValue=input.items.reduce((sum,item)=>sum+(Number(item.unitPrice)||0)*Number(item.receivedQty||0),0); const after=`${input.receiptStatus} · ${input.receiverName} · $${receivedValue.toFixed(2)} received`;
   await sql().begin(async tx=>{
     await tx`update opsvista_transfers set status=${status},receipt_status=${input.receiptStatus},receiver_id=${actor.id},receiver_name=${input.receiverName},received_at=${input.receivedAt},notes=${input.notes??existing.notes??null},items=${tx.json(input.items)},updated_at=now() where id=${id}`;
     await tx`insert into opsvista_transfer_audit (id,transfer_id,at,actor_id,actor_name,action,before_value,after_value,reason)
