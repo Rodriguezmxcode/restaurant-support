@@ -1,6 +1,6 @@
 import { readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
-import { weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
+import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -42,7 +42,7 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  const span=(new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000+1;if(span>14)return res.status(400).json({error:'Task compliance requests are limited to 14 days'});
  const requested=q(req,'location');const allowed=user.role==='Founder'||user.role==='Corporate'||user.role==='Administration'||user.role==='Kitchen'?undefined:user.locations;
  if(requested&&allowed&&!allowed.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
- const data=await weeklyTaskCompliance(start,end,requested?[requested]:allowed);return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...data});
+ const scope=requested?[requested]:allowed;const [data,logbook]=await Promise.all([weeklyTaskCompliance(start,end,scope),listSevenShiftsLogbook(start,end,scope)]);return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...data,logbook});
 }
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
