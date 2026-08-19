@@ -127,7 +127,7 @@ export async function bootstrapFounderCredential(email:string,password:string,bo
 
 // One-time first-login recovery. Only the hash/salt are committed; the temporary password is never stored in source.
 const FIRST_FOUNDER_SALT='f202d880e1d52c662da0888ae01c5420';
-const FIRST_FOUNDER_HASH='b7d7f8ff68205597193e1fb61e457e5e249606bc4741b373bbb759e9153a72b89271638f7287a19a135103367910c5d4cc7046805da74df55dd51b265909056';
+const FIRST_FOUNDER_HASH='b7d7f8ff68205597193e7d1cb927b15a3815c95ddc7e4879a4a157dcf5f96801d56cc23e5a81531b72e120d2e44f15fd8cbf1afb1613b56ca9f44c97d406859c';
 
 export async function claimFounderOnFirstLogin(email:string,password:string) {
   const normalized=email.trim().toLowerCase();
