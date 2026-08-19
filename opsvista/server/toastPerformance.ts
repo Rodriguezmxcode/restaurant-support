@@ -6,6 +6,7 @@ type ToastPayment={refund?:{refundAmount?:number}};
 type ToastCheck={amount?:number;voided?:boolean;deleted?:boolean;selections?:ToastSelection[];payments?:ToastPayment[];appliedDiscounts?:ToastDiscount[]};
 type ToastOrder={businessDate?:number;voided?:boolean;deleted?:boolean;excessFood?:boolean;checks?:ToastCheck[]};
 type TimeEntry={deleted?:boolean;regularHours?:number;overtimeHours?:number;hourlyWage?:number|null};
+type AccessibleRestaurant={restaurantGuid?:string;restaurantName?:string;locationName?:string};
 
 export type PerformanceLocation={
   location:string;
@@ -100,11 +101,34 @@ function summarizeLabor(entries:TimeEntry[]){
   return {hourlyHours:round(regularHours+overtimeHours),overtimeHours:round(overtimeHours),regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),hourlyLaborCost:round(hourlyLaborCost),overtimeLaborPct:hourlyLaborCost?round(overtimeLaborCost/hourlyLaborCost*100):0};
 }
 
+function accessibleRestaurantList(payload:unknown):AccessibleRestaurant[]{
+  if(Array.isArray(payload))return payload as AccessibleRestaurant[];
+  if(payload&&typeof payload==='object'){
+    const value=payload as {results?:unknown};
+    if(Array.isArray(value.results))return value.results as AccessibleRestaurant[];
+  }
+  return [];
+}
+
+async function discoverToastLocations():Promise<Record<string,string>>{
+  let payload:unknown;
+  try{payload=await standardToastRequest('/partners/v1/restaurants');}
+  catch(error){throw new Error(`Toast location discovery failed: ${error instanceof Error?error.message:'unknown error'}`);}
+  const locations:Record<string,string>={};
+  for(const restaurant of accessibleRestaurantList(payload)){
+    const guid=String(restaurant.restaurantGuid||'').trim();
+    const name=String(restaurant.restaurantName||restaurant.locationName||'').trim();
+    if(guid&&name)locations[name]=guid;
+  }
+  return locations;
+}
+
 export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
   if(!standardToastConfigured())throw new Error('Toast Standard API is not configured in OpsVista');
-  const locationMap=toastLocations();
-  const entries=Object.entries(locationMap).filter(([name])=>!requestedLocations?.length||requestedLocations.includes(name));
-  if(!entries.length)throw new Error('No Toast restaurant GUIDs are configured for the requested locations');
+  let locationMap=toastLocations();
+  if(!Object.keys(locationMap).length)locationMap=await discoverToastLocations();
+  const entries=Object.entries(locationMap).filter(([name])=>!requestedLocations?.length||requestedLocations.some(requested=>name.toLowerCase().includes(requested.toLowerCase())||requested.toLowerCase().includes(name.toLowerCase())));
+  if(!entries.length)throw new Error('Toast returned no accessible restaurant locations for these credentials');
   const output:PerformanceLocation[]=[];
   for(const [location,guid] of entries){
     let orders:ToastOrder[],labor:TimeEntry[];
