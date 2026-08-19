@@ -13,13 +13,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
   try {
-    const user = authenticateUser(email, password);
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const user = await authenticateUser(email, password);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials or inactive account' });
     res.setHeader?.('Set-Cookie', sessionCookie(issueSession(user)));
     res.setHeader?.('Cache-Control', 'no-store');
     return res.status(200).json({ user });
   } catch (error) {
     console.error('[OpsVista Auth Login]', error instanceof Error ? error.message : error);
-    return res.status(503).json({ error: 'Authentication is not configured' });
+    return res.status(503).json({ error: 'Authentication or central access directory is not configured' });
   }
 }
