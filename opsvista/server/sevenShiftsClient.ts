@@ -154,8 +154,26 @@ export async function taskDailySummary(locationId:number,locationName:string,dat
   const cid=await resolveCompanyId();
   const iso=`${date}T00:00:00.000Z`;
   const raw=await request(`/company/${cid}/task_list_daily_summary?location_id=${encodeURIComponent(String(locationId))}&date=${encodeURIComponent(iso)}`);
-  const counts=summaryCounts(raw);const accountability=accountabilityFromRaw(raw,date,locationId,locationName);
-  return {date,locationId,locationName,...counts,accountability,detailAvailable:accountability.length>0,raw};
+  let counts=summaryCounts(raw);
+  let accountability=accountabilityFromRaw(raw,date,locationId,locationName);
+  let detailRaw:unknown=raw;
+  if(!accountability.length){
+    const activeRaw=await request(`/company/${cid}/task_lists?location_id=${encodeURIComponent(String(locationId))}&active_on_date=${encodeURIComponent(date)}`);
+    const active=arrayFrom(activeRaw);
+    const details:unknown[]=[];
+    for(const list of active.slice(0,50)){
+      const id=numberField(list,['id','task_list_id']);
+      if(id!==undefined)details.push(await request(`/company/${cid}/task_lists/${id}`));
+      else details.push(list);
+    }
+    if(details.length){
+      detailRaw={data:details};
+      accountability=accountabilityFromRaw(detailRaw,date,locationId,locationName);
+      const detailCounts=summaryCounts(detailRaw);
+      if(!counts.total&&detailCounts.total)counts=detailCounts;
+    }
+  }
+  return {date,locationId,locationName,...counts,accountability,detailAvailable:accountability.length>0,raw:detailRaw};
 }
 
 function datesInclusive(start:string,end:string){const out:string[]=[];const d=new Date(`${start}T00:00:00Z`),last=new Date(`${end}T00:00:00Z`);for(;d<=last;d.setUTCDate(d.getUTCDate()+1))out.push(d.toISOString().slice(0,10));return out;}
