@@ -8,7 +8,7 @@ type Response={source?:string;start?:string;end?:string;total?:number;completed?
 const pct=(v:number|null|undefined)=>v===null||v===undefined?'—':`${v.toFixed(1)}%`;
 const fmtDate=(v:string)=>new Date(`${v}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 
-function operationalWeek(){const now=new Date();const day=now.getDay();const sinceWed=(day-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-sinceWed);const end=new Date(start);end.setDate(start.getDate()+6);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return {start:iso(start),end:iso(end)};}
+function operationalWeek(){const now=new Date();const day=now.getDay();const sinceWed=(day-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-sinceWed);const end=new Date(now.getFullYear(),now.getMonth(),now.getDate());const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return {start:iso(start),end:iso(end)};}
 
 export default function SevenShiftsTasksPanel({allowedLocations}:{allowedLocations?:string[]}){
  const week=useMemo(operationalWeek,[]);const [data,setData]=useState<Response>({});const [loading,setLoading]=useState(true);const [selected,setSelected]=useState('All locations');
