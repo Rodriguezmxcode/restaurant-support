@@ -20,7 +20,7 @@ export function standardToastConfigured(){return !!(process.env.TOAST_API_HOST&&
 export function analyticsToastConfigured(){return !!(process.env.TOAST_ANALYTICS_API_HOST&&process.env.TOAST_ANALYTICS_CLIENT_ID&&process.env.TOAST_ANALYTICS_CLIENT_SECRET);}
 
 function isRestaurantGuid(value:unknown):value is string{
-  return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+  return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
 export function toastLocations():Record<string,string>{
