@@ -13,6 +13,12 @@ function demoFallbackAllowed() {
   return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
 }
 
+function errorText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
 export async function loadRampTransactions(): Promise<RampDataEnvelope> {
   try {
     const response = await fetch('/api/ramp/compliance', {
@@ -22,7 +28,7 @@ export async function loadRampTransactions(): Promise<RampDataEnvelope> {
     });
 
     const payload = await response.json().catch(() => ({})) as RampDataEnvelope & { error?: string; detail?: string };
-    if (!response.ok) throw new Error(payload.detail || payload.error || `Ramp live API returned ${response.status}`);
+    if (!response.ok) throw new Error(errorText(payload.detail) || errorText(payload.error) || `Ramp live API returned ${response.status}`);
     if (!Array.isArray(payload.transactions)) throw new Error('Invalid Ramp payload');
     return { ...payload, source: 'live' };
   } catch (error) {
