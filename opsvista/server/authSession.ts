@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
 import { getManagedUser } from './managementStore';
 
-export type ServerRole = 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
+export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
 export type SessionUser = {
   id: string;
@@ -61,7 +61,8 @@ function effectiveManagedLocations(user: Awaited<ReturnType<typeof getManagedUse
 }
 
 export async function authenticateUser(email: string, password: string): Promise<SessionUser | null> {
-  const record = authUsers().find(user => user.email.toLowerCase() === email.trim().toLowerCase());
+  const normalizedEmail = email.trim().toLowerCase();
+  const record = authUsers().find(user => user.email.toLowerCase() === normalizedEmail);
   if (!record) return null;
   const candidate = scryptSync(password, record.passwordSalt, 64);
   const expected = Buffer.from(record.passwordHash, 'hex');
@@ -75,7 +76,7 @@ export async function authenticateUser(email: string, password: string): Promise
 
   return managed ? {
     id:record.id,
-    email:record.email,
+    email:managed.email || record.email,
     name:managed.name || record.name,
     role:managed.role,
     title:managed.title,
@@ -115,6 +116,6 @@ export function clearSessionCookie() { return `${COOKIE_NAME}=; Path=/; HttpOnly
 export function isRole(user: SessionUser | null, roles: ServerRole[]) { return !!user && roles.includes(user.role); }
 export function canAccessServerLocation(user: SessionUser, location?: string) {
   if (!location) return true;
-  if (['Corporate', 'HR', 'Administration', 'Maintenance'].includes(user.role)) return true;
+  if (['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role)) return true;
   return user.locations.includes(location);
 }
