@@ -39,9 +39,16 @@ function environmentOverride(): Record<string, number> {
   }));
 }
 
+function salaryLocationKey(location: string, override: Record<string, number>) {
+  const normalized = location.toLowerCase();
+  return [...new Set([...Object.keys(SALARY_PAYROLL_HISTORY), ...Object.keys(override)])]
+    .find(key => normalized.includes(key.toLowerCase())) ?? location;
+}
+
 function weeklySalaryForDate(location: string, date: string, override: Record<string, number>) {
-  if (override[location] !== undefined) return override[location];
-  return (SALARY_PAYROLL_HISTORY[location] ?? [])
+  const key = salaryLocationKey(location, override);
+  if (override[key] !== undefined) return override[key];
+  return (SALARY_PAYROLL_HISTORY[key] ?? [])
     .filter(entry => entry.effectiveFrom <= date)
     .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]?.weeklyAmount ?? 0;
 }
