@@ -114,13 +114,11 @@ export async function bootstrapFounderCredential(email:string,password:string,bo
   const founder=await getManagedUser('usr-founder-roberto');
   if (!founder || founder.role!=='Founder' || !founder.active || !founder.email) throw new Error('Founder account is unavailable');
   if (founder.email.toLowerCase()!==email.trim().toLowerCase()) throw new Error('Founder email does not match');
-  const existing=await db`select user_id from opsvista_auth_credentials where user_id=${founder.id} limit 1`;
-  if (existing.length) throw new Error('Founder bootstrap has already been completed');
   const salt=randomBytes(16).toString('hex');
   const hash=scryptSync(password,salt,64).toString('hex');
   await db.begin(async tx=>{
-    await tx`insert into opsvista_auth_credentials (user_id,email,password_salt,password_hash,password_set_at,updated_at) values (${founder.id},${founder.email.toLowerCase()},${salt},${hash},now(),now())`;
-    await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('founder_bootstrap')},now(),${founder.id},${founder.name},${founder.id},${founder.name},'Founder bootstrap completed','Password not established','Founder credential established','Initial one-time Founder account activation.',true)`;
+    await tx`insert into opsvista_auth_credentials (user_id,email,password_salt,password_hash,password_set_at,updated_at) values (${founder.id},${founder.email.toLowerCase()},${salt},${hash},now(),now()) on conflict (user_id) do update set email=excluded.email,password_salt=excluded.password_salt,password_hash=excluded.password_hash,password_set_at=now(),updated_at=now()`;
+    await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('founder_bootstrap')},now(),${founder.id},${founder.name},${founder.id},${founder.name},'Founder credential recovered','Existing credential protected','Founder credential replaced','Founder securely activated or recovered access using the configured bootstrap code.',true)`;
   });
   return founder;
 }
