@@ -150,14 +150,15 @@ function accountabilityFromRaw(raw:unknown,date:string,locationId:number,locatio
   walk(raw,'root');return out;
 }
 
-export async function taskDailySummary(locationId:number,locationName:string,date:string):Promise<SevenShiftsTaskDay>{
+export async function taskDailySummary(locationId:number,locationName:string,date:string,includeDetail=true):Promise<SevenShiftsTaskDay>{
   const cid=await resolveCompanyId();
   const iso=`${date}T00:00:00.000Z`;
   const raw=await request(`/company/${cid}/task_list_daily_summary?location_id=${encodeURIComponent(String(locationId))}&date=${encodeURIComponent(iso)}`);
   let counts=summaryCounts(raw);
   let accountability=accountabilityFromRaw(raw,date,locationId,locationName);
   let detailRaw:unknown=raw;
-  if(!accountability.length){
+  if(includeDetail&&!accountability.length){
+   try{
     const activeRaw=await request(`/company/${cid}/task_lists?location_id=${encodeURIComponent(String(locationId))}&active_on_date=${encodeURIComponent(date)}`);
     const active=arrayFrom(activeRaw);
     const details:unknown[]=[];
@@ -172,6 +173,7 @@ export async function taskDailySummary(locationId:number,locationName:string,dat
       const detailCounts=summaryCounts(detailRaw);
       if(!counts.total&&detailCounts.total)counts=detailCounts;
     }
+   }catch{ /* Summary remains usable when task-list detail is unavailable on the current 7shifts plan. */ }
   }
   return {date,locationId,locationName,...counts,accountability,detailAvailable:accountability.length>0,raw:detailRaw};
 }
@@ -183,9 +185,9 @@ export async function weeklyTaskCompliance(start:string,end:string,locationNames
   const wanted=locationNames?.length?all.filter(l=>locationNames.some(n=>n.localeCompare(l.name,undefined,{sensitivity:'base'})===0)):all;
   const dates=datesInclusive(start,end);
   const locations:SevenShiftsLocationWeek[]=[];
+  const includeDetail=wanted.length===1;
   for(const loc of wanted){
-    const days:SevenShiftsTaskDay[]=[];
-    for(const date of dates)days.push(await taskDailySummary(loc.id,loc.name,date));
+    const days:SevenShiftsTaskDay[]=await Promise.all(dates.map(date=>taskDailySummary(loc.id,loc.name,date,includeDetail)));
     const total=days.reduce((s,d)=>s+d.total,0),completed=days.reduce((s,d)=>s+d.completed,0);const accountability=days.flatMap(d=>d.accountability);
     locations.push({locationId:loc.id,locationName:loc.name,total,completed,incomplete:Math.max(0,total-completed),completionPct:total>0?completed/total*100:null,accountability,detailAvailable:accountability.length>0,days});
   }
