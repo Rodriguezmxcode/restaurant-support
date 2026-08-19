@@ -1,4 +1,5 @@
 import { readSession } from '../../server/authSession.js';
+import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastPerformance } from '../../server/toastPerformance.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
@@ -22,28 +23,52 @@ export default async function handler(req:Req,res:Res){
     requested=[location];
   }else if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role))requested=user.locations;
   try{
-    const locations=await getToastPerformance(start,end,requested);
+    const toastLocations=await getToastPerformance(start,end,requested);
+    const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
+    const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
+    const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
+    const locations=toastLocations.map(row=>{
+      const salaryRow=salaryByLocation.get(row.location);
+      const salaryLaborCost=salaryRow?.salaryLaborCost??0;
+      const totalLaborCost=row.hourlyLaborCost+salaryLaborCost;
+      return {
+        ...row,
+        salaryLaborCost,
+        totalLaborCost:round(totalLaborCost),
+        hourlyLaborPct:row.netSales?round(row.hourlyLaborCost/row.netSales*100):0,
+        salaryLaborPct:row.netSales?round(salaryLaborCost/row.netSales*100):0,
+        totalLaborPct:row.netSales?round(totalLaborCost/row.netSales*100):0,
+      };
+    });
     const totals=locations.reduce((acc,row)=>({
       netSales:acc.netSales+row.netSales,discountAmount:acc.discountAmount+row.discountAmount,voidAmount:acc.voidAmount+row.voidAmount,
       hourlyHours:acc.hourlyHours+row.hourlyHours,overtimeHours:acc.overtimeHours+row.overtimeHours,regularLaborCost:acc.regularLaborCost+row.regularLaborCost,
       overtimeLaborCost:acc.overtimeLaborCost+row.overtimeLaborCost,hourlyLaborCost:acc.hourlyLaborCost+row.hourlyLaborCost,
-    }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0});
-    const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
+      salaryLaborCost:acc.salaryLaborCost+row.salaryLaborCost,totalLaborCost:acc.totalLaborCost+row.totalLaborCost,
+    }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
-      source:'Toast Standard API',start,end,locations,
+      source:'Toast Standard API + OpsVista salary allocation',start,end,locations,
+      salaryLaborConfigured:salary.configured,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,
         voidPct:totals.netSales?round(totals.voidAmount/totals.netSales*100):0,
         laborPct:totals.netSales?round(totals.hourlyLaborCost/totals.netSales*100):0,
+        hourlyLaborPct:totals.netSales?round(totals.hourlyLaborCost/totals.netSales*100):0,
+        salaryLaborPct:totals.netSales?round(totals.salaryLaborCost/totals.netSales*100):0,
+        totalLaborPct:totals.netSales?round(totals.totalLaborCost/totals.netSales*100):0,
         overtimeLaborPct:totals.hourlyLaborCost?round(totals.overtimeLaborCost/totals.hourlyLaborCost*100):0,
         splh:totals.hourlyHours?round(totals.netSales/totals.hourlyHours):null
       },
-      notes:{salaryLabor:'Salary labor is not available from Toast Standard time entries when hourlyWage is null.',tasks:'Tasks require the 7shifts production feed.',overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.'}
+      notes:{
+        salaryLabor:salary.configured?'Weekly salaries allocated proportionally across the selected date range.':'Configure OPSVISTA_WEEKLY_SALARY_LABOR_JSON with the real weekly salary cost by location.',
+        tasks:'Tasks require the 7shifts production feed.',
+        overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.'
+      }
     });
   }catch(error){
     const message=error instanceof Error?error.message:'Performance source unavailable';
     const configuration=message.includes('not configured')||message.includes('GUID');
-    return res.status(configuration?503:502).json({error:message,configurationRequired:configuration,requiredEnvironmentVariables:['TOAST_API_HOST','TOAST_CLIENT_ID','TOAST_CLIENT_SECRET','TOAST_LOCATION_GUIDS_JSON']});
+    return res.status(configuration?503:502).json({error:message,configurationRequired:configuration,requiredEnvironmentVariables:['TOAST_API_HOST','TOAST_CLIENT_ID','TOAST_CLIENT_SECRET','TOAST_LOCATION_GUIDS_JSON','OPSVISTA_WEEKLY_SALARY_LABOR_JSON']});
   }
 }
