@@ -45,8 +45,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const message = error instanceof Error ? error.message : 'Unable to load Ramp compliance data';
     console.error('[OpsVista Ramp Compliance]', message);
     return res.status(502).json({
-      error: 'Ramp data unavailable',
-      detail: process.env.NODE_ENV === 'development' ? message : undefined,
+      error: `Ramp data unavailable: ${message}`,
+      detail: message,
     });
   }
 }
