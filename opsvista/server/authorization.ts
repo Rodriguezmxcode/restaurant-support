@@ -10,10 +10,15 @@ export type ServerCapability =
   | 'actions:verify'
   | 'automation:run'
   | 'payments:approve'
-  | 'users:manage';
+  | 'users:manage'
+  | 'platform:admin'
+  | 'integrations:manage';
+
+const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','automation:run','payments:approve','users:manage'];
 
 const capabilities: Record<ServerRole, ServerCapability[]> = {
-  Corporate: ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','automation:run','payments:approve','users:manage'],
+  Founder: [...operational,'platform:admin','integrations:manage'],
+  Corporate: operational,
   'Location Manager': ['labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify'],
   Kitchen: ['evidence:read','evidence:review','actions:read','actions:write','actions:verify'],
   HR: ['labor:read','actions:read','actions:write'],
@@ -21,7 +26,7 @@ const capabilities: Record<ServerRole, ServerCapability[]> = {
   Maintenance: ['evidence:read','actions:read','actions:write','actions:verify'],
 };
 
-const globalLocationRoles: ServerRole[] = ['Corporate','HR','Administration','Maintenance'];
+const globalLocationRoles: ServerRole[] = ['Founder','Corporate','HR','Administration','Maintenance'];
 
 export function hasCapability(user: SessionUser, capability: ServerCapability) {
   return capabilities[user.role].includes(capability);
