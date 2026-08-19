@@ -6,6 +6,7 @@ import OpsVistaCopilot from './OpsVistaCopilot';
 import VerificationLoopPanel from './VerificationLoopPanel';
 import AccessControlPanel from './AccessControlPanel';
 import InvitationManager from './InvitationManager';
+import ChangePasswordPanel from './ChangePasswordPanel';
 import { demoAutomationSignals, runActionRules, type SignalSource } from './actionRules';
 import type { VerificationStatus } from './verificationLoop';
 import { canAccessLocation, demoUsers, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
@@ -97,6 +98,11 @@ export default function App() {
     setLastRuleRun({ evaluated:result.evaluatedSignals, suppressed:result.suppressedDuplicates, created:result.actions.length });
   };
 
+  const logout = async () => {
+    try { await fetch('/api/auth/logout',{method:'POST',credentials:'include'}); }
+    finally { window.location.assign('/'); }
+  };
+
   const openCount = scopedActions.filter(a=>!['Completed','Dismissed'].includes(a.status)).length;
   const highCount = scopedActions.filter(a=>a.severity==='High'&&!['Completed','Dismissed'].includes(a.status)).length;
   const autoCount = scopedActions.filter(a=>a.automated&&!['Completed','Dismissed'].includes(a.status)).length;
@@ -122,13 +128,13 @@ export default function App() {
     <main>
       <header className="topbar">
         <div className="search-wrap"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={isIntelligenceModule?'Buscar en OpsVista...':'Buscar incidente, ubicación o responsable...'} /></div>
-        <div className="top-actions"><select value={currentUser.id} onChange={e=>setCurrentUser(demoUsers.find(u=>u.id===e.target.value)??currentUser)} title="Preview role access">{demoUsers.map(user=><option key={user.id} value={user.id}>{user.role}</option>)}</select><button>↻ Actualizar datos</button><button className="danger-outline">Cerrar sesión</button><div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
+        <div className="top-actions"><select value={currentUser.id} onChange={e=>setCurrentUser(demoUsers.find(u=>u.id===e.target.value)??currentUser)} title="Preview role access">{demoUsers.map(user=><option key={user.id} value={user.id}>{user.role}</option>)}</select><button onClick={()=>window.location.reload()}>↻ Actualizar datos</button><button className="danger-outline" onClick={logout}>Cerrar sesión</button><div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
       </header>
 
       <div className="page">
         <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{!isIntelligenceModule&&<div className="filters"><select value={location} onChange={e=>setLocation(e.target.value)}><option>All locations</option>{allowedLocations.map(loc=><option key={loc}>{loc}</option>)}</select>{permissions.canEscalateActions&&<button className="primary">+ Nueva acción</button>}</div>}</div>
 
-        {isSettings ? <><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser} /></> : isRamp ? <RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined} /> : isLabor ? <LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined} /> : isEvidence ? <EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined} /> : <>
+        {isSettings ? <><ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onChangeUser={setCurrentUser} /></> : isRamp ? <RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined} /> : isLabor ? <LaborIntelligenceView allowedLocations={permissions.allLocations?undefined:allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined} /> : isEvidence ? <EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined} /> : <>
           <section className="metrics-grid">
             <Metric label="ACCESS SCOPE" value={permissions.allLocations?'All':String(allowedLocations.length)} note={permissions.allLocations?'All locations authorized':`${allowedLocations.join(', ') || 'No locations'} only`} />
             <Metric label="AUTO ACTIONS" value={String(autoCount)} note={`${lastRuleRun.suppressed} duplicates suppressed`} />
