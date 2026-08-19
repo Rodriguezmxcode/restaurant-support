@@ -2,6 +2,13 @@ import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
 
 export type ServerRole = 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
+export type ServerLocationGrant = {
+  location: string;
+  type: 'Primary' | 'Additional';
+  expiresAt?: string;
+  note?: string;
+};
+
 export type SessionUser = {
   id: string;
   name: string;
@@ -9,6 +16,7 @@ export type SessionUser = {
   role: ServerRole;
   title: string;
   locations: string[];
+  locationGrants?: ServerLocationGrant[];
 };
 
 type AuthUserRecord = SessionUser & {
@@ -102,8 +110,19 @@ export function isRole(user: SessionUser | null, roles: ServerRole[]) {
   return !!user && roles.includes(user.role);
 }
 
+export function activeServerLocations(user: SessionUser, now = new Date()) {
+  const grants = user.locationGrants?.length
+    ? user.locationGrants
+    : user.locations.map((location, index) => ({ location, type: index === 0 ? 'Primary' : 'Additional' } as ServerLocationGrant));
+  return Array.from(new Set(
+    grants
+      .filter(grant => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now.getTime())
+      .map(grant => grant.location),
+  ));
+}
+
 export function canAccessServerLocation(user: SessionUser, location?: string) {
   if (!location) return true;
   if (['Corporate', 'HR', 'Administration', 'Maintenance'].includes(user.role)) return true;
-  return user.locations.includes(location);
+  return activeServerLocations(user).includes(location);
 }
