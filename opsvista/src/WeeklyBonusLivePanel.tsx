@@ -9,7 +9,7 @@ type Row={location:string;tasks?:number;discounts?:number;voids?:number;ot?:numb
 
 const locationsDefault=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const pct=(v:number|undefined,digits=1)=>v===undefined?'Pending':`${v.toFixed(digits)}%`;
-function operationalWeek(){const now=new Date();const day=now.getDay();const since=(day-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-since);const end=new Date(start);end.setDate(start.getDate()+6);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{start:iso(start),end:iso(end)};}
+function operationalWeek(){const now=new Date();const day=now.getDay();const since=(day-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-since);const end=new Date(now.getFullYear(),now.getMonth(),now.getDate());const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{start:iso(start),end:iso(end)};}
 
 export default function WeeklyBonusLivePanel({allowedLocations}:{allowedLocations?:string[]}){
   const week=useMemo(operationalWeek,[]);const [tasks,setTasks]=useState<TaskResponse>({});const [toast,setToast]=useState<ToastResponse>({});const [loading,setLoading]=useState(true);
@@ -20,8 +20,8 @@ export default function WeeklyBonusLivePanel({allowedLocations}:{allowedLocation
     if(sr.status==='fulfilled'){const b=await sr.value.json().catch(()=>({})) as ToastResponse;setToast(b);}else setToast({error:'Toast unavailable'});
     setLoading(false);};void run();return()=>{cancelled=true};},[week.start,week.end]);
   const rows=useMemo<Row[]>(()=>scope.map(location=>{
-    const t=tasks.locations?.find(x=>x.locationName.localeCompare(location,undefined,{sensitivity:'base'})===0)?.completionPct??undefined;
-    const s=toast.locations?.find(x=>x.location.localeCompare(location,undefined,{sensitivity:'base'})===0);
+    const t=tasks.locations?.find(x=>x.locationName.toLowerCase().includes(location.toLowerCase())||location.toLowerCase().includes(x.locationName.toLowerCase()))?.completionPct??undefined;
+    const s=toast.locations?.find(x=>x.location.toLowerCase().includes(location.toLowerCase())||location.toLowerCase().includes(x.location.toLowerCase()));
     const result=calculateWeeklyBonus({tasksPct:t??undefined,discountsPct:s?.discountPct,voidsPct:s?.voidPct,overtimeLaborPct:s?.overtimeLaborPct});
     const ready=result.metrics.filter(m=>m.ready);return{location,tasks:t??undefined,discounts:s?.discountPct,voids:s?.voidPct,ot:s?.overtimeLaborPct,points:ready.reduce((n,m)=>n+(m.points??0),0),availableMax:ready.reduce((n,m)=>n+m.weight,0),failed:result.eligibilityReasons};
   }),[scope.join('|'),tasks,toast]);
