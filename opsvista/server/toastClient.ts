@@ -19,10 +19,19 @@ async function authenticate(host:string,clientId:string,clientSecret:string,cach
 export function standardToastConfigured(){return !!(process.env.TOAST_API_HOST&&process.env.TOAST_CLIENT_ID&&process.env.TOAST_CLIENT_SECRET&&process.env.TOAST_LOCATION_GUIDS_JSON);}
 export function analyticsToastConfigured(){return !!(process.env.TOAST_ANALYTICS_API_HOST&&process.env.TOAST_ANALYTICS_CLIENT_ID&&process.env.TOAST_ANALYTICS_CLIENT_SECRET);}
 
+function isRestaurantGuid(value:unknown):value is string{
+  return typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 export function toastLocations():Record<string,string>{
   const raw=process.env.TOAST_LOCATION_GUIDS_JSON;
   if(!raw)return {};
-  try{return JSON.parse(raw) as Record<string,string>;}catch{throw new Error('TOAST_LOCATION_GUIDS_JSON must be valid JSON');}
+  let parsed:unknown;
+  try{parsed=JSON.parse(raw);}catch{throw new Error('TOAST_LOCATION_GUIDS_JSON must be valid JSON');}
+  if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw new Error('TOAST_LOCATION_GUIDS_JSON must map each location name to its Toast restaurant GUID');
+  const locations=Object.fromEntries(Object.entries(parsed as Record<string,unknown>).filter(([,guid])=>isRestaurantGuid(guid)).map(([name,guid])=>[name,(guid as string).trim()]));
+  if(!Object.keys(locations).length)throw new Error('TOAST_LOCATION_GUIDS_JSON has no valid restaurant GUIDs. Use {"Stamford":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}; do not include clientId, clientSecret, or userAccessType.');
+  return locations;
 }
 
 export async function standardToastRequest(path:string,restaurantGuid?:string){
