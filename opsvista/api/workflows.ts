@@ -6,7 +6,7 @@ import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
-const WORKFLOW_VERSION='7shifts-workflow-v4';
+const WORKFLOW_VERSION='7shifts-workflow-v5';
 const text=(v:unknown)=>typeof v==='string'?v.trim():'';
 const q=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query?.[key] as string).trim():'';
 const isApprover=(role:string)=>role==='Founder'||role==='Corporate';
