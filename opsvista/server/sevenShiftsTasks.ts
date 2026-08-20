@@ -28,7 +28,7 @@ function isCompleted(task:any){
 export async function getSevenShiftsTaskCompliance(start:string,end:string){
   const companyId=process.env.SEVENSHIFTS_COMPANY_ID;
   if(!companyId)throw new Error('SEVENSHIFTS_COMPANY_ID is not configured');
-  const locationsPayload:any=await request(`/v2/company/${companyId}/locations?limit=200`);
+  const locationsPayload:any=await request(`/v2/company/${companyId}/locations?limit=100`);
   const locations=rows(locationsPayload);
   const totals=new Map<string,{location:string;completed:number;total:number}>();
   for(const location of locations){
