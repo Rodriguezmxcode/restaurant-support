@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import './laborIntelligence.css';
+import ScheduleOvertimeMonitor, { type ScheduleRisk } from './ScheduleOvertimeMonitor';
 
 type LaborEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:'High'|'Medium'|'Low'};
 type Props={onEscalate?:(item:LaborEscalation)=>void;allowedLocations?:string[]};
 type LiveRow={location:string;netSales:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
-type LiveResponse={start:string;end:string;locations:LiveRow[];error?:string};
+type LiveResponse={start:string;end:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
 type Insight=LiveRow&{targetLaborPct:number;gap:number;estimatedExcess:number;severity:'Healthy'|'Watch'|'Action'};
 
 const money=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value);
 const pct=(value:number)=>`${value.toFixed(1)}%`;
 const targetFor=(location:string)=>/Avon|Southington|Danbury/i.test(location)?22:21;
-function operationalRange(){const now=new Date();const since=(now.getDay()-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-since);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{start:iso(start),end:iso(now)}}
+function operationalRange(){const now=new Date();const since=(now.getDay()-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-since);const scheduleEnd=new Date(start.getFullYear(),start.getMonth(),start.getDate()+6);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{start:iso(start),end:iso(now),schedule_end:iso(scheduleEnd)}}
 
 export default function LaborIntelligenceView({onEscalate,allowedLocations}:Props){
   const range=useMemo(operationalRange,[]);
@@ -24,7 +25,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
     const params=new URLSearchParams(range);
     fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as LiveResponse;if(!response.ok)throw new Error(body.error||'Live labor data unavailable');setData(body)}).catch(e=>{if(e?.name!=='AbortError')setError(e instanceof Error?e.message:'Live labor data unavailable')}).finally(()=>setLoading(false));
     return()=>controller.abort();
-  },[range.start,range.end]);
+  },[range.start,range.end,range.schedule_end]);
 
   const rows=useMemo<Insight[]>(()=>((data?.locations||[])
     .filter(row=>!allowedLocations?.length||allowedLocations.some(location=>row.location.toLowerCase().includes(location.toLowerCase())))
@@ -45,6 +46,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
       <article className="labor-card"><span>NEEDS ACTION</span><strong>{rows.filter(r=>r.severity==='Action').length}</strong><p>{rows.filter(r=>r.severity==='Watch').length} additional watch locations</p></article>
     </section>
     <section className="labor-guidance"><div><strong>OpsVista Labor Guardrail</strong><span>Review actual demand, required positions, service levels, prep and closing standards before reducing hours.</span></div><div className="labor-guide-chips"><span>Live sales</span><span>Hourly + salary</span><span>Total labor %</span><span>SPLH</span><span>Overtime</span></div></section>
+    <ScheduleOvertimeMonitor data={data?.scheduleRisk||null} error={data?.scheduleRiskError} loading={loading} onEscalate={onEscalate}/>
     <section className="labor-panel"><div className="labor-panel-head"><div><h2>Live Labor Intelligence by Location</h2><p>Actual performance for the selected operating period.</p></div><span>{rows.length} locations</span></div>
       <div className="labor-table-wrap"><table className="labor-table"><thead><tr><th>Location</th><th>Net Sales</th><th>Hourly Labor</th><th>Salary Labor</th><th>Total Labor</th><th>Target</th><th>SPLH</th><th>OT Hours</th><th>Above Target</th><th>Status</th><th></th></tr></thead>
       <tbody>{rows.map(row=><tr key={row.location} className={row.severity==='Action'?'labor-action-row':''}><td><strong>{row.location}</strong></td><td>{money(row.netSales)}</td><td>{money(row.hourlyLaborCost)} · {pct(row.hourlyLaborPct)}</td><td>{money(row.salaryLaborCost)} · {pct(row.salaryLaborPct)}</td><td><strong className={row.gap>1?'labor-negative':''}>{money(row.totalLaborCost)} · {pct(row.totalLaborPct)}</strong></td><td>{pct(row.targetLaborPct)}</td><td>{row.splh?money(row.splh):'—'}</td><td>{row.overtimeHours.toFixed(1)}h</td><td className="labor-money">{money(row.estimatedExcess)}</td><td><span className={`labor-status ${row.severity.toLowerCase()}`}>{row.severity}</span></td><td><button onClick={()=>setSelected(row)}>Review</button></td></tr>)}</tbody></table></div>

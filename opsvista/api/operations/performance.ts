@@ -2,6 +2,7 @@ import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastPerformance } from '../../server/toastPerformance.js';
 import { getSevenShiftsTaskCompliance } from '../../server/sevenShiftsTasks.js';
+import { getSevenShiftsScheduleRisk } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -13,9 +14,10 @@ export default async function handler(req:Req,res:Res){
   if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
-  const start=asString(req.query?.start),end=asString(req.query?.end),location=asString(req.query?.location);
+  const start=asString(req.query?.start),end=asString(req.query?.end),scheduleEnd=asString(req.query?.schedule_end)||end,location=asString(req.query?.location);
   if(!validDate(start)||!validDate(end))return res.status(400).json({error:'start and end must use YYYY-MM-DD'});
   if(new Date(start)>new Date(end))return res.status(400).json({error:'start must be before end'});
+  if(!validDate(scheduleEnd)||new Date(start)>new Date(scheduleEnd))return res.status(400).json({error:'schedule_end must use YYYY-MM-DD and be on or after start'});
   const days=Math.floor((new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000)+1;
   if(days>31)return res.status(400).json({error:'Date ranges are limited to 31 days for live Toast polling'});
   let requested:string[]|undefined;
@@ -24,10 +26,13 @@ export default async function handler(req:Req,res:Res){
     requested=[location];
   }else if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role))requested=user.locations;
   try{
-    const toastLocations=await getToastPerformance(start,end,requested);
-    let taskCompliance:Awaited<ReturnType<typeof getSevenShiftsTaskCompliance>>|null=null;
-    let taskComplianceError='';
-    try{taskCompliance=await getSevenShiftsTaskCompliance(start,end);}catch(taskError){taskComplianceError=taskError instanceof Error?taskError.message:'7shifts data unavailable';}
+    const [toastLocations,taskResult,scheduleResult]=await Promise.all([
+      getToastPerformance(start,end,requested),
+      getSevenShiftsTaskCompliance(start,end).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})),
+      getSevenShiftsScheduleRisk(start,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
+    ]);
+    const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
+    const scheduleRisk=scheduleResult.data,scheduleRiskError=scheduleResult.error;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
@@ -52,7 +57,7 @@ export default async function handler(req:Req,res:Res){
     }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
       source:'Toast Standard API + OpsVista salary allocation',start,end,locations,
-      salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,
+      salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,

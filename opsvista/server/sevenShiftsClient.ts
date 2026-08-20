@@ -55,7 +55,7 @@ async function oauthToken(){
   if(oauthCache&&oauthCache.expiresAt>Date.now()+60_000)return oauthCache.token;
   const id=oauthClientId(),secret=oauthClientSecret();
   if(!id||!secret)throw new Error('7shifts credentials are not configured');
-  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'v1_access companies:read locations:read users:read shifts:read'});
+  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'v1_access companies:read locations:read users:read roles:read shifts:read time_punches:read'});
   const res=await fetch('https://app.7shifts.com/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const json=await res.json().catch(()=>({})) as Json;
   if(!res.ok||typeof json.access_token!=='string')throw new Error(`7shifts OAuth failed (${res.status})`);
@@ -83,6 +83,29 @@ function arrayFrom(value:unknown):Json[]{
   return [];
 }
 
+function nextCursor(value:unknown){
+  if(!value||typeof value!=='object')return '';
+  const meta=(value as Json).meta;
+  if(!meta||typeof meta!=='object')return '';
+  const cursor=(meta as Json).cursor;
+  if(!cursor||typeof cursor!=='object')return '';
+  const next=(cursor as Json).next;
+  return typeof next==='string'?next:'';
+}
+
+async function requestAll(path:string,maxPages=20){
+  const rows:Json[]=[];let cursor='';const seen=new Set<string>();
+  for(let page=0;page<maxPages;page++){
+    const separator=path.includes('?')?'&':'?';
+    const raw=await request(`${path}${cursor?`${separator}cursor=${encodeURIComponent(cursor)}`:''}`);
+    rows.push(...arrayFrom(raw));
+    const next=nextCursor(raw);
+    if(!next||seen.has(next))break;
+    seen.add(next);cursor=next;
+  }
+  return rows;
+}
+
 export async function resolveCompanyId(){
   if(resolvedCompanyIdCache)return resolvedCompanyIdCache;
   const configured=companyId();if(configured)return configured;
@@ -98,6 +121,153 @@ export async function listSevenShiftsLocations(){
   for(const cid of candidates){try{const rows=arrayFrom(await request(`/company/${cid}/locations?limit=100`));const locations=rows.map(r=>({id:Number(r.id),name:String(r.name||`Location ${r.id}`)})).filter(r=>Number.isFinite(r.id)&&r.id>0);if(locations.length){resolvedCompanyIdCache=cid;return locations;}}catch(error){lastError=error;}}
   if(lastError)throw lastError;
   throw new Error('7shifts authenticated successfully but returned 0 locations. Verify that the access token belongs to the Puerto Vallarta company account and that its technical contact is an active company admin.');
+}
+
+export type SevenShiftsScheduleShift={
+  id:number;
+  start:string;
+  end:string;
+  location:string;
+  role:string;
+};
+
+export type SevenShiftsEmployeeScheduleRisk={
+  userId:number;
+  employeeName:string;
+  primaryLocation:string;
+  locations:string[];
+  role:string;
+  workedHours:number;
+  scheduledHours:number;
+  remainingScheduledHours:number;
+  projectedHours:number;
+  overtimeHours:number;
+  hourlyWage:number;
+  estimatedOvertimeCost:number;
+  nextShift?:SevenShiftsScheduleShift;
+  status:'Overtime'|'Risk'|'Safe';
+};
+
+export type SevenShiftsLocationScheduleRisk={
+  location:string;
+  monitoredEmployees:number;
+  riskEmployees:number;
+  projectedOvertimeHours:number;
+  estimatedOvertimeCost:number;
+};
+
+export type SevenShiftsScheduleRisk={
+  start:string;
+  end:string;
+  generatedAt:string;
+  thresholdHours:number;
+  scheduledHours:number;
+  riskEmployees:number;
+  projectedOvertimeHours:number;
+  estimatedOvertimeCost:number;
+  employees:SevenShiftsEmployeeScheduleRisk[];
+  locations:SevenShiftsLocationScheduleRisk[];
+};
+
+type ScheduleAccumulator={
+  userId:number;
+  employeeName:string;
+  locations:Map<string,number>;
+  roles:Map<string,number>;
+  workedHours:number;
+  scheduledHours:number;
+  remainingScheduledHours:number;
+  wageCentsWeighted:number;
+  wageHours:number;
+  userWageCents:number;
+  nextShift?:SevenShiftsScheduleShift;
+};
+
+function roundHours(value:number){return Math.round((value+Number.EPSILON)*10)/10;}
+function roundMoney(value:number){return Math.round((value+Number.EPSILON)*100)/100;}
+function dateMs(value:unknown){const ms=typeof value==='string'?Date.parse(value):NaN;return Number.isFinite(ms)?ms:NaN;}
+function hoursBetween(start:unknown,end:unknown){const a=dateMs(start),b=dateMs(end);return Number.isFinite(a)&&Number.isFinite(b)&&b>a?(b-a)/3_600_000:0;}
+function breakHours(value:unknown){
+  if(!Array.isArray(value))return 0;
+  return value.reduce((sum,item)=>{
+    if(!item||typeof item!=='object')return sum;
+    const row=item as Json;
+    const explicit=numberField(row,['duration_minutes','minutes','break_minutes']);
+    if(explicit!==undefined)return sum+Math.max(0,explicit/60);
+    return sum+hoursBetween(stringField(row,['start','clocked_in','break_start']),stringField(row,['end','clocked_out','break_end']));
+  },0);
+}
+function displayName(user:Json,userId:number){return [user.preferred_first_name||user.first_name,user.preferred_last_name||user.last_name].filter(Boolean).join(' ').trim()||String(user.email||`Employee ${userId}`);}
+function addWeighted(map:Map<string,number>,key:string,hours:number){if(key)map.set(key,(map.get(key)||0)+Math.max(0,hours));}
+function highestWeighted(map:Map<string,number>,fallback:string){return Array.from(map.entries()).sort((a,b)=>b[1]-a[1])[0]?.[0]||fallback;}
+
+export async function getSevenShiftsScheduleRisk(start:string,end:string,locationNames?:string[]):Promise<SevenShiftsScheduleRisk>{
+  const cid=await resolveCompanyId();
+  const allLocations=await listSevenShiftsLocations();
+  const wanted=locationNames?.length?allLocations.filter(location=>locationNames.some(name=>name.toLowerCase()===location.name.toLowerCase()||location.name.toLowerCase().includes(name.toLowerCase())||name.toLowerCase().includes(location.name.toLowerCase()))):allLocations;
+  if(!wanted.length)throw new Error('7shifts returned no authorized locations for the schedule monitor');
+  const wantedIds=new Set(wanted.map(location=>location.id));
+  const locationMap=new Map(wanted.map(location=>[location.id,location.name]));
+  const endExclusive=new Date(`${end}T00:00:00.000Z`);endExclusive.setUTCDate(endExclusive.getUTCDate()+1);
+  const rangeStart=`${start}T00:00:00.000Z`,rangeEnd=endExclusive.toISOString();
+  const shiftQuery=new URLSearchParams({limit:'500','start[gte]':rangeStart,'start[lte]':rangeEnd,include_draft:'false',deleted:'false',consider_tz_in_ranges:'true'});
+  const punchQuery=new URLSearchParams({limit:'500',business_date_start:start,business_date_end:end,deleted:'false',localize_search_time:'true'});
+  const [users,roles,shifts,punches]=await Promise.all([
+    requestAll(`/company/${cid}/users?status=active&limit=500`),
+    requestAll(`/company/${cid}/roles?limit=500`),
+    requestAll(`/company/${cid}/shifts?${shiftQuery.toString()}`),
+    requestAll(`/company/${cid}/time_punches?${punchQuery.toString()}`),
+  ]);
+  const userMap=new Map(users.map(user=>[Number(user.id),user]));
+  const roleMap=new Map(roles.map(role=>[Number(role.id),String(role.name||`Role ${role.id}`)]));
+  const accumulators=new Map<number,ScheduleAccumulator>();
+  const ensure=(userId:number)=>{
+    const user=userMap.get(userId)||{};
+    let row=accumulators.get(userId);
+    if(!row){row={userId,employeeName:displayName(user,userId),locations:new Map(),roles:new Map(),workedHours:0,scheduledHours:0,remainingScheduledHours:0,wageCentsWeighted:0,wageHours:0,userWageCents:Number(user.hourly_wage)||0};accumulators.set(userId,row);}
+    return row;
+  };
+  const now=Math.min(Date.now(),dateMs(rangeEnd));
+  for(const shift of shifts){
+    const locationId=Number(shift.location_id),userId=Number(shift.user_id);
+    if(!wantedIds.has(locationId)||!Number.isFinite(userId)||userId<=0||shift.deleted===true||shift.draft===true||shift.open===true||shift.unassigned===true)continue;
+    const startMs=dateMs(shift.start),endMs=dateMs(shift.end);
+    if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs)continue;
+    const duration=Math.max(0,(endMs-startMs)/3_600_000-breakHours(shift.breaks));
+    const location=locationMap.get(locationId)||`Location ${locationId}`;
+    const role=roleMap.get(Number(shift.role_id))||String(shift.station_name||'Unassigned role');
+    const row=ensure(userId);row.scheduledHours+=duration;addWeighted(row.locations,location,duration);addWeighted(row.roles,role,duration);
+    if(endMs>now){
+      const remaining=startMs>=now?duration:duration*Math.max(0,Math.min(1,(endMs-now)/(endMs-startMs)));
+      row.remainingScheduledHours+=remaining;
+      const candidate={id:Number(shift.id)||0,start:String(shift.start),end:String(shift.end),location,role};
+      if(!row.nextShift||dateMs(candidate.start)<dateMs(row.nextShift.start))row.nextShift=candidate;
+    }
+    const wage=Number(shift.hourly_wage)||0;if(wage>0&&duration>0){row.wageCentsWeighted+=wage*duration;row.wageHours+=duration;}
+  }
+  for(const punch of punches){
+    const locationId=Number(punch.location_id),userId=Number(punch.user_id);
+    if(!wantedIds.has(locationId)||!Number.isFinite(userId)||userId<=0||punch.deleted===true)continue;
+    const clockedIn=String(punch.clocked_in||''),clockedOut=String(punch.clocked_out||new Date(now).toISOString());
+    const duration=Math.max(0,hoursBetween(clockedIn,clockedOut)-breakHours(punch.breaks));if(!duration)continue;
+    const location=locationMap.get(locationId)||`Location ${locationId}`;
+    const role=roleMap.get(Number(punch.role_id))||'Unassigned role';
+    const row=ensure(userId);row.workedHours+=duration;addWeighted(row.locations,location,duration);addWeighted(row.roles,role,duration);
+    const wage=Number(punch.hourly_wage)||0;if(wage>0){row.wageCentsWeighted+=wage*duration;row.wageHours+=duration;}
+  }
+  const thresholdHours=40;
+  const employees=Array.from(accumulators.values()).map<SevenShiftsEmployeeScheduleRisk>(row=>{
+    const projectedHours=row.workedHours+row.remainingScheduledHours;
+    const overtimeHours=Math.max(0,projectedHours-thresholdHours);
+    const wageCents=row.userWageCents>0?row.userWageCents:(row.wageHours?row.wageCentsWeighted/row.wageHours:0);
+    const primaryLocation=row.nextShift?.location||highestWeighted(row.locations,'Unknown location');
+    return {userId:row.userId,employeeName:row.employeeName,primaryLocation,locations:Array.from(row.locations.keys()).sort(),role:row.nextShift?.role||highestWeighted(row.roles,'Unassigned role'),workedHours:roundHours(row.workedHours),scheduledHours:roundHours(row.scheduledHours),remainingScheduledHours:roundHours(row.remainingScheduledHours),projectedHours:roundHours(projectedHours),overtimeHours:roundHours(overtimeHours),hourlyWage:roundMoney(wageCents/100),estimatedOvertimeCost:roundMoney(overtimeHours*wageCents/100*1.5),nextShift:row.nextShift,status:overtimeHours>0?'Overtime':projectedHours>=38?'Risk':'Safe'};
+  }).sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours||a.employeeName.localeCompare(b.employeeName));
+  const locations=Array.from(locationMap.values()).map<SevenShiftsLocationScheduleRisk>(location=>{
+    const rows=employees.filter(employee=>employee.primaryLocation===location);
+    return {location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+employee.estimatedOvertimeCost,0))};
+  }).sort((a,b)=>b.projectedOvertimeHours-a.projectedOvertimeHours||a.location.localeCompare(b.location));
+  return {start,end,generatedAt:new Date().toISOString(),thresholdHours,scheduledHours:roundHours(employees.reduce((sum,employee)=>sum+employee.scheduledHours,0)),riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(employees.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+employee.estimatedOvertimeCost,0)),employees,locations};
 }
 
 function numberField(o:Json,names:string[]){for(const name of names){const v=Number(o[name]);if(Number.isFinite(v))return v;}return undefined;}
