@@ -70,7 +70,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     event.preventDefault(); setMessage('');
     if(password.length<12){setMessage('Password must be at least 12 characters.');return;}
     if(password!==confirmPassword){setMessage('Passwords do not match.');return;}
-    const response=await fetch('/api/auth/founder-bootstrap',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,bootstrapSecret})});
+    const response=await fetch('/api/auth/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,bootstrapSecret,mode:'founder-recovery'})});
     const body=await response.json().catch(()=>({})) as SessionResponse;
     if(!response.ok||!body.user){setMessage(body.error||'Unable to activate Founder account.');return;}
     bindAuthenticatedUser(body.user); setPassword('');setConfirmPassword('');setBootstrapSecret('');
