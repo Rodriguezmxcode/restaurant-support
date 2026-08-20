@@ -6,6 +6,7 @@ import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
+const WORKFLOW_VERSION='7shifts-workflow-v4';
 const text=(v:unknown)=>typeof v==='string'?v.trim():'';
 const q=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query?.[key] as string).trim():'';
 const isApprover=(role:string)=>role==='Founder'||role==='Corporate';
@@ -15,15 +16,23 @@ const validDate=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v);
 
 function operationalWeek(){const now=new Date();const day=now.getUTCDay();const since=(day-3+7)%7;const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-since));const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
 
+const diagnostic=(error:unknown)=>error instanceof Error?error.message:String(error||'Unknown 7shifts error');
+const normalizedLocation=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/puerto\s+vallarta|mexican\s+restaurant|restaurant/g,'').replace(/[^a-z0-9]/g,'');
+const sameLocation=(left:string,right:string)=>{const a=normalizedLocation(left),b=normalizedLocation(right);return Boolean(a&&b&&(a===b||a.includes(b)||b.includes(a)))};
+
 async function taskComplianceWithFallback(start:string,end:string,scope?:string[]){
  let primary:Awaited<ReturnType<typeof weeklyTaskCompliance>>|undefined;
- try{primary=await weeklyTaskCompliance(start,end,scope);if(primary.total>0||primary.locations.length>0)return{...primary,adapterVersion:'7shifts-summary-v3',taskSource:'daily-summary'};}catch{/* Try the task-list adapter before reporting the connection as unavailable. */}
+ let primaryError='';
+ try{primary=await weeklyTaskCompliance(start,end,scope);if(primary.locations.length>0)return{...primary,adapterVersion:WORKFLOW_VERSION,taskSource:'daily-summary',availableLocationCount:primary.locations.length};}catch(error){primaryError=diagnostic(error);}
+ let fallbackError='';
  try{
   const fallback=await getSevenShiftsTaskCompliance(start,end);
-  const requested=scope?.length?fallback.locations.filter(row=>scope.some(name=>name.toLowerCase()===row.location.toLowerCase()||row.location.toLowerCase().includes(name.toLowerCase())||name.toLowerCase().includes(row.location.toLowerCase()))):fallback.locations;
-  if(fallback.totals.total>0||requested.length>0){const total=requested.reduce((sum,row)=>sum+row.total,0),completed=requested.reduce((sum,row)=>sum+row.completed,0);return{companyId:Number(process.env.SEVENSHIFTS_COMPANY_ID)||primary?.companyId||0,start,end,total,completed,incomplete:Math.max(0,total-completed),completionPct:total>0?completed/total*100:null,detailAvailable:false,accountability:[],people:[],locations:requested.map((row,index)=>({locationId:index+1,locationName:row.location,total:row.total,completed:row.completed,incomplete:Math.max(0,row.total-row.completed),completionPct:row.total>0?row.completed/row.total*100:null,accountability:[],detailAvailable:false,days:[]})),adapterVersion:'7shifts-task-lists-v3',taskSource:'active-task-lists'};}
- }catch{/* The primary diagnostic below remains authoritative when the fallback is unavailable. */}
- throw new Error(`7shifts authenticated but returned no locations or task lists for ${start} through ${end}. Verify SEVENSHIFTS_ACCESS_TOKEN and SEVENSHIFTS_COMPANY_ID against Company Settings → Developer Tools in the Puerto Vallarta 7shifts account.`);
+  const requested=scope?.length?fallback.locations.filter(row=>scope.some(name=>sameLocation(name,row.location))):fallback.locations;
+  if(scope?.length&&fallback.locations.length>0&&!requested.length)throw new Error(`7shifts location mapping failed. Requested: ${scope.join(', ')}. Available in 7shifts: ${fallback.locations.map(row=>row.location).join(', ')}`);
+  if(requested.length>0){const total=requested.reduce((sum,row)=>sum+row.total,0),completed=requested.reduce((sum,row)=>sum+row.completed,0);return{companyId:Number(process.env.SEVENSHIFTS_COMPANY_ID)||primary?.companyId||0,start,end,total,completed,incomplete:Math.max(0,total-completed),completionPct:total>0?completed/total*100:null,detailAvailable:false,accountability:[],people:[],locations:requested.map((row,index)=>({locationId:index+1,locationName:row.location,total:row.total,completed:row.completed,incomplete:Math.max(0,row.total-row.completed),completionPct:row.total>0?row.completed/row.total*100:null,accountability:[],detailAvailable:false,days:[]})),adapterVersion:WORKFLOW_VERSION,taskSource:'active-task-lists',availableLocationCount:requested.length};}
+  fallbackError='7shifts returned zero locations';
+ }catch(error){fallbackError=diagnostic(error);}
+ throw new Error(`7shifts Tasks unavailable for ${start} through ${end}. Daily summary: ${primaryError||'no location rows'}. Task Lists fallback: ${fallbackError||'no location rows'}.`);
 }
 
 async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
@@ -63,6 +72,7 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
 }
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
+ res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
  try{if(resource==='payments')return await payments(req,res,user);if(resource==='tasks')return await tasks(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':'payments';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
