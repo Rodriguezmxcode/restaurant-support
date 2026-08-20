@@ -1,6 +1,7 @@
 import { readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
+import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -13,6 +14,17 @@ const canUseLocation=(u:NonNullable<ReturnType<typeof readSession>>,location:str
 const validDate=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v);
 
 function operationalWeek(){const now=new Date();const day=now.getUTCDay();const since=(day-3+7)%7;const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-since));const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
+
+async function taskComplianceWithFallback(start:string,end:string,scope?:string[]){
+ let primary:Awaited<ReturnType<typeof weeklyTaskCompliance>>|undefined;
+ try{primary=await weeklyTaskCompliance(start,end,scope);if(primary.total>0||primary.locations.length>0)return{...primary,adapterVersion:'7shifts-summary-v3',taskSource:'daily-summary'};}catch{/* Try the task-list adapter before reporting the connection as unavailable. */}
+ try{
+  const fallback=await getSevenShiftsTaskCompliance(start,end);
+  const requested=scope?.length?fallback.locations.filter(row=>scope.some(name=>name.toLowerCase()===row.location.toLowerCase()||row.location.toLowerCase().includes(name.toLowerCase())||name.toLowerCase().includes(row.location.toLowerCase()))):fallback.locations;
+  if(fallback.totals.total>0||requested.length>0){const total=requested.reduce((sum,row)=>sum+row.total,0),completed=requested.reduce((sum,row)=>sum+row.completed,0);return{companyId:Number(process.env.SEVENSHIFTS_COMPANY_ID)||primary?.companyId||0,start,end,total,completed,incomplete:Math.max(0,total-completed),completionPct:total>0?completed/total*100:null,detailAvailable:false,accountability:[],people:[],locations:requested.map((row,index)=>({locationId:index+1,locationName:row.location,total:row.total,completed:row.completed,incomplete:Math.max(0,row.total-row.completed),completionPct:row.total>0?row.completed/row.total*100:null,accountability:[],detailAvailable:false,days:[]})),adapterVersion:'7shifts-task-lists-v3',taskSource:'active-task-lists'};}
+ }catch{/* The primary diagnostic below remains authoritative when the fallback is unavailable. */}
+ throw new Error(`7shifts authenticated but returned no locations or task lists for ${start} through ${end}. Verify SEVENSHIFTS_ACCESS_TOKEN and SEVENSHIFTS_COMPANY_ID against Company Settings → Developer Tools in the Puerto Vallarta 7shifts account.`);
+}
 
 async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(!req.method||req.method==='GET'){
@@ -43,7 +55,7 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  const requested=q(req,'location');const allowed=user.role==='Founder'||user.role==='Corporate'||user.role==='Administration'||user.role==='Kitchen'?undefined:user.locations;
  if(requested&&allowed&&!allowed.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
  const scope=requested?[requested]:allowed;
- const [tasksResult,logbookResult]=await Promise.allSettled([weeklyTaskCompliance(start,end,scope),listSevenShiftsLogbook(start,end,scope)]);
+ const [tasksResult,logbookResult]=await Promise.allSettled([taskComplianceWithFallback(start,end,scope),listSevenShiftsLogbook(start,end,scope)]);
  if(tasksResult.status==='rejected')throw tasksResult.reason;
  const logbook=logbookResult.status==='fulfilled'?logbookResult.value:[];
  const logbookError=logbookResult.status==='rejected'?(logbookResult.reason instanceof Error?logbookResult.reason.message:'7shifts Logbook unavailable'):undefined;
