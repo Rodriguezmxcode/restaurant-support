@@ -15,7 +15,7 @@ function selectedRange(key:Period,customStart:string,customEnd:string){const now
 
 export default function WeeklyBonusLivePanel({allowedLocations}:{allowedLocations?:string[]}){
   const today=iso(new Date());
-  const [period,setPeriod]=useState<Period>(()=>{if(typeof window==='undefined')return'today';const saved=window.localStorage.getItem('opsvista-bonus-period')??window.sessionStorage.getItem('opsvista-bonus-period');return saved&&['today','yesterday','this-week','previous-week','this-month','last-30-days','custom'].includes(saved)?saved as Period:'today'});
+  const [period,setPeriod]=useState<Period>(()=>{if(typeof window==='undefined'||!window.localStorage.getItem('opsvista-bonus-period-v2'))return'today';const saved=window.localStorage.getItem('opsvista-bonus-period')??window.sessionStorage.getItem('opsvista-bonus-period');return saved&&['today','yesterday','this-week','previous-week','this-month','last-30-days','custom'].includes(saved)?saved as Period:'today'});
   const [customStart,setCustomStart]=useState(()=>typeof window!=='undefined'?(window.localStorage.getItem('opsvista-bonus-custom-start')||today):today);
   const [customEnd,setCustomEnd]=useState(()=>typeof window!=='undefined'?(window.localStorage.getItem('opsvista-bonus-custom-end')||today):today);
   const [selected,setSelected]=useState(()=>typeof window!=='undefined'?window.sessionStorage.getItem('opsvista-bonus-location')||'All locations':'All locations');
@@ -24,7 +24,7 @@ export default function WeeklyBonusLivePanel({allowedLocations}:{allowedLocation
   const rangeError=!range.start||!range.end||rangeDays<1?'Selecciona una fecha inicial y final válidas.':rangeDays>31?'El rango personalizado puede incluir hasta 31 días.':undefined;
   const [tasks,setTasks]=useState<TaskResponse>({});const [toast,setToast]=useState<ToastResponse>({});const [loading,setLoading]=useState(true);
   const scope=allowedLocations?.length?allowedLocations:locationsDefault;
-  useEffect(()=>{window.sessionStorage.setItem('opsvista-bonus-period',period);window.localStorage.setItem('opsvista-bonus-period',period);window.localStorage.setItem('opsvista-bonus-custom-start',customStart);window.localStorage.setItem('opsvista-bonus-custom-end',customEnd)},[period,customStart,customEnd]);
+  useEffect(()=>{window.sessionStorage.setItem('opsvista-bonus-period',period);window.localStorage.setItem('opsvista-bonus-period',period);window.localStorage.setItem('opsvista-bonus-period-v2','1');window.localStorage.setItem('opsvista-bonus-custom-start',customStart);window.localStorage.setItem('opsvista-bonus-custom-end',customEnd)},[period,customStart,customEnd]);
   useEffect(()=>{window.sessionStorage.setItem('opsvista-bonus-location',selected)},[selected]);
   useEffect(()=>{if(selected!=='All locations'&&!scope.includes(selected))setSelected('All locations')},[selected,scope.join('|')]);
   useEffect(()=>{if(rangeError){setLoading(false);return}let cancelled=false;const run=async()=>{setLoading(true);const qs=new URLSearchParams({start:range.start,end:range.end});const [tr,sr]=await Promise.allSettled([fetch(`/api/tasks/weekly?${qs}`,{credentials:'include',cache:'no-store'}),fetch(`/api/operations/performance?${qs}`,{credentials:'include',cache:'no-store'})]);
