@@ -32,7 +32,7 @@ export default function App(){
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const nav=permissions.modules;
-  const [section,setSection]=useState<OpsVistaModule>(()=>{const saved=typeof window!=='undefined'?window.sessionStorage.getItem('opsvista-section'):null;return (saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
+  const [section,setSection]=useState<OpsVistaModule>(()=>{const saved=typeof window!=='undefined'?(window.localStorage.getItem('opsvista-section')??window.sessionStorage.getItem('opsvista-section')):null;return (saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
   const [location,setLocation]=useState('All locations');
   const [actions,setActions]=useState(initialActions);
   const [selectedId,setSelectedId]=useState(initialActions[0]?.id??1);
@@ -40,7 +40,7 @@ export default function App(){
   const [lastRuleRun,setLastRuleRun]=useState({evaluated:seededRules.evaluatedSignals,suppressed:seededRules.suppressedDuplicates,created:seededRules.actions.length});
 
   useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);setLocation('All locations')},[currentUser]);
-  useEffect(()=>{window.sessionStorage.setItem('opsvista-section',section)},[section]);
+  useEffect(()=>{window.sessionStorage.setItem('opsvista-section',section);window.localStorage.setItem('opsvista-section',section)},[section]);
 
   const scopedActions=useMemo(()=>actions.filter(action=>canAccessLocation(currentUser,action.location)),[actions,currentUser]);
   const selected=scopedActions.find(a=>a.id===selectedId)??scopedActions[0];
@@ -50,6 +50,7 @@ export default function App(){
   const escalateExternal=(item:ExternalEscalation,category:string)=>{if(!permissions.canEscalateActions||!canAccessLocation(currentUser,item.location))return;setActions(items=>{const nextId=Math.max(0,...items.map(a=>a.id))+1;setSelectedId(nextId);return [...items,{...item,id:nextId,category,status:'Open',verificationStatus:'Pending'}]});setSection('Action Center');setLocation('All locations');setSearch('')};
   const runRulesNow=()=>{if(!permissions.canRunAutomation)return;const result=runActionRules(demoAutomationSignals.filter(signal=>canAccessLocation(currentUser,signal.location)),actions);if(result.actions.length)setActions(items=>{let nextId=Math.max(0,...items.map(a=>a.id));return [...items,...result.actions.map(action=>({...action,id:++nextId,status:'Open' as const,verificationStatus:'Pending' as const}))]});setLastRuleRun({evaluated:result.evaluatedSignals,suppressed:result.suppressedDuplicates,created:result.actions.length})};
   const logout=async()=>{try{await fetch('/api/auth/logout',{method:'POST',credentials:'include'})}finally{window.location.assign('/')}};
+  const refreshData=()=>{window.sessionStorage.setItem('opsvista-section',section);window.localStorage.setItem('opsvista-section',section);window.location.reload()};
 
   const openCount=scopedActions.filter(a=>!['Completed','Dismissed'].includes(a.status)).length;
   const highCount=scopedActions.filter(a=>a.severity==='High'&&!['Completed','Dismissed'].includes(a.status)).length;
@@ -80,7 +81,7 @@ export default function App(){
     <main>
       <header className="topbar">
         <div className="search-wrap"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={isDedicated?'Buscar en OpsVista...':'Buscar incidente, ubicación o responsable...'}/></div>
-        <div className="top-actions"><select value={currentUser.id} onChange={e=>setCurrentUser(demoUsers.find(u=>u.id===e.target.value)??currentUser)} title="Preview role access">{demoUsers.map(user=><option key={user.id} value={user.id}>{user.role}</option>)}</select><button onClick={()=>window.location.reload()}>↻ Actualizar datos</button><button className="danger-outline" onClick={logout}>Cerrar sesión</button><div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
+        <div className="top-actions"><select value={currentUser.id} onChange={e=>setCurrentUser(demoUsers.find(u=>u.id===e.target.value)??currentUser)} title="Preview role access">{demoUsers.map(user=><option key={user.id} value={user.id}>{user.role}</option>)}</select><button onClick={refreshData}>↻ Actualizar datos</button><button className="danger-outline" onClick={logout}>Cerrar sesión</button><div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
       </header>
 
       <div className="page">
