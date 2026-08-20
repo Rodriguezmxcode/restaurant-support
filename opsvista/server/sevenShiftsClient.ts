@@ -95,7 +95,7 @@ export async function listSevenShiftsLocations(){
   const candidates:number[]=[];const configured=companyId();if(configured)candidates.push(configured);
   try{for(const company of arrayFrom(await request('/companies'))){const id=Number(company.id);if(Number.isFinite(id)&&id>0&&!candidates.includes(id))candidates.push(id);}}catch(error){if(!candidates.length)throw error;}
   let lastError:unknown;
-  for(const cid of candidates){try{const rows=arrayFrom(await request(`/company/${cid}/locations?limit=500`));const locations=rows.map(r=>({id:Number(r.id),name:String(r.name||`Location ${r.id}`)})).filter(r=>Number.isFinite(r.id)&&r.id>0);if(locations.length){resolvedCompanyIdCache=cid;return locations;}}catch(error){lastError=error;}}
+  for(const cid of candidates){try{const rows=arrayFrom(await request(`/company/${cid}/locations?limit=100`));const locations=rows.map(r=>({id:Number(r.id),name:String(r.name||`Location ${r.id}`)})).filter(r=>Number.isFinite(r.id)&&r.id>0);if(locations.length){resolvedCompanyIdCache=cid;return locations;}}catch(error){lastError=error;}}
   if(lastError)throw lastError;
   throw new Error('7shifts authenticated successfully but returned 0 locations. Verify that the access token belongs to the Puerto Vallarta company account and that its technical contact is an active company admin.');
 }
@@ -157,8 +157,7 @@ function accountabilityFromRaw(raw:unknown,date:string,locationId:number,locatio
 
 export async function taskDailySummary(locationId:number,locationName:string,date:string,includeDetail=true):Promise<SevenShiftsTaskDay>{
   const cid=await resolveCompanyId();
-  const iso=`${date}T00:00:00.000Z`;
-  const raw=await request(`/company/${cid}/task_list_daily_summary?location_id=${encodeURIComponent(String(locationId))}&date=${encodeURIComponent(iso)}`);
+  const raw=await request(`/company/${cid}/task_list_daily_summary?location_id=${encodeURIComponent(String(locationId))}&date=${encodeURIComponent(date)}`);
   let counts=summaryCounts(raw);
   let accountability=accountabilityFromRaw(raw,date,locationId,locationName);
   let detailRaw:unknown=raw;
@@ -221,9 +220,9 @@ export async function listSevenShiftsLogbook(start:string,end:string,locationNam
   const wanted=locationNames?.length?locations.filter(l=>locationNames.some(n=>n.toLowerCase()===l.name.toLowerCase()||l.name.toLowerCase().includes(n.toLowerCase())||n.toLowerCase().includes(l.name.toLowerCase()))):locations;
   const locationMap=new Map(wanted.map(l=>[l.id,l.name]));
   const [postsRaw,categoriesRaw,usersRaw]=await Promise.all([
-    request(`/company/${cid}/log_book_posts?posted_date_gte=${encodeURIComponent(start)}&posted_date_lte=${encodeURIComponent(end)}&order_field=date&order_dir=desc&limit=200`),
+    request(`/company/${cid}/log_book_posts?posted_date_gte=${encodeURIComponent(start)}&posted_date_lte=${encodeURIComponent(end)}&order_field=date&order_dir=desc&limit=100`),
     request(`/company/${cid}/log_book_categories`),
-    request(`/company/${cid}/users?limit=500`),
+    request(`/company/${cid}/users?limit=100`),
   ]);
   const categories=new Map(arrayFrom(categoriesRaw).map(row=>[Number(row.id),String(row.name||'Logbook')]));
   const users=new Map(arrayFrom(usersRaw).map(row=>[Number(row.id),[row.preferred_first_name||row.first_name,row.preferred_last_name||row.last_name].filter(Boolean).join(' ').trim()||String(row.email||`User ${row.id}`)]));
