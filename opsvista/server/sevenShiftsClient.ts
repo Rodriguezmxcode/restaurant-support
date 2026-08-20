@@ -145,7 +145,7 @@ function accountabilityFromRaw(raw:unknown,date:string,locationId:number,locatio
     const dueAt=stringField(o,['due_at','dueAt','due_time','dueTime','deadline']);
     const hasCompletionSignal=explicitCompleted!==undefined||status==='completed'||status==='complete'||!!completedAt||userId!==undefined;
     if(taskName&&hasCompletionSignal){
-      const completed=explicitCompleted??status==='completed'||status==='complete'||!!completedAt;
+      const completed=explicitCompleted??(status==='completed'||status==='complete'||!!completedAt);
       const key=`${date}:${locationId}:${taskId??path}:${taskName}`;
       if(!seen.has(key)){seen.add(key);let late: boolean|undefined; if(completedAt&&dueAt){const c=Date.parse(completedAt),d=Date.parse(dueAt);if(Number.isFinite(c)&&Number.isFinite(d))late=c>d;}
         out.push({key,date,locationId,locationName,taskId,taskName,userId,userName,completed,completedAt,late});}
