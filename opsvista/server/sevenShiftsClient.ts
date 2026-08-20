@@ -50,11 +50,12 @@ function oauthClientId(){return env('SEVENSHIFTS_CLIENT_ID')||env('SEVEN_SHIFTS_
 function oauthClientSecret(){return env('SEVENSHIFTS_CLIENT_SECRET')||env('SEVEN_SHIFTS_CLIENT_SECRET');}
 
 let oauthCache:{token:string;expiresAt:number}|undefined;
+let resolvedCompanyIdCache:number|undefined;
 async function oauthToken(){
   if(oauthCache&&oauthCache.expiresAt>Date.now()+60_000)return oauthCache.token;
   const id=oauthClientId(),secret=oauthClientSecret();
   if(!id||!secret)throw new Error('7shifts credentials are not configured');
-  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'companies:read locations:read users:read'});
+  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'v1_access companies:read locations:read users:read shifts:read'});
   const res=await fetch('https://app.7shifts.com/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const json=await res.json().catch(()=>({})) as Json;
   if(!res.ok||typeof json.access_token!=='string')throw new Error(`7shifts OAuth failed (${res.status})`);
@@ -67,8 +68,8 @@ async function request(path:string){
   const headers:Record<string,string>={Authorization:`Bearer ${t}`,'x-api-version':VERSION,Accept:'application/json'};
   if(!accessToken()&&companyGuid())headers['x-company-guid']=companyGuid();
   const res=await fetch(`${API}${path}`,{headers,cache:'no-store'});
-  const json=await res.json().catch(()=>({})) as unknown;
-  if(!res.ok)throw new Error(`7shifts request failed (${res.status})`);
+  const text=await res.text();let json:unknown={};try{json=text?JSON.parse(text):{};}catch{json={message:text};}
+  if(!res.ok){const detail=json&&typeof json==='object'?String((json as Json).detail||(json as Json).message||(json as Json).title||'').trim():'';throw new Error(`7shifts request failed (${res.status})${detail?`: ${detail.slice(0,300)}`:''}`);}
   return json;
 }
 
@@ -83,6 +84,7 @@ function arrayFrom(value:unknown):Json[]{
 }
 
 export async function resolveCompanyId(){
+  if(resolvedCompanyIdCache)return resolvedCompanyIdCache;
   const configured=companyId();if(configured)return configured;
   const companies=arrayFrom(await request('/companies'));
   const id=Number(companies[0]?.id);if(!Number.isFinite(id)||id<=0)throw new Error('Unable to resolve 7shifts company id');
@@ -90,9 +92,12 @@ export async function resolveCompanyId(){
 }
 
 export async function listSevenShiftsLocations(){
-  const cid=await resolveCompanyId();
-  const rows=arrayFrom(await request(`/company/${cid}/locations`));
-  return rows.map(r=>({id:Number(r.id),name:String(r.name||`Location ${r.id}`)})).filter(r=>Number.isFinite(r.id)&&r.id>0);
+  const candidates:number[]=[];const configured=companyId();if(configured)candidates.push(configured);
+  try{for(const company of arrayFrom(await request('/companies'))){const id=Number(company.id);if(Number.isFinite(id)&&id>0&&!candidates.includes(id))candidates.push(id);}}catch(error){if(!candidates.length)throw error;}
+  let lastError:unknown;
+  for(const cid of candidates){try{const rows=arrayFrom(await request(`/company/${cid}/locations?limit=500`));const locations=rows.map(r=>({id:Number(r.id),name:String(r.name||`Location ${r.id}`)})).filter(r=>Number.isFinite(r.id)&&r.id>0);if(locations.length){resolvedCompanyIdCache=cid;return locations;}}catch(error){lastError=error;}}
+  if(lastError)throw lastError;
+  throw new Error('7shifts authenticated successfully but returned 0 locations. Verify that the access token belongs to the Puerto Vallarta company account and that its technical contact is an active company admin.');
 }
 
 function numberField(o:Json,names:string[]){for(const name of names){const v=Number(o[name]);if(Number.isFinite(v))return v;}return undefined;}
@@ -109,10 +114,10 @@ function summaryCounts(raw:unknown){
   let total=0,completed=0,found=false;
   for(const o of candidates){
     const t=numberField(o,['total','total_tasks','task_count','tasks_count','total_count']);
-    const c=numberField(o,['completed','completed_tasks','completed_count','tasks_completed']);
+    const c=numberField(o,['completed','completed_tasks','completed_count','tasks_completed','total_tasks_completed']);
     if(t!==undefined||c!==undefined){total=Math.max(total,t??0);completed=Math.max(completed,c??0);found=true;}
     const taskLists=o.task_lists||o.taskLists||o.lists;
-    if(Array.isArray(taskLists))for(const item of taskLists){if(!item||typeof item!=='object')continue;const q=item as Json;const qt=numberField(q,['total','total_tasks','task_count','tasks_count','total_count']);const qc=numberField(q,['completed','completed_tasks','completed_count','tasks_completed']);if(qt!==undefined||qc!==undefined){total+=(qt??0);completed+=(qc??0);found=true;}}
+    if(Array.isArray(taskLists))for(const item of taskLists){if(!item||typeof item!=='object')continue;const q=item as Json;const qt=numberField(q,['total','total_tasks','task_count','tasks_count','total_count']);const qc=numberField(q,['completed','completed_tasks','completed_count','tasks_completed','total_tasks_completed']);if(qt!==undefined||qc!==undefined){total+=(qt??0);completed+=(qc??0);found=true;}}
   }
   if(!found&&raw&&typeof raw==='object'&&Array.isArray((raw as Json).data)){
     const rows=(raw as Json).data as unknown[];
@@ -230,4 +235,3 @@ export async function listSevenShiftsLogbook(start:string,end:string,locationNam
     return [{id:Number.isFinite(id)?id:0,date:stringField(row,['date','posted_date','created'])?.slice(0,10)||start,locationId,locationName:locationMap.get(locationId)||`Location ${locationId}`,userId,author:userId!==undefined?(users.get(userId)||`User ${userId}`):'Unknown author',categoryId,category:categoryId!==undefined?(categories.get(categoryId)||'Logbook'):'Logbook',message:stringField(row,['message','content','text'])||'',attachments}];
   });
 }
-
