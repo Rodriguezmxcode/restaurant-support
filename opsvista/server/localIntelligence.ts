@@ -181,11 +181,11 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
   const trafficByName = byName(trafficRows);
   const eventsByName = byName(eventRows);
 
-  const rows = selected.map(place => {
+  const rows = await Promise.all(selected.map(async place => {
     const weatherSource = weatherByName.get(place.name);
     const trafficSource = trafficByName.get(place.name);
     const eventsSource = eventsByName.get(place.name);
-    const weather = weatherSource ? {
+    let weather = weatherSource ? {
       provider: String(weatherSource.provider || 'The Weather Company'),
       temperature: Number(weatherSource.temperature ?? 0),
       feelsLike: Number(weatherSource.feels ?? weatherSource.feelsLike ?? weatherSource.temperature ?? 0),
@@ -194,6 +194,13 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
       phrase: String(weatherSource.phrase || (Number(weatherSource.precipitation ?? 0) > 0 ? 'Precipitación activa' : 'Sin precipitación activa')),
       updatedAt: String(weatherSource.updated || weatherSource.updatedAt || new Date().toISOString()),
     } : null;
+    if (!weather) {
+      try {
+        weather = await getWeather(place);
+      } catch {
+        weather = null;
+      }
+    }
     const traffic = trafficSource ? {
       provider: 'TomTom Traffic',
       currentSpeed: Number(trafficSource.currentSpeed ?? 0),
@@ -219,7 +226,7 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
       errors: { weather: '', traffic: '', events: '' },
       assessment: operatingAssessment(weather, traffic, events),
     };
-  });
+  }));
 
   const weatherCount = rows.filter(row => row.weather).length;
   const trafficCount = rows.filter(row => row.traffic).length;
