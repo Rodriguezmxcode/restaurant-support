@@ -9,6 +9,19 @@ const apiBaseUrl = process.env.RAMP_API_BASE_URL || 'https://api.ramp.com/develo
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
+async function timedFetch(url: string | URL, init: RequestInit, timeoutMs: number, label: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function getAccessToken(): Promise<string> {
   if (process.env.RAMP_ACCESS_TOKEN) return process.env.RAMP_ACCESS_TOKEN;
 
@@ -24,14 +37,14 @@ async function getAccessToken(): Promise<string> {
 
   const body = new URLSearchParams({ grant_type: 'client_credentials' });
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-  const response = await fetch(tokenUrl, {
+  const response = await timedFetch(tokenUrl, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${basic}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body,
-  });
+  }, 7_000, 'Ramp token request');
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -53,12 +66,12 @@ export async function rampGet<T>(path: string, query?: Record<string, string | n
     if (value !== undefined) url.searchParams.set(key, String(value));
   });
 
-  const response = await fetch(url, {
+  const response = await timedFetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
     },
-  });
+  }, 8_000, `Ramp ${path} request`);
 
   if (!response.ok) {
     const text = await response.text();
