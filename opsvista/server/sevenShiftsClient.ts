@@ -218,7 +218,23 @@ function configuredEmployeeOverrides():ScheduleEmployeeOverride[]{
     return rows.flatMap(value=>{if(!value||typeof value!=='object')return[];const row=value as Record<string,unknown>,employeeName=String(row.employeeName||'').trim();if(!employeeName)return[];const hourlyWage=Number(row.hourlyWage);return[{employeeName,location:String(row.location||'').trim()||undefined,role:String(row.role||'').trim()||undefined,employmentType:row.employmentType==='salary'?'salary':row.employmentType==='hourly'?'hourly':undefined,hourlyWage:Number.isFinite(hourlyWage)&&hourlyWage>0&&hourlyWage<=250?hourlyWage:undefined}];});
   }catch{return[];}
 }
-function employeeOverride(employeeName:string,locations:string[]){return configuredEmployeeOverrides().find(row=>normalizedIdentity(row.employeeName)===normalizedIdentity(employeeName)&&(!row.location||locations.some(location=>normalizedIdentity(location)===normalizedIdentity(row.location||''))));}
+function employeeIdentityMatches(configuredName:string,actualName:string){
+  const configured=normalizedIdentity(configuredName),actual=normalizedIdentity(actualName);
+  if(!configured||!actual)return false;
+  if(configured===actual)return true;
+  // 7shifts sometimes truncates the final character of a last name. Accept only
+  // that narrow variation so a confirmed salary override is not silently lost.
+  const [shorter,longer]=configured.length<actual.length?[configured,actual]:[actual,configured];
+  return shorter.length>=8&&longer.length-shorter.length===1&&longer.startsWith(shorter);
+}
+function employeeOverride(employeeName:string,locations:string[]){
+  const matches=configuredEmployeeOverrides().filter(row=>employeeIdentityMatches(row.employeeName,employeeName));
+  if(!matches.length)return undefined;
+  const locationMatch=matches.find(row=>!row.location||locations.some(location=>normalizedIdentity(location)===normalizedIdentity(row.location||'')));
+  // A unique named override is authoritative for its configured location. This
+  // also repairs records whose source system currently assigns the wrong site.
+  return locationMatch||(matches.length===1?matches[0]:undefined);
+}
 function directoryManager(employeeName:string,locations:string[]){return initialManagedDirectory.some(user=>user.active&&user.role==='Location Manager'&&normalizedIdentity(user.name)===normalizedIdentity(employeeName)&&(!user.locations.length||user.locations.some(location=>locations.some(actual=>normalizedIdentity(actual)===normalizedIdentity(location)))));}
 
 export async function getSevenShiftsScheduleRisk(start:string,end:string,locationNames?:string[]):Promise<SevenShiftsScheduleRisk>{
