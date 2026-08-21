@@ -55,7 +55,7 @@ async function oauthToken(){
   if(oauthCache&&oauthCache.expiresAt>Date.now()+60_000)return oauthCache.token;
   const id=oauthClientId(),secret=oauthClientSecret();
   if(!id||!secret)throw new Error('7shifts credentials are not configured');
-  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'v1_access companies:read locations:read users:read roles:read shifts:read time_punches:read'});
+  const body=new URLSearchParams({grant_type:'client_credentials',client_id:id,client_secret:secret,scope:'v1_access companies:read locations:read users:read roles:read shifts:read'});
   const res=await fetch('https://app.7shifts.com/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const json=await res.json().catch(()=>({})) as Json;
   if(!res.ok||typeof json.access_token!=='string')throw new Error(`7shifts OAuth failed (${res.status})`);
@@ -134,6 +134,7 @@ export type SevenShiftsScheduleShift={
 export type SevenShiftsEmployeeScheduleRisk={
   userId:number;
   employeeName:string;
+  externalEmployeeId?:string;
   primaryLocation:string;
   locations:string[];
   role:string;
@@ -142,8 +143,11 @@ export type SevenShiftsEmployeeScheduleRisk={
   remainingScheduledHours:number;
   projectedHours:number;
   overtimeHours:number;
-  hourlyWage:number;
-  estimatedOvertimeCost:number;
+  actualOvertimeHours:number;
+  hourlyWage:number|null;
+  estimatedOvertimeCost:number|null;
+  wageSource:'shift_or_punch'|'user_hourly'|'unavailable';
+  toastMatchStatus:'matched_external_id'|'matched_name'|'ambiguous'|'unmatched';
   nextShift?:SevenShiftsScheduleShift;
   status:'Overtime'|'Risk'|'Safe';
 };
@@ -154,6 +158,7 @@ export type SevenShiftsLocationScheduleRisk={
   riskEmployees:number;
   projectedOvertimeHours:number;
   estimatedOvertimeCost:number;
+  employeesMissingHourlyWage:number;
 };
 
 export type SevenShiftsScheduleRisk={
@@ -165,6 +170,8 @@ export type SevenShiftsScheduleRisk={
   riskEmployees:number;
   projectedOvertimeHours:number;
   estimatedOvertimeCost:number;
+  employeesMissingHourlyWage:number;
+  unmatchedToastEmployees:number;
   employees:SevenShiftsEmployeeScheduleRisk[];
   locations:SevenShiftsLocationScheduleRisk[];
 };
@@ -177,9 +184,7 @@ type ScheduleAccumulator={
   workedHours:number;
   scheduledHours:number;
   remainingScheduledHours:number;
-  wageCentsWeighted:number;
-  wageHours:number;
-  userWageCents:number;
+  externalEmployeeId:string;
   nextShift?:SevenShiftsScheduleShift;
 };
 
@@ -211,12 +216,10 @@ export async function getSevenShiftsScheduleRisk(start:string,end:string,locatio
   const endExclusive=new Date(`${end}T00:00:00.000Z`);endExclusive.setUTCDate(endExclusive.getUTCDate()+1);
   const rangeStart=`${start}T00:00:00.000Z`,rangeEnd=endExclusive.toISOString();
   const shiftQuery=new URLSearchParams({limit:'500','start[gte]':rangeStart,'start[lte]':rangeEnd,include_draft:'false',deleted:'false',consider_tz_in_ranges:'true'});
-  const punchQuery=new URLSearchParams({limit:'500',business_date_start:start,business_date_end:end,deleted:'false',localize_search_time:'true'});
-  const [users,roles,shifts,punches]=await Promise.all([
+  const [users,roles,shifts]=await Promise.all([
     requestAll(`/company/${cid}/users?status=active&limit=500`),
     requestAll(`/company/${cid}/roles?limit=500`),
     requestAll(`/company/${cid}/shifts?${shiftQuery.toString()}`),
-    requestAll(`/company/${cid}/time_punches?${punchQuery.toString()}`),
   ]);
   const userMap=new Map(users.map(user=>[Number(user.id),user]));
   const roleMap=new Map(roles.map(role=>[Number(role.id),String(role.name||`Role ${role.id}`)]));
@@ -224,7 +227,7 @@ export async function getSevenShiftsScheduleRisk(start:string,end:string,locatio
   const ensure=(userId:number)=>{
     const user=userMap.get(userId)||{};
     let row=accumulators.get(userId);
-    if(!row){row={userId,employeeName:displayName(user,userId),locations:new Map(),roles:new Map(),workedHours:0,scheduledHours:0,remainingScheduledHours:0,wageCentsWeighted:0,wageHours:0,userWageCents:Number(user.hourly_wage)||0};accumulators.set(userId,row);}
+    if(!row){row={userId,employeeName:displayName(user,userId),externalEmployeeId:String(user.employee_id||''),locations:new Map(),roles:new Map(),workedHours:0,scheduledHours:0,remainingScheduledHours:0};accumulators.set(userId,row);}
     return row;
   };
   const now=Math.min(Date.now(),dateMs(rangeEnd));
@@ -243,31 +246,53 @@ export async function getSevenShiftsScheduleRisk(start:string,end:string,locatio
       const candidate={id:Number(shift.id)||0,start:String(shift.start),end:String(shift.end),location,role};
       if(!row.nextShift||dateMs(candidate.start)<dateMs(row.nextShift.start))row.nextShift=candidate;
     }
-    const wage=Number(shift.hourly_wage)||0;if(wage>0&&duration>0){row.wageCentsWeighted+=wage*duration;row.wageHours+=duration;}
-  }
-  for(const punch of punches){
-    const locationId=Number(punch.location_id),userId=Number(punch.user_id);
-    if(!wantedIds.has(locationId)||!Number.isFinite(userId)||userId<=0||punch.deleted===true)continue;
-    const clockedIn=String(punch.clocked_in||''),clockedOut=String(punch.clocked_out||new Date(now).toISOString());
-    const duration=Math.max(0,hoursBetween(clockedIn,clockedOut)-breakHours(punch.breaks));if(!duration)continue;
-    const location=locationMap.get(locationId)||`Location ${locationId}`;
-    const role=roleMap.get(Number(punch.role_id))||'Unassigned role';
-    const row=ensure(userId);row.workedHours+=duration;addWeighted(row.locations,location,duration);addWeighted(row.roles,role,duration);
-    const wage=Number(punch.hourly_wage)||0;if(wage>0){row.wageCentsWeighted+=wage*duration;row.wageHours+=duration;}
   }
   const thresholdHours=40;
   const employees=Array.from(accumulators.values()).map<SevenShiftsEmployeeScheduleRisk>(row=>{
     const projectedHours=row.workedHours+row.remainingScheduledHours;
     const overtimeHours=Math.max(0,projectedHours-thresholdHours);
-    const wageCents=row.userWageCents>0?row.userWageCents:(row.wageHours?row.wageCentsWeighted/row.wageHours:0);
     const primaryLocation=row.nextShift?.location||highestWeighted(row.locations,'Unknown location');
-    return {userId:row.userId,employeeName:row.employeeName,primaryLocation,locations:Array.from(row.locations.keys()).sort(),role:row.nextShift?.role||highestWeighted(row.roles,'Unassigned role'),workedHours:roundHours(row.workedHours),scheduledHours:roundHours(row.scheduledHours),remainingScheduledHours:roundHours(row.remainingScheduledHours),projectedHours:roundHours(projectedHours),overtimeHours:roundHours(overtimeHours),hourlyWage:roundMoney(wageCents/100),estimatedOvertimeCost:roundMoney(overtimeHours*wageCents/100*1.5),nextShift:row.nextShift,status:overtimeHours>0?'Overtime':projectedHours>=38?'Risk':'Safe'};
+    return {userId:row.userId,employeeName:row.employeeName,externalEmployeeId:row.externalEmployeeId||undefined,primaryLocation,locations:Array.from(row.locations.keys()).sort(),role:row.nextShift?.role||highestWeighted(row.roles,'Unassigned role'),workedHours:0,scheduledHours:roundHours(row.scheduledHours),remainingScheduledHours:roundHours(row.remainingScheduledHours),projectedHours:roundHours(projectedHours),overtimeHours:roundHours(overtimeHours),actualOvertimeHours:0,hourlyWage:null,estimatedOvertimeCost:null,wageSource:'unavailable',toastMatchStatus:'unmatched',nextShift:row.nextShift,status:overtimeHours>0?'Overtime':projectedHours>=38?'Risk':'Safe'};
   }).sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours||a.employeeName.localeCompare(b.employeeName));
   const locations=Array.from(locationMap.values()).map<SevenShiftsLocationScheduleRisk>(location=>{
     const rows=employees.filter(employee=>employee.primaryLocation===location);
-    return {location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+employee.estimatedOvertimeCost,0))};
+    return {location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:rows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length};
   }).sort((a,b)=>b.projectedOvertimeHours-a.projectedOvertimeHours||a.location.localeCompare(b.location));
-  return {start,end,generatedAt:new Date().toISOString(),thresholdHours,scheduledHours:roundHours(employees.reduce((sum,employee)=>sum+employee.scheduledHours,0)),riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(employees.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+employee.estimatedOvertimeCost,0)),employees,locations};
+  return {start,end,generatedAt:new Date().toISOString(),thresholdHours,scheduledHours:roundHours(employees.reduce((sum,employee)=>sum+employee.scheduledHours,0)),riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(employees.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:employees.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length,unmatchedToastEmployees:employees.length,employees,locations};
+}
+
+export type ToastEmployeeLaborForSchedule={employeeGuid:string;externalEmployeeId:string;employeeName:string;location:string;regularHours:number;overtimeHours:number;totalHours:number;hourlyWage:number|null;wageSource:'time_entry'|'employee_override'|'unavailable'};
+
+function normalizedIdentity(value:string){return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function aggregateToastLabor(rows:ToastEmployeeLaborForSchedule[]){
+  const totalHours=rows.reduce((sum,row)=>sum+row.totalHours,0),actualOvertimeHours=rows.reduce((sum,row)=>sum+row.overtimeHours,0);
+  const known=rows.filter(row=>row.hourlyWage!==null);
+  const weightedHours=known.reduce((sum,row)=>sum+Math.max(row.totalHours,0),0);
+  const hourlyWage=known.length?(weightedHours?known.reduce((sum,row)=>sum+(row.hourlyWage??0)*Math.max(row.totalHours,0),0)/weightedHours:known.length===1?known[0].hourlyWage:null):null;
+  return {workedHours:roundHours(totalHours),actualOvertimeHours:roundHours(actualOvertimeHours),hourlyWage:hourlyWage===null?null:roundMoney(hourlyWage)};
+}
+
+export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,toastRows:ToastEmployeeLaborForSchedule[]):SevenShiftsScheduleRisk{
+  const byExternal=new Map<string,ToastEmployeeLaborForSchedule[]>(),byName=new Map<string,ToastEmployeeLaborForSchedule[]>();
+  for(const row of toastRows){
+    const external=normalizedIdentity(row.externalEmployeeId||'');if(external)byExternal.set(external,[...(byExternal.get(external)||[]),row]);
+    const name=normalizedIdentity(row.employeeName);if(name)byName.set(name,[...(byName.get(name)||[]),row]);
+  }
+  const employees=risk.employees.map(employee=>{
+    const external=normalizedIdentity(employee.externalEmployeeId||'');let candidates=external?(byExternal.get(external)||[]):[];let toastMatchStatus:SevenShiftsEmployeeScheduleRisk['toastMatchStatus']='unmatched';
+    if(candidates.length)toastMatchStatus='matched_external_id';
+    else{
+      const nameCandidates=byName.get(normalizedIdentity(employee.employeeName))||[];
+      candidates=nameCandidates.filter(row=>employee.locations.some(location=>normalizedIdentity(location)===normalizedIdentity(row.location)));
+      const identities=new Set(candidates.map(row=>normalizedIdentity(row.externalEmployeeId)||row.employeeGuid));
+      if(candidates.length&&identities.size===1)toastMatchStatus='matched_name';else if(candidates.length>1){toastMatchStatus='ambiguous';candidates=[];}else if(candidates.length===1)toastMatchStatus='matched_name';
+    }
+    if(!candidates.length)return {...employee,workedHours:0,projectedHours:roundHours(employee.remainingScheduledHours),overtimeHours:roundHours(Math.max(0,employee.remainingScheduledHours-risk.thresholdHours)),actualOvertimeHours:0,hourlyWage:null,estimatedOvertimeCost:null,wageSource:'unavailable' as const,toastMatchStatus,status:employee.remainingScheduledHours>risk.thresholdHours?'Overtime' as const:employee.remainingScheduledHours>=38?'Risk' as const:'Safe' as const};
+    const actual=aggregateToastLabor(candidates),projectedHours=actual.workedHours+employee.remainingScheduledHours,overtimeHours=Math.max(0,projectedHours-risk.thresholdHours);
+    return {...employee,workedHours:actual.workedHours,projectedHours:roundHours(projectedHours),overtimeHours:roundHours(overtimeHours),actualOvertimeHours:actual.actualOvertimeHours,hourlyWage:actual.hourlyWage,estimatedOvertimeCost:actual.hourlyWage===null?null:roundMoney(overtimeHours*actual.hourlyWage*1.5),wageSource:actual.hourlyWage===null?'unavailable' as const:'shift_or_punch' as const,toastMatchStatus,status:overtimeHours>0?'Overtime' as const:projectedHours>=38?'Risk' as const:'Safe' as const};
+  }).sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours||a.employeeName.localeCompare(b.employeeName));
+  const locations=risk.locations.map(location=>{const rows=employees.filter(employee=>employee.primaryLocation===location.location);return {...location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:rows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length};}).sort((a,b)=>b.projectedOvertimeHours-a.projectedOvertimeHours||a.location.localeCompare(b.location));
+  return {...risk,employees,locations,riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,projectedOvertimeHours:roundHours(employees.reduce((sum,employee)=>sum+employee.overtimeHours,0)),estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:employees.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length,unmatchedToastEmployees:employees.filter(employee=>!employee.toastMatchStatus.startsWith('matched')).length};
 }
 
 function numberField(o:Json,names:string[]){for(const name of names){const v=Number(o[name]);if(Number.isFinite(v))return v;}return undefined;}

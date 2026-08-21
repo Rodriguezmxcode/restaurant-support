@@ -2,7 +2,7 @@ import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastPerformance } from '../../server/toastPerformance.js';
 import { getSevenShiftsTaskCompliance } from '../../server/sevenShiftsTasks.js';
-import { getSevenShiftsScheduleRisk } from '../../server/sevenShiftsClient.js';
+import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -32,16 +32,17 @@ export default async function handler(req:Req,res:Res){
       getSevenShiftsScheduleRisk(start,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
-    const scheduleRisk=scheduleResult.data,scheduleRiskError=scheduleResult.error;
+    const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,toastLocations.flatMap(row=>row.employeeLabor)):null,scheduleRiskError=scheduleResult.error;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
     const locations=toastLocations.map(row=>{
+      const {employeeLabor:_,...publicRow}=row;
       const salaryRow=salaryByLocation.get(row.location);
       const salaryLaborCost=salaryRow?.salaryLaborCost??0;
       const totalLaborCost=row.hourlyLaborCost+salaryLaborCost;
       return {
-        ...row,
+        ...publicRow,
         salaryLaborCost,
         totalLaborCost:round(totalLaborCost),
         hourlyLaborPct:row.netSales?round(row.hourlyLaborCost/row.netSales*100):0,
@@ -56,7 +57,7 @@ export default async function handler(req:Req,res:Res){
       salaryLaborCost:acc.salaryLaborCost+row.salaryLaborCost,totalLaborCost:acc.totalLaborCost+row.totalLaborCost,
     }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
-      source:'Toast Standard API + OpsVista salary allocation',start,end,locations,
+      source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,locations,
       salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
