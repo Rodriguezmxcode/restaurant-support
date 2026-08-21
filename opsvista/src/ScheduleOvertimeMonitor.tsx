@@ -27,29 +27,26 @@ const dateTime=(value:string)=>new Intl.DateTimeFormat('es-US',{timeZone:'Americ
 const initials=(name:string)=>name.split(/\s+/).filter(Boolean).map(part=>part[0]).join('').slice(0,2).toUpperCase();
 
 export default function ScheduleOvertimeMonitor({data,error,loading,onEscalate}:Props){
-  const [location,setLocation]=useState('All locations');
   const [alertAt,setAlertAt]=useState(40);
   const [onlyRisk,setOnlyRisk]=useState(false);
   const [selected,setSelected]=useState<ScheduleEmployee|null>(null);
   const [sent,setSent]=useState<number[]>([]);
-  const locations=useMemo(()=>data?.locations.map(row=>row.location)||[],[data]);
   const employees=useMemo(()=>((data?.employees||[])
-    .filter(row=>location==='All locations'||row.primaryLocation===location||row.locations.includes(location))
     .filter(row=>!onlyRisk||row.projectedHours>=alertAt)
-    .sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours)),[data,location,onlyRisk,alertAt]);
-  const locationRows=useMemo(()=>location==='All locations'?(data?.locations||[]):(data?.locations||[]).filter(row=>row.location===location),[data,location]);
+    .sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours)),[data,onlyRisk,alertAt]);
+  const locationRows=useMemo(()=>(data?.locations||[]),[data]);
   const topRisk=employees.filter(row=>row.overtimeHours>0).slice(0,2);
   const send=(employee:ScheduleEmployee)=>{
-    onEscalate?.({location:employee.nextShift?.location||employee.primaryLocation,title:`Revisar overtime proyectado · ${employee.employeeName}`,signal:`${employee.employeeName} está proyectado a ${employee.projectedHours.toFixed(1)} h (${employee.overtimeHours.toFixed(1)} h de overtime) para ${data?.start}–${data?.end}.`,cause:`Acumula ${employee.workedHours.toFixed(1)} h trabajadas y todavía tiene ${employee.remainingScheduledHours.toFixed(1)} h programadas por completar.`,recommendation:employee.nextShift?`Revisar o reasignar el turno de ${dateTime(employee.nextShift.start)} en ${employee.nextShift.location} (${employee.nextShift.role}) a una persona calificada que permanezca debajo de 40 horas.`:'Revisar los turnos restantes y reasignar horas a una persona calificada que permanezca debajo de 40 horas.',impact:employee.estimatedOvertimeCost===null?'Costo OT no disponible porque 7shifts no entregó una tarifa horaria válida.':`${money(employee.estimatedOvertimeCost)} de costo OT estimado a 1.5×`,severity:employee.overtimeHours>=4?'High':'Medium'});
+    onEscalate?.({location:employee.nextShift?.location||employee.primaryLocation,title:`Revisar overtime proyectado · ${employee.employeeName}`,signal:`${employee.employeeName} está proyectado a ${employee.projectedHours.toFixed(1)} h (${employee.overtimeHours.toFixed(1)} h de overtime) para ${data?.start}–${data?.end}.`,cause:`Acumula ${employee.workedHours.toFixed(1)} h trabajadas y todavía tiene ${employee.remainingScheduledHours.toFixed(1)} h programadas por completar.`,recommendation:employee.nextShift?`Revisar o reasignar el turno de ${dateTime(employee.nextShift.start)} en ${employee.nextShift.location} (${employee.nextShift.role}) a una persona calificada que permanezca debajo de 40 horas.`:'Revisar los turnos restantes y reasignar horas a una persona calificada que permanezca debajo de 40 horas.',impact:employee.estimatedOvertimeCost===null?'Costo OT no disponible porque Toast no entregó una tarifa horaria válida.':`${money(employee.estimatedOvertimeCost)} de costo OT estimado a 1.5×`,severity:employee.overtimeHours>=4?'High':'Medium'});
     setSent(current=>current.includes(employee.userId)?current:[...current,employee.userId]);
   };
 
-  if(loading)return <section className="schedule-panel schedule-loading"><strong>Cargando horarios y time punches de 7shifts…</strong><span>Calculando overtime por empleado y ubicación.</span></section>;
-  if(error)return <section className="schedule-panel schedule-error"><strong>No fue posible calcular el overtime proyectado</strong><span>{error}</span><small>OpsVista no mostrará estimaciones hasta recibir turnos, empleados, puestos y time punches reales de 7shifts.</small></section>;
+  if(loading)return <section className="schedule-panel schedule-loading"><strong>Cargando horarios de 7shifts y Time Entries de Toast…</strong><span>Calculando overtime por empleado y ubicación.</span></section>;
+  if(error)return <section className="schedule-panel schedule-error"><strong>No fue posible calcular el overtime proyectado</strong><span>{error}</span><small>OpsVista no mostrará estimaciones hasta recibir turnos y puestos reales de 7shifts, más horas y tarifas válidas de Toast.</small></section>;
   if(!data)return null;
 
   return <div className="schedule-section">
-    <div className="schedule-section-heading"><div><span>7SHIFTS · LIVE SCHEDULE</span><h2>Monitor de overtime por empleado</h2><p>{data.start} → {data.end} · Semana operativa miércoles–martes · Horas trabajadas + turnos publicados restantes</p></div><div className="schedule-controls"><select value={location} onChange={event=>setLocation(event.target.value)}><option>All locations</option>{locations.map(name=><option key={name}>{name}</option>)}</select><label>Alerta a <select value={alertAt} onChange={event=>setAlertAt(Number(event.target.value))}><option value={36}>36 h</option><option value={38}>38 h</option><option value={40}>40 h</option></select></label><button className={onlyRisk?'active':''} onClick={()=>setOnlyRisk(value=>!value)}>Solo en riesgo</button></div></div>
+    <div className="schedule-section-heading"><div><span>7SHIFTS · LIVE SCHEDULE</span><h2>Monitor de overtime por empleado</h2><p>{data.start} → {data.end} · Semana operativa miércoles–martes · Horas trabajadas + turnos publicados restantes</p></div><div className="schedule-controls"><label>Alerta a <select value={alertAt} onChange={event=>setAlertAt(Number(event.target.value))}><option value={36}>36 h</option><option value={38}>38 h</option><option value={40}>40 h</option></select></label><button className={onlyRisk?'active':''} onClick={()=>setOnlyRisk(value=>!value)}>Solo en riesgo</button></div></div>
 
     <section className="schedule-kpis">
       <article><span className="schedule-kpi-icon blue">◷</span><div><label>HORAS PROGRAMADAS</label><strong>{data.scheduledHours.toFixed(1)}</strong><p>7shifts · semana completa publicada</p></div></article>

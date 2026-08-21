@@ -175,12 +175,28 @@ async function discoverToastLocations():Promise<Record<string,string>>{
   return locations;
 }
 
-export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
+async function resolvedToastLocationEntries(requestedLocations?:string[]){
   if(!standardToastConfigured())throw new Error('Toast Standard API is not configured in OpsVista');
   let locationMap=toastLocations();
   if(!Object.keys(locationMap).length)locationMap=await discoverToastLocations();
   const entries=Object.entries(locationMap).filter(([name])=>!requestedLocations?.length||requestedLocations.some(requested=>name.toLowerCase().includes(requested.toLowerCase())||requested.toLowerCase().includes(name.toLowerCase())));
   if(!entries.length)throw new Error('Toast returned no accessible restaurant locations for these credentials');
+  return entries;
+}
+
+export async function getToastEmployeeLabor(start:string,end:string,requestedLocations?:string[]):Promise<ToastEmployeeLabor[]>{
+  const entries=await resolvedToastLocationEntries(requestedLocations);
+  const output:ToastEmployeeLabor[]=[];
+  for(const [location,guid] of entries){
+    let labor:TimeEntry[],employees:ToastEmployee[];
+    try{[labor,employees]=await Promise.all([getLaborForRange(guid,start,end),getEmployees(guid)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:'Toast request failed'}`);}
+    output.push(...summarizeEmployeeLabor(labor,employees,location));
+  }
+  return output;
+}
+
+export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
+  const entries=await resolvedToastLocationEntries(requestedLocations);
   const output:PerformanceLocation[]=[];
   for(const [location,guid] of entries){
     let orders:ToastOrder[],labor:TimeEntry[],employees:ToastEmployee[];

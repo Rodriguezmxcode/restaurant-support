@@ -1,6 +1,6 @@
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
-import { getToastPerformance } from '../../server/toastPerformance.js';
+import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
 import { getSevenShiftsTaskCompliance } from '../../server/sevenShiftsTasks.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk } from '../../server/sevenShiftsClient.js';
 
@@ -9,30 +9,46 @@ type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:s
 
 function asString(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value||'';}
 function validDate(value:string){return /^\d{4}-\d{2}-\d{2}$/.test(value);}
+function daysInclusive(start:string,end:string){return Math.floor((new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000)+1;}
+function locationList(value:string){return Array.from(new Set(value.split(',').map(item=>item.trim()).filter(Boolean)));}
+function addDays(value:string,days:number){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
+function operatingWeek(value:string){const day=new Date(`${value}T00:00:00Z`).getUTCDay();const start=addDays(value,-((day-3+7)%7));return{start,end:addDays(start,6)};}
 
 export default async function handler(req:Req,res:Res){
   if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
-  const start=asString(req.query?.start),end=asString(req.query?.end),scheduleEnd=asString(req.query?.schedule_end)||end,location=asString(req.query?.location);
+  const start=asString(req.query?.start),end=asString(req.query?.end);
+  const defaultSchedule=validDate(end)?operatingWeek(end):{start,end};
+  const scheduleStart=asString(req.query?.schedule_start)||defaultSchedule.start,scheduleEnd=asString(req.query?.schedule_end)||defaultSchedule.end,overtimeEnd=asString(req.query?.overtime_end)||end;
+  const requestedNames=locationList(asString(req.query?.locations)||asString(req.query?.location));
+  const includeTasks=asString(req.query?.include_tasks)!=='false';
   if(!validDate(start)||!validDate(end))return res.status(400).json({error:'start and end must use YYYY-MM-DD'});
   if(new Date(start)>new Date(end))return res.status(400).json({error:'start must be before end'});
-  if(!validDate(scheduleEnd)||new Date(start)>new Date(scheduleEnd))return res.status(400).json({error:'schedule_end must use YYYY-MM-DD and be on or after start'});
-  const days=Math.floor((new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000)+1;
+  if(!validDate(scheduleStart)||!validDate(scheduleEnd)||new Date(scheduleStart)>new Date(scheduleEnd))return res.status(400).json({error:'schedule_start and schedule_end must define a valid YYYY-MM-DD range'});
+  if(!validDate(overtimeEnd)||new Date(overtimeEnd)<new Date(scheduleStart)||new Date(overtimeEnd)>new Date(scheduleEnd))return res.status(400).json({error:'overtime_end must fall inside the schedule range'});
+  const days=daysInclusive(start,end);
   if(days>31)return res.status(400).json({error:'Date ranges are limited to 31 days for live Toast polling'});
+  if(daysInclusive(scheduleStart,scheduleEnd)>7)return res.status(400).json({error:'Overtime schedule ranges are limited to one operational week'});
   let requested:string[]|undefined;
-  if(location&&location!=='All locations'){
-    if(user.role!=='Founder'&&user.role!=='Corporate'&&!user.locations.includes(location))return res.status(403).json({error:'Location not authorized'});
-    requested=[location];
+  if(requestedNames.length&&requestedNames[0]!=='All locations'){
+    if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role)){
+      const allowed=new Set(user.locations.map(item=>item.toLowerCase()));
+      if(requestedNames.some(item=>!allowed.has(item.toLowerCase())))return res.status(403).json({error:'One or more locations are not authorized'});
+    }
+    requested=requestedNames;
   }else if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role))requested=user.locations;
   try{
-    const [toastLocations,taskResult,scheduleResult]=await Promise.all([
+    const sameLaborRange=start===scheduleStart&&end===overtimeEnd;
+    const [toastLocations,weeklyEmployeeLabor,taskResult,scheduleResult]=await Promise.all([
       getToastPerformance(start,end,requested),
-      getSevenShiftsTaskCompliance(start,end).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})),
-      getSevenShiftsScheduleRisk(start,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
+      sameLaborRange?Promise.resolve(null):getToastEmployeeLabor(scheduleStart,overtimeEnd,requested),
+      includeTasks?getSevenShiftsTaskCompliance(start,end).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})):Promise.resolve({data:null,error:''}),
+      getSevenShiftsScheduleRisk(scheduleStart,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
-    const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,toastLocations.flatMap(row=>row.employeeLabor)):null,scheduleRiskError=scheduleResult.error;
+    const overtimeEmployeeLabor=weeklyEmployeeLabor??toastLocations.flatMap(row=>row.employeeLabor);
+    const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,overtimeEmployeeLabor):null,scheduleRiskError=scheduleResult.error;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
@@ -57,7 +73,7 @@ export default async function handler(req:Req,res:Res){
       salaryLaborCost:acc.salaryLaborCost+row.salaryLaborCost,totalLaborCost:acc.totalLaborCost+row.totalLaborCost,
     }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
-      source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,locations,
+      source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,scheduleStart,scheduleEnd,overtimeEnd,locations,
       salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),

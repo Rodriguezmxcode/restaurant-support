@@ -1,31 +1,58 @@
 import { useEffect, useMemo, useState } from 'react';
 import './laborIntelligence.css';
+import './laborFilters.css';
 import ScheduleOvertimeMonitor, { type ScheduleRisk } from './ScheduleOvertimeMonitor';
 
 type LaborEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:'High'|'Medium'|'Low'};
 type Props={onEscalate?:(item:LaborEscalation)=>void;allowedLocations?:string[]};
 type LiveRow={location:string;netSales:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
-type LiveResponse={start:string;end:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
+type LiveResponse={start:string;end:string;scheduleStart:string;scheduleEnd:string;overtimeEnd:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
 type Insight=LiveRow&{targetLaborPct:number;gap:number;estimatedExcess:number;severity:'Healthy'|'Watch'|'Action'};
+type PeriodKey='today'|'yesterday'|'this_week'|'prior_week'|'last_30'|'custom';
 
 const money=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value);
 const pct=(value:number)=>`${value.toFixed(1)}%`;
 const targetFor=(location:string)=>/Avon|Southington|Danbury/i.test(location)?22:21;
-function operationalRange(){const now=new Date();const since=(now.getDay()-3+7)%7;const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-since);const scheduleEnd=new Date(start.getFullYear(),start.getMonth(),start.getDate()+6);const iso=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return{start:iso(start),end:iso(now),schedule_end:iso(scheduleEnd)}}
+const periodLabels:Record<PeriodKey,string>={today:'Today',yesterday:'Yesterday',this_week:'This week',prior_week:'Prior week',last_30:'Last 30 days',custom:'Custom'};
+const stored=(key:string)=>typeof window==='undefined'?'':window.localStorage.getItem(key)||'';
+function addDays(iso:string,days:number){const date=new Date(`${iso}T00:00:00.000Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
+function easternToday(){const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const value=Object.fromEntries(parts.map(part=>[part.type,part.value]));return `${value.year}-${value.month}-${value.day}`;}
+function operatingWeek(date:string){const day=new Date(`${date}T00:00:00.000Z`).getUTCDay();const start=addDays(date,-((day-3+7)%7));return{start,end:addDays(start,6)};}
+function selectedRange(period:PeriodKey,customStart:string,customEnd:string){
+  const today=easternToday(),week=operatingWeek(today);
+  if(period==='yesterday'){const day=addDays(today,-1);return{start:day,end:day};}
+  if(period==='this_week')return{start:week.start,end:today};
+  if(period==='prior_week')return{start:addDays(week.start,-7),end:addDays(week.start,-1)};
+  if(period==='last_30')return{start:addDays(today,-29),end:today};
+  if(period==='custom')return{start:customStart||today,end:customEnd||today};
+  return{start:today,end:today};
+}
 
 export default function LaborIntelligenceView({onEscalate,allowedLocations}:Props){
-  const range=useMemo(operationalRange,[]);
+  const today=useMemo(easternToday,[]);
+  const [period,setPeriod]=useState<PeriodKey>(()=>{const saved=stored('opsvista-labor-period') as PeriodKey;return saved in periodLabels?saved:'today';});
+  const [customStart,setCustomStart]=useState(()=>stored('opsvista-labor-custom-start')||today);
+  const [customEnd,setCustomEnd]=useState(()=>stored('opsvista-labor-custom-end')||today);
+  const [selectedLocations,setSelectedLocations]=useState<string[]>(()=>{try{const parsed=JSON.parse(stored('opsvista-labor-locations')||'[]');return Array.isArray(parsed)?parsed.filter(item=>typeof item==='string'):[];}catch{return[];}});
+  const range=useMemo(()=>selectedRange(period,customStart,customEnd),[period,customStart,customEnd]);
+  const overtimeWeek=useMemo(()=>operatingWeek(range.end),[range.end]);
+  const overtimeEnd=range.end<today?range.end:today<overtimeWeek.end?today:overtimeWeek.end;
+  const selectionKey=selectedLocations.join('|');
   const [data,setData]=useState<LiveResponse|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<Insight|null>(null);
   const [escalated,setEscalated]=useState<string[]>([]);
 
+  useEffect(()=>{const valid=selectedLocations.filter(location=>allowedLocations?.includes(location));if(valid.length!==selectedLocations.length)setSelectedLocations(valid);},[allowedLocations,selectionKey]);
+  useEffect(()=>{window.localStorage.setItem('opsvista-labor-period',period);window.localStorage.setItem('opsvista-labor-custom-start',customStart);window.localStorage.setItem('opsvista-labor-custom-end',customEnd);window.localStorage.setItem('opsvista-labor-locations',JSON.stringify(selectedLocations));},[period,customStart,customEnd,selectionKey]);
   useEffect(()=>{const controller=new AbortController();setLoading(true);setError('');
-    const params=new URLSearchParams(range);
+    setData(null);
+    const params=new URLSearchParams({start:range.start,end:range.end,schedule_start:overtimeWeek.start,schedule_end:overtimeWeek.end,overtime_end:overtimeEnd,include_tasks:'false'});
+    if(selectedLocations.length)params.set('locations',selectedLocations.join(','));
     fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as LiveResponse;if(!response.ok)throw new Error(body.error||'Live labor data unavailable');setData(body)}).catch(e=>{if(e?.name!=='AbortError')setError(e instanceof Error?e.message:'Live labor data unavailable')}).finally(()=>setLoading(false));
     return()=>controller.abort();
-  },[range.start,range.end,range.schedule_end]);
+  },[range.start,range.end,overtimeWeek.start,overtimeWeek.end,overtimeEnd,selectionKey]);
 
   const rows=useMemo<Insight[]>(()=>((data?.locations||[])
     .filter(row=>!allowedLocations?.length||allowedLocations.some(location=>row.location.toLowerCase().includes(location.toLowerCase())))
@@ -35,8 +62,18 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
 
   const sendToActionCenter=(row:Insight)=>{onEscalate?.({location:row.location,title:`${row.location} labor review`,signal:`Total labor is ${pct(row.totalLaborPct)} against a ${pct(row.targetLaborPct)} target for ${range.start}–${range.end}; overtime is ${row.overtimeHours.toFixed(1)} hours.`,cause:row.gap>0?'Labor cost is above the operating target for the selected period.':'Labor is within target, but management requested a documented review.',recommendation:'Review staffing, overtime, peak coverage, prep and closing requirements before making schedule changes.',impact:`${money(row.estimatedExcess)} labor cost above target in the selected period`,severity:row.severity==='Action'?'High':row.severity==='Watch'?'Medium':'Low'});setEscalated(items=>items.includes(row.location)?items:[...items,row.location]);};
 
+  const locationLabel=!selectedLocations.length?'All locations':selectedLocations.length===1?selectedLocations[0]:`${selectedLocations.length} locations`;
+  const toggleLocation=(location:string)=>setSelectedLocations(current=>{const next=current.includes(location)?current.filter(item=>item!==location):[...current,location];return next.length===allowedLocations?.length?[]:next;});
+
   return <div className="labor-page">
-    <div className="detail-block" style={{marginBottom:16}}><label>LIVE PERIOD</label><p>{range.start} → {range.end} · Toast sales and labor + OpsVista salary allocation</p>{error&&<p style={{color:'#b91c1c'}}>{error}</p>}</div>
+    <section className="labor-filter-bar">
+      <div className="labor-period-control"><label htmlFor="labor-period">Period</label><select id="labor-period" value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}>{Object.entries(periodLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
+      {period==='custom'&&<div className="labor-custom-dates"><label>From<input type="date" value={customStart} max={customEnd} min={addDays(customEnd,-30)} onChange={event=>setCustomStart(event.target.value)}/></label><label>To<input type="date" value={customEnd} min={customStart} max={today<addDays(customStart,30)?today:addDays(customStart,30)} onChange={event=>setCustomEnd(event.target.value)}/></label></div>}
+      <details className="labor-location-picker"><summary><span>Locations</span><strong>{locationLabel}</strong></summary><div className="labor-location-menu"><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/><span>All locations</span></label>{(allowedLocations||[]).map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/><span>{location}</span></label>)}</div></details>
+      <div className="labor-period-explanation"><span>RESULTS SHOWN</span><strong>{periodLabels[period]} · {range.start} → {range.end}</strong><small>Toast sales, worked hours and labor cost for {locationLabel}.</small></div>
+      <div className="labor-period-explanation overtime"><span>OVERTIME EVALUATION</span><strong>{overtimeWeek.start} → {overtimeWeek.end}</strong><small>40-hour threshold always uses the Wednesday–Tuesday operating week.</small></div>
+    </section>
+    {error&&<div className="labor-data-error">{error}</div>}
     <section className="labor-summary-grid">
       <article className="labor-card labor-hero"><span>TOTAL LABOR</span><strong>{loading?'…':pct(totals.sales?totals.labor/totals.sales*100:0)}</strong><p>Hourly + salary labor</p></article>
       <article className="labor-card"><span>NET SALES</span><strong>{money(totals.sales)}</strong><p>Live Toast</p></article>
