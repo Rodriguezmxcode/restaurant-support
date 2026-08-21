@@ -14,6 +14,7 @@ const locations: LocationPoint[] = [
   { name: 'Danbury', lat: 41.3948, lon: -73.4540 },
   { name: 'Avon', lat: 41.8096, lon: -72.8307 },
   { name: 'Southington', lat: 41.5965, lon: -72.8776 },
+  { name: 'Middletown', lat: 41.5623, lon: -72.6506 },
 ];
 
 const responseCache = new Map<string, { expiresAt: number; value: any }>();
@@ -147,6 +148,103 @@ function operatingAssessment(weather: any, traffic: any, events: any) {
   };
 }
 
+async function getExistingConnectedSource(requestedLocations?: string[]) {
+  const configuredUrl = process.env.OPSVISTA_LOCAL_INTELLIGENCE_SOURCE_URL?.trim();
+  const candidates = [...new Set([
+    configuredUrl,
+    'https://app.getopsvista.com/api/public-local-intelligence',
+    'https://pv-operations.rodriguez10.chatgpt.site/api/public-local-intelligence',
+  ].filter(Boolean) as string[])];
+  let source: any;
+  let sourceUrl = '';
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (requestedLocations?.length === 1) url.searchParams.set('location', requestedLocations[0]);
+      source = await timedJson(url, 9_000, 'Existing Local Intelligence connection');
+      sourceUrl = `${url.origin}${url.pathname}`;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!source) throw lastError instanceof Error ? lastError : new Error('Existing Local Intelligence connection unavailable');
+
+  const selected = locations.filter(location => !requestedLocations?.length || requestedLocations.includes(location.name));
+  const weatherRows = Array.isArray(source.weather) ? source.weather : [];
+  const trafficRows = Array.isArray(source.traffic) ? source.traffic : [];
+  const eventRows = Array.isArray(source.events) ? source.events : [];
+  const byName = (rows: any[]) => new Map(rows.map(row => [String(row.name || row.location || ''), row]));
+  const weatherByName = byName(weatherRows);
+  const trafficByName = byName(trafficRows);
+  const eventsByName = byName(eventRows);
+
+  const rows = selected.map(place => {
+    const weatherSource = weatherByName.get(place.name);
+    const trafficSource = trafficByName.get(place.name);
+    const eventsSource = eventsByName.get(place.name);
+    const weather = weatherSource ? {
+      provider: String(weatherSource.provider || 'The Weather Company'),
+      temperature: Number(weatherSource.temperature ?? 0),
+      feelsLike: Number(weatherSource.feels ?? weatherSource.feelsLike ?? weatherSource.temperature ?? 0),
+      precipitation: Number(weatherSource.precipitation ?? 0),
+      windMph: Number(weatherSource.wind ?? weatherSource.windMph ?? 0),
+      phrase: String(weatherSource.phrase || (Number(weatherSource.precipitation ?? 0) > 0 ? 'Precipitación activa' : 'Sin precipitación activa')),
+      updatedAt: String(weatherSource.updated || weatherSource.updatedAt || new Date().toISOString()),
+    } : null;
+    const traffic = trafficSource ? {
+      provider: 'TomTom Traffic',
+      currentSpeed: Number(trafficSource.currentSpeed ?? 0),
+      freeFlowSpeed: Number(trafficSource.freeFlowSpeed ?? 0),
+      congestionPct: Number(trafficSource.congestion ?? trafficSource.congestionPct ?? 0),
+      roadClosure: Boolean(trafficSource.roadClosure),
+      incidentCount: Number(trafficSource.incidentCount ?? 0),
+      topIncident: trafficSource.topIncident || null,
+      updatedAt: String(trafficSource.updatedAt || new Date().toISOString()),
+    } : null;
+    const events = eventsSource ? {
+      provider: 'Ticketmaster Discovery',
+      eventCount: Number(eventsSource.eventCount ?? 0),
+      events: Array.isArray(eventsSource.events) ? eventsSource.events : [],
+      horizonDays: 14,
+      updatedAt: String(eventsSource.updatedAt || new Date().toISOString()),
+    } : null;
+    return {
+      location: place.name,
+      weather,
+      traffic,
+      events,
+      errors: { weather: '', traffic: '', events: '' },
+      assessment: operatingAssessment(weather, traffic, events),
+    };
+  });
+
+  const weatherCount = rows.filter(row => row.weather).length;
+  const trafficCount = rows.filter(row => row.traffic).length;
+  const eventCount = rows.filter(row => row.events).length;
+  const provider = (id: ProviderState['id'], name: string, count: number): ProviderState => ({
+    id,
+    name,
+    state: count > 0 ? 'live' : 'error',
+    detail: count > 0 ? `${count}/${rows.length} locations updated through the existing connection` : 'Existing provider did not return data',
+  });
+  return {
+    source: 'Existing PV Operations provider connections',
+    sourceUrl,
+    sharedSource: true,
+    fetchedAt: new Date().toISOString(),
+    horizonDays: 14,
+    providers: [
+      provider('weather', String(rows.find(row => row.weather)?.weather?.provider || 'Weather'), weatherCount),
+      provider('traffic', 'TomTom Traffic', trafficCount),
+      provider('events', 'Ticketmaster Discovery', eventCount),
+    ],
+    locations: rows,
+  };
+}
+
 export async function getLocalIntelligence(requestedLocations?: string[]) {
   const selected = locations.filter(location => !requestedLocations?.length || requestedLocations.includes(location.name));
   const cacheKey = selected.map(location => location.name).sort().join('|') || 'none';
@@ -155,6 +253,20 @@ export async function getLocalIntelligence(requestedLocations?: string[]) {
   const tomtomKey = process.env.TOMTOM_API_KEY;
   const ticketmasterKey = process.env.TICKETMASTER_API_KEY;
   const weatherKey = process.env.WEATHER_COMPANY_API_KEY || process.env.WEATHER_API_KEY;
+
+  // Reuse the already configured provider runtime before asking for any new
+  // deployment secrets. Only public weather, traffic and event data crosses
+  // this server-to-server boundary; provider keys remain in PV Operations.
+  if (!tomtomKey || !ticketmasterKey) {
+    try {
+      const sharedPayload = await getExistingConnectedSource(requestedLocations);
+      responseCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, value: sharedPayload });
+      return sharedPayload;
+    } catch {
+      // Continue to the direct providers/Open-Meteo fallback so this module
+      // remains honest and usable if the existing source is temporarily down.
+    }
+  }
 
   const rows = await Promise.all(selected.map(async place => {
     const [weatherResult, trafficResult, eventsResult] = await Promise.allSettled([

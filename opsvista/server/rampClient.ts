@@ -7,7 +7,7 @@ type RampTokenResponse = {
 const tokenUrl = process.env.RAMP_TOKEN_URL || 'https://api.ramp.com/developer/v1/token';
 const apiBaseUrl = process.env.RAMP_API_BASE_URL || 'https://api.ramp.com/developer/v1';
 
-let cachedToken: { value: string; expiresAt: number } | null = null;
+let cachedToken: { value: string; expiresAt: number; scopes: string } | null = null;
 
 async function timedFetch(url: string | URL, init: RequestInit, timeoutMs: number, label: string) {
   const controller = new AbortController();
@@ -20,6 +20,22 @@ async function timedFetch(url: string | URL, init: RequestInit, timeoutMs: numbe
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function requestAccessToken(scopes: string, clientId: string, clientSecret: string) {
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: scopes,
+  });
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  return await timedFetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  }, 7_000, 'Ramp token request');
 }
 
 async function getAccessToken(): Promise<string> {
@@ -35,19 +51,22 @@ async function getAccessToken(): Promise<string> {
     throw new Error('Ramp credentials are not configured in the server environment.');
   }
 
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    scope: process.env.RAMP_SCOPES || 'transactions:read',
-  });
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-  const response = await timedFetch(tokenUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basic}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body,
-  }, 7_000, 'Ramp token request');
+  const configuredScopes = process.env.RAMP_SCOPES?.trim();
+  const requestedScopes = [...new Set([
+    ...(configuredScopes?.split(/\s+/).filter(Boolean) ?? []),
+    'transactions:read',
+    'users:read',
+  ])].join(' ');
+  let scopes = requestedScopes;
+  let response = await requestAccessToken(scopes, clientId, clientSecret);
+
+  // Transactions remain available when an older Ramp app has not yet been
+  // granted users:read. The API payload will disclose that enrichment is
+  // unavailable instead of dropping the complete expense ledger.
+  if (!response.ok && response.status !== 401) {
+    scopes = configuredScopes || 'transactions:read';
+    response = await requestAccessToken(scopes, clientId, clientSecret);
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -58,6 +77,7 @@ async function getAccessToken(): Promise<string> {
   cachedToken = {
     value: json.access_token,
     expiresAt: Date.now() + Math.max(60, json.expires_in ?? 600) * 1000,
+    scopes,
   };
   return json.access_token;
 }

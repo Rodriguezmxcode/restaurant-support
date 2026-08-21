@@ -16,6 +16,7 @@ export type RampTransaction = {
   merchantLocation?: string;
   amount: number;
   cardholder?: string;
+  role?: string;
   department?: string;
   restaurant?: string;
   entity?: string;
