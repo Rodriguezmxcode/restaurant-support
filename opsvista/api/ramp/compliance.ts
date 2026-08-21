@@ -31,7 +31,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(503).json({ error: 'Authentication is not configured' });
   }
   if (!user) return res.status(401).json({ error: 'Authentication required' });
-  if (!isRole(user, ['Corporate', 'Administration'])) return res.status(403).json({ error: 'Not authorized for Ramp portfolio data' });
+  if (!isRole(user, ['Founder', 'Corporate', 'Administration'])) return res.status(403).json({ error: 'Not authorized for Ramp portfolio data' });
 
   try {
     const payload = await getRampCompliancePayload({
