@@ -2,6 +2,7 @@ import { readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
+import { getLocalIntelligence, localIntelligenceLocationNames } from '../server/localIntelligence.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -71,9 +72,21 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...tasksResult.value,logbook,...(logbookError?{logbookError}:{})});
 }
 
+async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
+ const requested=q(req,'location');
+ const unrestricted=['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role);
+ const selected=requested&&requested!=='All locations'?[requested]:unrestricted?undefined:user.locations;
+ if(selected?.some(location=>!localIntelligenceLocationNames.includes(location)))return res.status(400).json({error:'Unknown location'});
+ if(!unrestricted&&selected?.some(location=>!user.locations.includes(location)))return res.status(403).json({error:'Location outside your access scope'});
+ const payload=await getLocalIntelligence(selected);
+ res.setHeader?.('Cache-Control','private, max-age=60, stale-while-revalidate=120');
+ return res.status(200).json(payload);
+}
+
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='tasks')return await tasks(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':'payments';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
+ try{if(resource==='payments')return await payments(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':resource==='local_intelligence'?'local-intelligence':'payments';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
 }

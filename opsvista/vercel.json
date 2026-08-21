@@ -6,6 +6,7 @@
   "installCommand": "npm install",
   "rewrites": [
     { "source": "/api/payments", "destination": "/api/workflows?resource=payments" },
-    { "source": "/api/tasks/weekly", "destination": "/api/workflows?resource=tasks" }
+    { "source": "/api/tasks/weekly", "destination": "/api/workflows?resource=tasks" },
+    { "source": "/api/local-intelligence", "destination": "/api/workflows?resource=local_intelligence" }
   ]
 }

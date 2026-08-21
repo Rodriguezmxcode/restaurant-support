@@ -35,7 +35,10 @@ async function getAccessToken(): Promise<string> {
     throw new Error('Ramp credentials are not configured in the server environment.');
   }
 
-  const body = new URLSearchParams({ grant_type: 'client_credentials' });
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: process.env.RAMP_SCOPES || 'transactions:read',
+  });
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
   const response = await timedFetch(tokenUrl, {
     method: 'POST',
