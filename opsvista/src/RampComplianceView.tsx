@@ -9,6 +9,7 @@ import {
   type RampTransaction,
 } from './rampCompliance';
 import { loadRampTransactions } from './rampDataSource';
+import CustomDateRangePicker from './CustomDateRangePicker';
 import './rampCompliance.css';
 
 type Escalation = {
@@ -186,7 +187,7 @@ export default function RampComplianceView({ onEscalate }: Props) {
   return <div className="ramp-page">
     <section className="ramp-filter-bar">
       <label className="ramp-period-control"><span>Period</span><select value={period} onChange={event => setPeriod(event.target.value as RampPeriod)}>{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      {period === 'custom' && <div className="ramp-custom-dates"><label><span>From</span><input type="date" value={customStart} max={customEnd || today} min={addDays(customEnd || today, -30)} onChange={event => setCustomStart(event.target.value)} /></label><label><span>To</span><input type="date" value={customEnd} min={customStart} max={today < addDays(customStart || today, 30) ? today : addDays(customStart || today, 30)} onChange={event => setCustomEnd(event.target.value)} /></label></div>}
+      <CustomDateRangePicker active={period === 'custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start, end) => { setCustomStart(start); setCustomEnd(end); }} ariaLabel="Seleccionar periodo de gastos Ramp" />
       <div className="ramp-period-summary"><span>RESULTS SHOWN</span><strong>{periodLabels[period]} · {range.fromDate} → {range.toDate}</strong><small>Live Ramp transactions for the selected Connecticut operating period. Weeks run Wednesday–Tuesday.</small></div>
     </section>
     <section className={`ramp-live-strip ${dataSource === 'error' ? 'connection-error' : ''}`}>

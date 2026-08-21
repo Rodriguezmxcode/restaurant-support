@@ -2,7 +2,7 @@ import { readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
-import { getLocalIntelligence, localIntelligenceLocationNames } from '../server/localIntelligence.js';
+import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, type LocalIntelligenceHorizonKey } from '../server/localIntelligence.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -75,11 +75,13 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
 async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const requested=q(req,'location');
+ const horizonKey=(q(req,'horizon')||'next_14') as LocalIntelligenceHorizonKey;
+ if(!(horizonKey in localIntelligenceHorizons))return res.status(400).json({error:'Unknown Local Intelligence period'});
  const unrestricted=['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role);
  const selected=requested&&requested!=='All locations'?[requested]:unrestricted?undefined:user.locations;
  if(selected?.some(location=>!localIntelligenceLocationNames.includes(location)))return res.status(400).json({error:'Unknown location'});
  if(!unrestricted&&selected?.some(location=>!user.locations.includes(location)))return res.status(403).json({error:'Location outside your access scope'});
- const payload=await getLocalIntelligence(selected);
+ const payload=await getLocalIntelligence(selected,localIntelligenceHorizons[horizonKey]);
  res.setHeader?.('Cache-Control','private, max-age=60, stale-while-revalidate=120');
  return res.status(200).json(payload);
 }

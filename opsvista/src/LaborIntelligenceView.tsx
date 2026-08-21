@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import './laborIntelligence.css';
 import './laborFilters.css';
 import ScheduleOvertimeMonitor, { type ScheduleRisk } from './ScheduleOvertimeMonitor';
+import CustomDateRangePicker from './CustomDateRangePicker';
 
 type LaborEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:'High'|'Medium'|'Low'};
 type Props={onEscalate?:(item:LaborEscalation)=>void;allowedLocations?:string[]};
@@ -68,7 +69,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
   return <div className="labor-page">
     <section className="labor-filter-bar">
       <div className="labor-period-control"><label htmlFor="labor-period">Period</label><select id="labor-period" value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}>{Object.entries(periodLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
-      {period==='custom'&&<div className="labor-custom-dates"><label>From<input type="date" value={customStart} max={customEnd} min={addDays(customEnd,-30)} onChange={event=>setCustomStart(event.target.value)}/></label><label>To<input type="date" value={customEnd} min={customStart} max={today<addDays(customStart,30)?today:addDays(customStart,30)} onChange={event=>setCustomEnd(event.target.value)}/></label></div>}
+      <CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo de horarios" />
       <details className="labor-location-picker"><summary><span>Locations</span><strong>{locationLabel}</strong></summary><div className="labor-location-menu"><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/><span>All locations</span></label>{(allowedLocations||[]).map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/><span>{location}</span></label>)}</div></details>
       <div className="labor-period-explanation"><span>RESULTS SHOWN</span><strong>{periodLabels[period]} · {range.start} → {range.end}</strong><small>Toast sales, worked hours and labor cost for {locationLabel}.</small></div>
       <div className="labor-period-explanation overtime"><span>OVERTIME EVALUATION</span><strong>{overtimeWeek.start} → {overtimeWeek.end}</strong><small>40-hour threshold always uses the Wednesday–Tuesday operating week.</small></div>

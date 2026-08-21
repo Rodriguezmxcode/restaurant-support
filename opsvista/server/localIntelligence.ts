@@ -7,6 +7,52 @@ type ProviderState = {
   detail: string;
 };
 
+export type LocalIntelligenceHorizonKey = 'today' | 'tomorrow' | 'next_7' | 'next_14' | 'next_30';
+export type LocalIntelligenceHorizon = { key: LocalIntelligenceHorizonKey; startOffsetDays: number; horizonDays: number };
+export const localIntelligenceHorizons: Record<LocalIntelligenceHorizonKey, LocalIntelligenceHorizon> = {
+  today: { key: 'today', startOffsetDays: 0, horizonDays: 1 },
+  tomorrow: { key: 'tomorrow', startOffsetDays: 1, horizonDays: 1 },
+  next_7: { key: 'next_7', startOffsetDays: 0, horizonDays: 7 },
+  next_14: { key: 'next_14', startOffsetDays: 0, horizonDays: 14 },
+  next_30: { key: 'next_30', startOffsetDays: 0, horizonDays: 30 },
+};
+
+function easternToday() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function addIsoDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function easternMidnightUtc(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  const guess = new Date(Date.UTC(year, month - 1, day));
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(guess);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const representedAsUtc = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), Number(values.hour), Number(values.minute));
+  return new Date(guess.getTime() - (representedAsUtc - guess.getTime()));
+}
+
+function horizonRange(horizon: LocalIntelligenceHorizon) {
+  const today = easternToday();
+  const rangeStart = addIsoDays(today, horizon.startOffsetDays);
+  const rangeEnd = addIsoDays(rangeStart, horizon.horizonDays - 1);
+  const boundaryStart = easternMidnightUtc(rangeStart);
+  const now = new Date();
+  const start = horizon.startOffsetDays === 0 && now > boundaryStart ? now : boundaryStart;
+  const end = easternMidnightUtc(addIsoDays(rangeEnd, 1));
+  return { start, end, rangeStart, rangeEnd };
+}
+
 const locations: LocationPoint[] = [
   { name: 'Stamford', lat: 41.0534, lon: -73.5387 },
   { name: 'Orange', lat: 41.2784, lon: -73.0265 },
@@ -102,10 +148,9 @@ async function getTraffic(place: LocationPoint, key: string) {
   };
 }
 
-async function getEvents(place: LocationPoint, key: string) {
+async function getEvents(place: LocationPoint, key: string, horizon: LocalIntelligenceHorizon) {
   const url = new URL('https://app.ticketmaster.com/discovery/v2/events.json');
-  const start = new Date();
-  const end = new Date(start.getTime() + 14 * 86_400_000);
+  const { start, end } = horizonRange(horizon);
   url.searchParams.set('apikey', key);
   url.searchParams.set('latlong', `${place.lat},${place.lon}`);
   url.searchParams.set('radius', '25');
@@ -124,10 +169,10 @@ async function getEvents(place: LocationPoint, key: string) {
     city: event._embedded?.venues?.[0]?.city?.name || place.name,
     category: event.classifications?.[0]?.segment?.name || 'Event',
   }));
-  return { provider: 'Ticketmaster Discovery', eventCount: source.length, events, horizonDays: 14, updatedAt: new Date().toISOString() };
+  return { provider: 'Ticketmaster Discovery', eventCount: source.length, events, horizonDays: horizon.horizonDays, updatedAt: new Date().toISOString() };
 }
 
-function operatingAssessment(weather: any, traffic: any, events: any) {
+function operatingAssessment(weather: any, traffic: any, events: any, horizonDays: number) {
   const recommendations: string[] = [];
   let riskScore = 0;
   if (weather) {
@@ -138,7 +183,7 @@ function operatingAssessment(weather: any, traffic: any, events: any) {
     if (traffic.roadClosure) { riskScore += 3; recommendations.push('Existe un cierre vial cercano; avisa al equipo y anticipa retrasos de clientes y delivery.'); }
     else if (traffic.congestionPct >= 30 || traffic.incidentCount > 0) { riskScore += 2; recommendations.push('Escalona entradas y comunica rutas alternas por congestión o incidentes cercanos.'); }
   }
-  if (events?.eventCount >= 5) { riskScore += 2; recommendations.push('Revisa reservas, prep e inventario: hay varios eventos cercanos en los próximos 14 días.'); }
+  if (events?.eventCount >= 5) { riskScore += 2; recommendations.push(`Revisa reservas, prep e inventario: hay varios eventos cercanos en el horizonte de ${horizonDays} día${horizonDays === 1 ? '' : 's'}.`); }
   else if (events?.eventCount > 0) recommendations.push('Compara los eventos cercanos con reservas y ventas históricas antes de ajustar staffing.');
   if (!recommendations.length) recommendations.push('Sin señales externas críticas ahora; conserva el staffing planificado y monitorea cambios.');
   return {
@@ -148,7 +193,7 @@ function operatingAssessment(weather: any, traffic: any, events: any) {
   };
 }
 
-async function getExistingConnectedSource(requestedLocations?: string[]) {
+async function getExistingConnectedSource(requestedLocations: string[] | undefined, horizon: LocalIntelligenceHorizon) {
   const configuredUrl = process.env.OPSVISTA_LOCAL_INTELLIGENCE_SOURCE_URL?.trim();
   const candidates = [...new Set([
     configuredUrl,
@@ -163,6 +208,11 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
     try {
       const url = new URL(candidate);
       if (requestedLocations?.length === 1) url.searchParams.set('location', requestedLocations[0]);
+      const range = horizonRange(horizon);
+      url.searchParams.set('horizonDays', String(horizon.horizonDays));
+      url.searchParams.set('startOffsetDays', String(horizon.startOffsetDays));
+      url.searchParams.set('rangeStart', range.rangeStart);
+      url.searchParams.set('rangeEnd', range.rangeEnd);
       source = await timedJson(url, 9_000, 'Existing Local Intelligence connection');
       sourceUrl = `${url.origin}${url.pathname}`;
       break;
@@ -211,11 +261,18 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
       topIncident: trafficSource.topIncident || null,
       updatedAt: String(trafficSource.updatedAt || new Date().toISOString()),
     } : null;
+    const requestedRange = horizonRange(horizon);
+    const sourceMatchesHorizon = Number(source.horizonDays) === horizon.horizonDays && Number(source.startOffsetDays || 0) === horizon.startOffsetDays;
+    const sourceEvents = Array.isArray(eventsSource?.events) ? eventsSource.events : [];
+    const matchingEvents = sourceMatchesHorizon ? sourceEvents : sourceEvents.filter((event: any) => {
+      const date = String(event?.date || '').slice(0, 10);
+      return date && date >= requestedRange.rangeStart && date <= requestedRange.rangeEnd;
+    });
     const events = eventsSource ? {
       provider: 'Ticketmaster Discovery',
-      eventCount: Number(eventsSource.eventCount ?? 0),
-      events: Array.isArray(eventsSource.events) ? eventsSource.events : [],
-      horizonDays: 14,
+      eventCount: sourceMatchesHorizon ? Number(eventsSource.eventCount ?? matchingEvents.length) : matchingEvents.length,
+      events: matchingEvents,
+      horizonDays: horizon.horizonDays,
       updatedAt: String(eventsSource.updatedAt || new Date().toISOString()),
     } : null;
     return {
@@ -224,7 +281,7 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
       traffic,
       events,
       errors: { weather: '', traffic: '', events: '' },
-      assessment: operatingAssessment(weather, traffic, events),
+      assessment: operatingAssessment(weather, traffic, events, horizon.horizonDays),
     };
   }));
 
@@ -242,7 +299,10 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
     sourceUrl,
     sharedSource: true,
     fetchedAt: new Date().toISOString(),
-    horizonDays: 14,
+    horizonKey: horizon.key,
+    horizonDays: horizon.horizonDays,
+    rangeStart: horizonRange(horizon).rangeStart,
+    rangeEnd: horizonRange(horizon).rangeEnd,
     providers: [
       provider('weather', String(rows.find(row => row.weather)?.weather?.provider || 'Weather'), weatherCount),
       provider('traffic', 'TomTom Traffic', trafficCount),
@@ -252,9 +312,9 @@ async function getExistingConnectedSource(requestedLocations?: string[]) {
   };
 }
 
-export async function getLocalIntelligence(requestedLocations?: string[]) {
+export async function getLocalIntelligence(requestedLocations?: string[], horizon: LocalIntelligenceHorizon = localIntelligenceHorizons.next_14) {
   const selected = locations.filter(location => !requestedLocations?.length || requestedLocations.includes(location.name));
-  const cacheKey = selected.map(location => location.name).sort().join('|') || 'none';
+  const cacheKey = `${horizon.key}|${selected.map(location => location.name).sort().join('|') || 'none'}`;
   const cached = responseCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   const tomtomKey = process.env.TOMTOM_API_KEY;
@@ -266,7 +326,7 @@ export async function getLocalIntelligence(requestedLocations?: string[]) {
   // this server-to-server boundary; provider keys remain in PV Operations.
   if (!tomtomKey || !ticketmasterKey) {
     try {
-      const sharedPayload = await getExistingConnectedSource(requestedLocations);
+      const sharedPayload = await getExistingConnectedSource(requestedLocations, horizon);
       responseCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, value: sharedPayload });
       return sharedPayload;
     } catch {
@@ -279,7 +339,7 @@ export async function getLocalIntelligence(requestedLocations?: string[]) {
     const [weatherResult, trafficResult, eventsResult] = await Promise.allSettled([
       getWeather(place, weatherKey),
       tomtomKey ? getTraffic(place, tomtomKey) : Promise.resolve(null),
-      ticketmasterKey ? getEvents(place, ticketmasterKey) : Promise.resolve(null),
+      ticketmasterKey ? getEvents(place, ticketmasterKey, horizon) : Promise.resolve(null),
     ]);
     const weather = weatherResult.status === 'fulfilled' ? weatherResult.value : null;
     const traffic = trafficResult.status === 'fulfilled' ? trafficResult.value : null;
@@ -291,7 +351,7 @@ export async function getLocalIntelligence(requestedLocations?: string[]) {
         traffic: trafficResult.status === 'rejected' ? String(trafficResult.reason?.message || trafficResult.reason) : '',
         events: eventsResult.status === 'rejected' ? String(eventsResult.reason?.message || eventsResult.reason) : '',
       },
-      assessment: operatingAssessment(weather, traffic, events),
+      assessment: operatingAssessment(weather, traffic, events, horizon.horizonDays),
     };
   }));
 
@@ -305,7 +365,8 @@ export async function getLocalIntelligence(requestedLocations?: string[]) {
   const trafficFailures = rows.filter(row => !row.traffic).length;
   const eventFailures = rows.filter(row => !row.events).length;
   const payload = {
-    source: 'OpsVista Local Intelligence', fetchedAt: new Date().toISOString(), horizonDays: 14,
+    source: 'OpsVista Local Intelligence', fetchedAt: new Date().toISOString(), horizonKey: horizon.key, horizonDays: horizon.horizonDays,
+    rangeStart: horizonRange(horizon).rangeStart, rangeEnd: horizonRange(horizon).rangeEnd,
     providers: [
       providerState('weather', Boolean(weatherKey), weatherFailures < rows.length, weatherFailures, true),
       providerState('traffic', Boolean(tomtomKey), trafficFailures < rows.length, trafficFailures),
