@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import './scheduleOvertimeMonitor.css';
+import './scheduleSalary.css';
 
 export type ScheduleShift={id:number;start:string;end:string;location:string;role:string};
 export type ScheduleEmployee={
   userId:number;employeeName:string;primaryLocation:string;locations:string[];role:string;
   workedHours:number;scheduledHours:number;remainingScheduledHours:number;projectedHours:number;
-  overtimeHours:number;actualOvertimeHours:number;hourlyWage:number|null;estimatedOvertimeCost:number|null;wageSource:'shift_or_punch'|'user_hourly'|'unavailable';toastMatchStatus:'matched_external_id'|'matched_name'|'ambiguous'|'unmatched';nextShift?:ScheduleShift;
-  status:'Overtime'|'Risk'|'Safe';
+  overtimeHours:number;actualOvertimeHours:number;hourlyWage:number|null;estimatedOvertimeCost:number|null;wageSource:'shift_or_punch'|'user_hourly'|'unavailable';toastMatchStatus:'matched_external_id'|'matched_name'|'ambiguous'|'unmatched';employmentType:'hourly'|'salary';nextShift?:ScheduleShift;
+  status:'Overtime'|'Risk'|'Safe'|'Salary';
 };
 export type ScheduleLocation={location:string;monitoredEmployees:number;riskEmployees:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number};
 export type ScheduleRisk={
@@ -32,8 +33,8 @@ export default function ScheduleOvertimeMonitor({data,error,loading,onEscalate}:
   const [selected,setSelected]=useState<ScheduleEmployee|null>(null);
   const [sent,setSent]=useState<number[]>([]);
   const employees=useMemo(()=>((data?.employees||[])
-    .filter(row=>!onlyRisk||row.projectedHours>=alertAt)
-    .sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours)),[data,onlyRisk,alertAt]);
+    .filter(row=>!onlyRisk||(row.employmentType==='hourly'&&row.projectedHours>=alertAt))
+    .sort((a,b)=>a.employmentType!==b.employmentType?(a.employmentType==='salary'?1:-1):b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours)),[data,onlyRisk,alertAt]);
   const locationRows=useMemo(()=>(data?.locations||[]),[data]);
   const topRisk=employees.filter(row=>row.overtimeHours>0).slice(0,2);
   const send=(employee:ScheduleEmployee)=>{
@@ -59,16 +60,16 @@ export default function ScheduleOvertimeMonitor({data,error,loading,onEscalate}:
       <section className="schedule-panel schedule-employee-panel">
         <div className="schedule-panel-head"><div><h3>Horas por empleado</h3><p>Trabajadas y tarifa: Toast Time Entry Management · Programadas: 7shifts.{data.unmatchedToastEmployees?` ${data.unmatchedToastEmployees} empleados requieren vinculación entre sistemas.`:''}</p></div><span>{employees.length} empleados</span></div>
         <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>Empleado</th><th>Locación / puesto</th><th>Trabajadas Toast</th><th>Tarifa Toast</th><th>Programadas 7shifts</th><th>Proyección</th><th>OT proyectado</th><th>Próximo turno</th><th>Acción</th></tr></thead><tbody>
-          {employees.map(employee=>{const progress=Math.min(100,employee.workedHours/40*100);const atRisk=employee.projectedHours>=alertAt;return <tr key={employee.userId} className={employee.overtimeHours>0?'schedule-overtime-row':atRisk?'schedule-risk-row':''}>
-            <td><div className="schedule-person"><span>{initials(employee.employeeName)}</span><div><strong>{employee.employeeName}</strong>{!employee.toastMatchStatus.startsWith('matched')&&<small>Sin vínculo confirmado con Toast</small>}</div></div></td>
+          {employees.map(employee=>{const salaried=employee.employmentType==='salary';const progress=Math.min(100,employee.workedHours/40*100);const atRisk=!salaried&&employee.projectedHours>=alertAt;return <tr key={employee.userId} className={employee.overtimeHours>0?'schedule-overtime-row':atRisk?'schedule-risk-row':salaried?'schedule-salary-row':''}>
+            <td><div className="schedule-person"><span>{initials(employee.employeeName)}</span><div><strong>{employee.employeeName}</strong>{salaried?<small>Personal asalariado</small>:!employee.toastMatchStatus.startsWith('matched')&&<small>Sin vínculo confirmado con Toast</small>}</div></div></td>
             <td><strong>{employee.primaryLocation}</strong><small>{employee.role}{employee.locations.length>1?` · ${employee.locations.length} locations`:''}</small></td>
-            <td><strong>{employee.workedHours.toFixed(1)} h</strong><small>{employee.actualOvertimeHours.toFixed(1)} h OT ya trabajadas</small><div className="schedule-progress"><i style={{width:`${progress}%`}} className={employee.overtimeHours>0?'danger':atRisk?'warning':''}/></div></td>
-            <td><strong>{employee.hourlyWage===null?'—':`${money(employee.hourlyWage)}/h`}</strong><small>{employee.hourlyWage===null?'Sin tarifa horaria válida':'Time Entry Management'}</small></td>
+            <td><strong>{employee.workedHours.toFixed(1)} h</strong><small>{salaried?'Horas de cobertura registradas':`${employee.actualOvertimeHours.toFixed(1)} h OT ya trabajadas`}</small><div className="schedule-progress"><i style={{width:`${progress}%`}} className={employee.overtimeHours>0?'danger':atRisk?'warning':''}/></div></td>
+            <td><strong>{salaried?'Salario':employee.hourlyWage===null?'—':`${money(employee.hourlyWage)}/h`}</strong><small>{salaried?'No usa tarifa por hora':employee.hourlyWage===null?'Sin tarifa horaria válida':'Time Entry Management'}</small></td>
             <td><strong>{employee.scheduledHours.toFixed(1)} h</strong><small>{employee.remainingScheduledHours.toFixed(1)} h restantes</small></td>
-            <td><strong className={employee.overtimeHours>0?'schedule-danger-text':''}>{employee.projectedHours.toFixed(1)} h</strong></td>
-            <td>{employee.overtimeHours>0?<><span className="schedule-ot-pill">+{employee.overtimeHours.toFixed(1)} h</span><small>{cost(employee.estimatedOvertimeCost)}</small></>:atRisk?<span className="schedule-risk-pill">Cerca del límite</span>:<span className="schedule-safe-pill">Sin OT</span>}</td>
+            <td><strong className={employee.overtimeHours>0?'schedule-danger-text':''}>{employee.projectedHours.toFixed(1)} h</strong>{salaried&&<small>Cobertura asalariada</small>}</td>
+            <td>{salaried?<span className="schedule-salary-pill">Salario · OT no aplica</span>:employee.overtimeHours>0?<><span className="schedule-ot-pill">+{employee.overtimeHours.toFixed(1)} h</span><small>{cost(employee.estimatedOvertimeCost)}</small></>:atRisk?<span className="schedule-risk-pill">Cerca del límite</span>:<span className="schedule-safe-pill">Sin OT</span>}</td>
             <td>{employee.nextShift?<><strong>{dateTime(employee.nextShift.start)}</strong><small>{employee.nextShift.location} · {employee.nextShift.role}</small></>:<span>Sin turnos restantes</span>}</td>
-            <td><button onClick={()=>setSelected(employee)}>Revisar</button></td>
+            <td><button disabled={salaried} onClick={()=>setSelected(employee)}>{salaried?'Salario':'Revisar'}</button></td>
           </tr>})}
           {!employees.length&&<tr><td colSpan={9}><div className="schedule-empty">No hay empleados que coincidan con estos filtros.</div></td></tr>}
         </tbody></table></div>
