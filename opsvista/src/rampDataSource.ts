@@ -7,6 +7,15 @@ export type RampDataEnvelope = {
   toDate?: string;
   transactions: RampTransaction[];
   warning?: string;
+  serverVersion?: string;
+  rawTransactionCount?: number;
+  userEnrichment?: {
+    available: boolean;
+    userCount: number;
+    matchedTransactions: number;
+    directoryMatchedTransactions?: number;
+    warning?: string;
+  };
 };
 
 export type RampDateRange = {

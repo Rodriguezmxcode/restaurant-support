@@ -58,7 +58,8 @@ function firstText(...values: any[]): string | undefined {
 }
 
 function accountingSelection(tx: any, pattern: RegExp): string | undefined {
-  const selections = Array.isArray(tx.accounting_field_selections) ? tx.accounting_field_selections : [];
+  const lineItemSelections = (Array.isArray(tx.line_items) ? tx.line_items : []).flatMap((line: any) => Array.isArray(line?.accounting_field_selections) ? line.accounting_field_selections : []);
+  const selections = [...(Array.isArray(tx.accounting_field_selections) ? tx.accounting_field_selections : []), ...lineItemSelections];
   for (const raw of selections) {
     const item = asObject(raw);
     const field = firstText(item.field_name, item.name, item.display_name, item.label) || '';
@@ -69,10 +70,25 @@ function accountingSelection(tx: any, pattern: RegExp): string | undefined {
       typeof item.selected_value === 'string' ? item.selected_value : undefined,
       selected.name,
       selected.display_name,
+      item.name,
       item.category_name,
     );
     if (value) return value;
   }
+  return undefined;
+}
+
+function lineItemMemo(tx: any): string | undefined {
+  const items = Array.isArray(tx.line_items) ? tx.line_items : [];
+  return items.map((item: any) => firstText(item?.memo, item?.description)).find(Boolean);
+}
+
+function operationalRole(...values: any[]): string | undefined {
+  const value = values.filter(item => typeof item === 'string').join(' ').toLowerCase();
+  if (/sub\s*chef|sous\s*chef|chef|kitchen|cocina/.test(value)) return 'Chef';
+  if (/manager|general manager|assistant manager|gerente/.test(value)) return 'Manager';
+  if (/maintenance|mantenimiento|facilities/.test(value)) return 'Maintenance';
+  if (/corporate|executive|president|owner|founder|operations|office|administration|administrative|admin|human resources|payroll/.test(value)) return 'Corporate';
   return undefined;
 }
 
@@ -125,7 +141,7 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
   const user = asObject(tx.user);
   const department = asObject(tx.department);
   const location = asObject(tx.location);
-  const resolvedMemo = memo || tx.memo || tx.memo_text || '';
+  const resolvedMemo = memo || tx.memo || tx.memo_text || lineItemMemo(tx) || '';
   const resolvedCardholder = firstText(
     typeof tx.card_holder === 'string' ? tx.card_holder : undefined,
     tx.cardholder_name,
@@ -171,6 +187,15 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
     category,
     accountingCategory,
   ) || firstText(tx.location_name, nameOf(location), references.location);
+  const role = operationalRole(
+    references.role,
+    tx.job_title,
+    tx.position,
+    cardHolder.job_title,
+    cardHolder.role,
+    cardHolder.department_name,
+    resolvedDepartment,
+  );
   return {
     id: String(tx.id || tx.transaction_id || ''),
     date,
@@ -179,7 +204,7 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
     merchantLocation: merchantLocationOf(tx),
     amount: dollars(tx.amount ?? tx.amount_details ?? tx.total_amount ?? tx.cardholder_amount),
     cardholder: resolvedCardholder,
-    role: references.role,
+    role,
     department: resolvedDepartment,
     restaurant: resolvedRestaurant,
     entity: nameOf(tx.entity) || tx.entity_name || references.entity,
@@ -187,7 +212,7 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
     accountingCategory,
     cardLastFour: String(tx.card?.last_four || tx.card?.last_four_digits || tx.card_last_four || tx.last_four || '').trim() || undefined,
     memo: resolvedMemo,
-    receiptAttached: hasReceipt || Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length),
+    receiptAttached: hasReceipt || Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length || tx.receipt_attached || tx.has_receipt),
     state: status.includes('PENDING') ? 'PENDING' : 'CLEARED',
     source: 'Ramp',
   };

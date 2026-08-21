@@ -1,5 +1,6 @@
 import { rampGet } from './rampClient.js';
 import { normalizeRampTransaction } from './rampNormalize.js';
+import { listManagedUsers, type ManagedDirectoryUser } from './managementStore.js';
 
 type Page<T> = { data?: T[]; page?: { next?: string | null } };
 
@@ -28,10 +29,16 @@ async function collect<T>(path: string, query: Record<string, string | number | 
   const rows: T[] = [];
   let start: string | undefined;
 
-  for (let i = 0; i < 10; i += 1) {
+  // A 30-day view can exceed 1,000 transactions across all restaurants.
+  // Follow up to 5,000 records so the dashboard does not silently undercount.
+  for (let i = 0; i < 50; i += 1) {
     const page = await rampGet<Page<T>>(path, { ...query, page_size: 100, start });
     rows.push(...(page.data ?? []));
-    start = page.page?.next || undefined;
+    const next = page.page?.next || undefined;
+    if (next) {
+      try { start = new URL(next).searchParams.get('start') || next; }
+      catch { start = next; }
+    } else start = undefined;
     if (!start) break;
   }
 
@@ -60,14 +67,49 @@ function personName(user: any): string | undefined {
 }
 
 function classifyRole(...values: any[]): string | undefined {
-  const original = values.find(value => typeof value === 'string' && value.trim())?.trim();
-  if (!original) return undefined;
   const value = values.filter(item => typeof item === 'string').join(' ').toLowerCase();
   if (/sub\s*chef|sous\s*chef|chef|kitchen|cocina/.test(value)) return 'Chef';
   if (/manager|general manager|assistant manager|gerente/.test(value)) return 'Manager';
   if (/maintenance|mantenimiento|facilities/.test(value)) return 'Maintenance';
-  if (/corporate|operations|office|administration|administrative|admin/.test(value)) return 'Corporate';
-  return original;
+  if (/corporate|executive|president|owner|founder|operations|office|administration|administrative|admin/.test(value)) return 'Corporate';
+  return undefined;
+}
+
+function normalizeIdentity(value: string | undefined) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function managedRole(user: ManagedDirectoryUser): string {
+  if (user.role === 'Kitchen') return 'Chef';
+  if (user.role === 'Location Manager') return 'Manager';
+  if (user.role === 'Maintenance') return 'Maintenance';
+  return 'Corporate';
+}
+
+function managedDepartment(user: ManagedDirectoryUser): string {
+  if (user.role === 'Kitchen') return 'Kitchen';
+  if (user.role === 'Location Manager') return 'Restaurant Management';
+  if (user.role === 'Maintenance') return 'Maintenance';
+  if (user.role === 'Administration') return 'Administration';
+  if (user.role === 'HR') return 'Human Resources';
+  return 'Corporate';
+}
+
+function managedLocation(user: ManagedDirectoryUser): string | undefined {
+  if (user.locations.length === 1) return user.locations[0];
+  if (['Founder', 'Corporate', 'Administration', 'HR', 'Maintenance'].includes(user.role)) return 'Corporate';
+  return undefined;
+}
+
+function transactionEmails(tx: any): string[] {
+  return [
+    tx.card_holder_email,
+    tx.cardholder_email,
+    asObject(tx.card_holder).email,
+    asObject(tx.cardholder).email,
+    asObject(tx.user).email,
+    asObject(tx.spent_by).email,
+  ].filter(value => typeof value === 'string' && value.trim()).map(value => value.trim().toLowerCase());
 }
 
 function userIdOf(value: any): string | undefined {
@@ -128,28 +170,44 @@ export async function getRampCompliancePayload(params?: { fromDate?: string; toD
   // endpoint or scope is unavailable.
   const transactions = await collect<any>('transactions', transactionQuery);
   let users: any[] = [];
+  let managedUsers: ManagedDirectoryUser[] = [];
   let userEnrichmentWarning: string | undefined;
-  try {
-    users = await collect<any>('users');
-  } catch (error) {
-    userEnrichmentWarning = error instanceof Error
-      ? `Ramp user enrichment unavailable: ${error.message}`
-      : 'Ramp user enrichment unavailable.';
-  }
+  const [rampUsersResult,managedUsersResult] = await Promise.allSettled([collect<any>('users'), listManagedUsers()]);
+  if (rampUsersResult.status === 'fulfilled') users = rampUsersResult.value;
+  else userEnrichmentWarning = rampUsersResult.reason instanceof Error
+    ? `Ramp user enrichment unavailable: ${rampUsersResult.reason.message}`
+    : 'Ramp user enrichment unavailable.';
+  if (managedUsersResult.status === 'fulfilled') managedUsers = managedUsersResult.value.filter(user => user.active);
   const usersById = new Map<string, any>();
   users.forEach(user => {
     const id = userIdOf(user);
     if (id) usersById.set(id, user);
   });
+  const managedByEmail = new Map(managedUsers.filter(user => user.email).map(user => [String(user.email).toLowerCase(), user]));
+  const managedByName = new Map(managedUsers.map(user => [normalizeIdentity(user.name), user]));
+  let directoryMatchedTransactions = 0;
   const normalized = transactions
     .map(tx => {
       const user = usersById.get(transactionUserId(tx) || '');
-      return normalizeRampTransaction(
+      const memo = tx.memo || tx.memo_text || tx.memos?.[0]?.memo;
+      const receipt = Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length || tx.receipt_attached || tx.has_receipt);
+      const initial = normalizeRampTransaction(
         tx,
-        tx.memo || tx.memo_text || tx.memos?.[0]?.memo,
-        Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length || tx.receipt_attached),
+        memo,
+        receipt,
         user ? userReferences(user) : {},
       );
+      const managed = transactionEmails(tx).map(email => managedByEmail.get(email)).find(Boolean)
+        || managedByName.get(normalizeIdentity(initial.cardholder));
+      if (!managed) return initial;
+      directoryMatchedTransactions += 1;
+      return normalizeRampTransaction(tx, memo, receipt, {
+        cardholder: initial.cardholder || managed.name,
+        role: initial.role || managedRole(managed),
+        department: initial.department || managedDepartment(managed),
+        location: initial.restaurant || managedLocation(managed),
+        entity: initial.entity,
+      });
     })
     .filter(tx => tx.id && tx.date >= range.fromDate && tx.date <= range.toDate);
 
@@ -158,12 +216,13 @@ export async function getRampCompliancePayload(params?: { fromDate?: string; toD
     fetchedAt: new Date().toISOString(),
     fromDate: range.fromDate,
     toDate: range.toDate,
-    serverVersion: 'ramp-live-v3-users',
+    serverVersion: 'ramp-live-v4-attribution',
     rawTransactionCount: transactions.length,
     userEnrichment: {
       available: users.length > 0,
       userCount: users.length,
       matchedTransactions: normalized.filter(tx => Boolean(tx.cardholder)).length,
+      directoryMatchedTransactions,
       warning: userEnrichmentWarning,
     },
     warning: userEnrichmentWarning,

@@ -117,7 +117,11 @@ export default function RampComplianceView({ onEscalate }: Props) {
   const [dataSource, setDataSource] = useState<RampSourceState>('loading');
   const [dataWarning, setDataWarning] = useState<string | undefined>();
   const [fetchedAt, setFetchedAt] = useState<string | undefined>();
+  const [identifiedCardholders, setIdentifiedCardholders] = useState<number | undefined>();
+  const [rampAdapterVersion, setRampAdapterVersion] = useState<string | undefined>();
   const [status, setStatus] = useState('All');
+  const [restaurantFilter, setRestaurantFilter] = useState('All');
+  const [roleFilter, setRoleFilter] = useState('All');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<RampComplianceResult | null>(null);
   const [escalated, setEscalated] = useState<string[]>([]);
@@ -136,6 +140,8 @@ export default function RampComplianceView({ onEscalate }: Props) {
     setDataSource(envelope.source);
     setDataWarning(envelope.warning);
     setFetchedAt(envelope.fetchedAt);
+    setIdentifiedCardholders(envelope.userEnrichment?.matchedTransactions);
+    setRampAdapterVersion(envelope.serverVersion);
   };
 
   useEffect(() => {
@@ -151,13 +157,17 @@ export default function RampComplianceView({ onEscalate }: Props) {
   const cardholderRows = useMemo(() => groupRampCompliance(results, 'cardholder'), [results]);
   const locationRows = useMemo(() => groupRampCompliance(results, 'department'), [results]);
   const overdueRows = useMemo(() => results.filter(tx => tx.overdue), [results]);
+  const restaurantOptions = useMemo(() => [...new Set(results.map(tx => tx.restaurant || tx.department).filter(Boolean) as string[])].sort(), [results]);
+  const roleOptions = useMemo(() => [...new Set(results.map(tx => tx.role).filter(Boolean) as string[])].sort(), [results]);
 
   const filtered = results.filter(tx => {
     const statusMatch = status === 'All' || tx.complianceStatus === status || (status === 'Overdue >48h' && tx.overdue);
+    const restaurantMatch = restaurantFilter === 'All' || tx.restaurant === restaurantFilter || (!tx.restaurant && tx.department === restaurantFilter);
+    const roleMatch = roleFilter === 'All' || tx.role === roleFilter;
     const q = query.trim().toLowerCase();
     const queryMatch = !q || [tx.merchant, tx.merchantLocation, tx.cardholder, tx.role, tx.department, tx.restaurant, tx.entity, tx.category, tx.accountingCategory, tx.cardLastFour, tx.memo, ...tx.flags]
       .filter(Boolean).join(' ').toLowerCase().includes(q);
-    return statusMatch && queryMatch;
+    return statusMatch && restaurantMatch && roleMatch && queryMatch;
   });
 
   const escalationFor = (tx: RampComplianceResult): Escalation => ({
@@ -194,7 +204,7 @@ export default function RampComplianceView({ onEscalate }: Props) {
       <div>
         <span className={`ramp-source-badge ${dataSource}`}>{sourceLabel}</span>
         <strong>{sourceTitle}</strong>
-        <small>{dataWarning || (fetchedAt ? `Last sync ${new Date(fetchedAt).toLocaleString()} · ${transactions.length} transactions` : 'Checking secure server connection')}</small>
+        <small>{dataWarning || (fetchedAt ? `Last sync ${new Date(fetchedAt).toLocaleString()} · ${transactions.length} transactions · ${identifiedCardholders ?? 0} cardholders identified${rampAdapterVersion ? ` · ${rampAdapterVersion}` : ''}` : 'Checking secure server connection')}</small>
       </div>
       <button onClick={() => void refresh()} disabled={dataSource === 'loading'}>↻ Refresh Ramp</button>
     </section>
@@ -205,12 +215,12 @@ export default function RampComplianceView({ onEscalate }: Props) {
     </section>}
 
     <section className="ramp-summary-grid">
+      <article className="ramp-summary-card hero-spend"><span>TOTAL RAMP SPEND</span><strong>{money(summary.totalSpend)}</strong><p>{summary.total} transactions in the selected period</p></article>
       <article className="ramp-summary-card hero-score"><span>RAMP COMPLIANCE SCORE</span><strong>{summary.total ? summary.score : '—'}</strong><small>/100</small><p>{summary.total ? `${summary.compliant} of ${summary.total} transactions fully compliant` : 'No transactions returned for this period'}</p></article>
       <article className="ramp-summary-card overdue-card"><span>OVERDUE &gt;48H</span><strong>{summary.overdue}</strong><p>{money(summary.overdueSpend)} missing receipt or memo past deadline</p></article>
       <article className="ramp-summary-card attention"><span>REQUIRES ATTENTION</span><strong>{summary.needsAttention}</strong><p>{money(summary.exposedSpend)} exposed spend</p></article>
       <article className="ramp-summary-card"><span>MISSING RECEIPTS</span><strong>{summary.missingReceipts}</strong><p>Receipt evidence required</p></article>
       <article className="ramp-summary-card"><span>MISSING MEMOS</span><strong>{summary.missingMemos}</strong><p>Purpose of spend incomplete</p></article>
-      <article className="ramp-summary-card"><span>SPEND REVIEWED</span><strong>{money(summary.totalSpend)}</strong><p>{summary.total} transactions in current view</p></article>
     </section>
 
     <section className="ramp-policy-strip">
@@ -226,7 +236,12 @@ export default function RampComplianceView({ onEscalate }: Props) {
     <section className="ramp-table-panel">
       <div className="ramp-table-head">
         <div><h2>Ramp Expense Ledger</h2><p>Every available Ramp field is tied to the selected period: cardholder, merchant, restaurant, department, purpose and evidence.</p></div>
-        <div className="ramp-controls"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search merchant, cardholder or flag..."/><select value={status} onChange={e => setStatus(e.target.value)}><option>All</option><option>Overdue &gt;48h</option><option>Critical</option><option>Needs attention</option><option>Compliant</option></select></div>
+        <div className="ramp-controls">
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search merchant, cardholder, memo..."/>
+          <select aria-label="Filter by restaurant or department" value={restaurantFilter} onChange={e => setRestaurantFilter(e.target.value)}><option>All</option>{restaurantOptions.map(value => <option key={value}>{value}</option>)}</select>
+          <select aria-label="Filter by role" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}><option>All</option>{roleOptions.map(value => <option key={value}>{value}</option>)}</select>
+          <select aria-label="Filter by compliance status" value={status} onChange={e => setStatus(e.target.value)}><option>All</option><option>Overdue &gt;48h</option><option>Critical</option><option>Needs attention</option><option>Compliant</option></select>
+        </div>
       </div>
       <div className="ramp-table-wrap"><table className="ramp-table">
         <thead><tr><th>Date / time</th><th>Age</th><th>Cardholder / card</th><th>Role / position</th><th>Merchant / place</th><th>Restaurant</th><th>Department</th><th>Category</th><th>Entity</th><th>Memo</th><th>Amount</th><th>Receipt / state</th><th>Compliance</th><th></th></tr></thead>
