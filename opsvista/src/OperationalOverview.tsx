@@ -12,12 +12,15 @@ const baselineRows:BaselineRow[]=[
 ];
 const money=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 const money2=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
-function startOfOperationalWeek(date:Date){const d=new Date(date);d.setHours(0,0,0,0);const delta=(d.getDay()-3+7)%7;d.setDate(d.getDate()-delta);return d}
-function iso(d:Date){return d.toISOString().slice(0,10)}
-function plusDays(d:Date,n:number){const x=new Date(d);x.setDate(x.getDate()+n);return x}
-function monthStart(d:Date,offset=0){return new Date(d.getFullYear(),d.getMonth()+offset,1)}
-function monthEnd(d:Date,offset=0){return new Date(d.getFullYear(),d.getMonth()+offset+1,0)}
-function resolveRange(key:RangeKey,customStart:string,customEnd:string){const now=new Date();if(key==='today')return{start:iso(now),end:iso(now),label:'Today'};if(key==='this-week'){const s=startOfOperationalWeek(now);return{start:iso(s),end:iso(now),label:'This operating week'}};if(key==='previous-week'){const s=plusDays(startOfOperationalWeek(now),-7);return{start:iso(s),end:iso(plusDays(s,6)),label:'Previous operating week'}};if(key==='this-month')return{start:iso(monthStart(now)),end:iso(now),label:'This month'};if(key==='last-month')return{start:iso(monthStart(now,-1)),end:iso(monthEnd(now,-1)),label:'Last month'};return{start:customStart,end:customEnd,label:'Custom range'}}
+function easternToday(){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const value=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+function plusDays(value:string,n:number){const date=new Date(`${value}T00:00:00.000Z`);date.setUTCDate(date.getUTCDate()+n);return date.toISOString().slice(0,10)}
+function startOfOperationalWeek(value:string){const day=new Date(`${value}T00:00:00.000Z`).getUTCDay();return plusDays(value,-((day-3+7)%7))}
+function monthBoundary(value:string,offset:number,end=false){const [year,month]=value.split('-').map(Number);const date=end?new Date(Date.UTC(year,month+offset,0)):new Date(Date.UTC(year,month-1+offset,1));return date.toISOString().slice(0,10)}
+function resolveRange(key:RangeKey,customStart:string,customEnd:string){const today=easternToday();if(key==='today')return{start:today,end:today,label:'Today'};if(key==='this-week'){const start=startOfOperationalWeek(today);return{start,end:today,label:'This operating week'}};if(key==='previous-week'){const start=plusDays(startOfOperationalWeek(today),-7);return{start,end:plusDays(start,6),label:'Previous operating week'}};if(key==='this-month')return{start:monthBoundary(today,0),end:today,label:'This month'};if(key==='last-month')return{start:monthBoundary(today,-1),end:monthBoundary(today,-1,true),label:'Last month'};return{start:customStart,end:customEnd,label:'Custom range'}}
 function Kpi({label,value,note,status='ready'}:{label:string;value:string;note:string;status?:'ready'|'pending'|'warning'}){const accent=status==='warning'?'#b45309':status==='pending'?'#64748b':'#0f766e';return <div style={{background:'#fff',border:'1px solid #dce6f0',borderRadius:14,padding:'16px 17px',minHeight:120,boxShadow:'0 2px 8px rgba(15,23,42,.035)'}}><div style={{fontSize:11,fontWeight:850,letterSpacing:'.055em',color:'#526174'}}>{label}</div><div style={{fontSize:27,fontWeight:850,letterSpacing:'-.035em',color:'#142235',marginTop:9}}>{value}</div><div style={{fontSize:12.5,lineHeight:1.4,color:accent,fontWeight:650,marginTop:7}}>{note}</div></div>}
 
 export default function OperationalOverview({allowedLocations,allLocations,initialLocation='All locations'}:Props){

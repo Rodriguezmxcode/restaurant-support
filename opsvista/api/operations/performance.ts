@@ -1,8 +1,7 @@
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
-import { getSevenShiftsTaskCompliance } from '../../server/sevenShiftsTasks.js';
-import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk } from '../../server/sevenShiftsClient.js';
+import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -13,6 +12,14 @@ function daysInclusive(start:string,end:string){return Math.floor((new Date(`${e
 function locationList(value:string){return Array.from(new Set(value.split(',').map(item=>item.trim()).filter(Boolean)));}
 function addDays(value:string,days:number){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
 function operatingWeek(value:string){const day=new Date(`${value}T00:00:00Z`).getUTCDay();const start=addDays(value,-((day-3+7)%7));return{start,end:addDays(start,6)};}
+async function getPerformanceTaskCompliance(start:string,end:string,requested?:string[]){
+  const data=await weeklyTaskCompliance(start,end,requested);
+  return {
+    source:'7shifts live daily summary',start,end,
+    locations:data.locations.map(row=>({location:row.locationName,completed:row.completed,total:row.total,compliancePct:row.completionPct??0})),
+    totals:{completed:data.completed,total:data.total,compliancePct:data.completionPct??0}
+  };
+}
 
 export default async function handler(req:Req,res:Res){
   if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
@@ -43,7 +50,7 @@ export default async function handler(req:Req,res:Res){
     const [toastLocations,weeklyEmployeeLabor,taskResult,scheduleResult]=await Promise.all([
       getToastPerformance(start,end,requested),
       sameLaborRange?Promise.resolve(null):getToastEmployeeLabor(scheduleStart,overtimeEnd,requested),
-      includeTasks?getSevenShiftsTaskCompliance(start,end).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})):Promise.resolve({data:null,error:''}),
+      includeTasks?getPerformanceTaskCompliance(start,end,requested).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})):Promise.resolve({data:null,error:''}),
       getSevenShiftsScheduleRisk(scheduleStart,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
