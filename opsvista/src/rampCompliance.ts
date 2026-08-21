@@ -13,9 +13,15 @@ export type RampTransaction = {
   date: string;
   transactionTime?: string;
   merchant: string;
+  merchantLocation?: string;
   amount: number;
   cardholder?: string;
   department?: string;
+  restaurant?: string;
+  entity?: string;
+  category?: string;
+  accountingCategory?: string;
+  cardLastFour?: string;
   memo?: string;
   receiptAttached: boolean;
   state: 'CLEARED' | 'PENDING';
@@ -184,7 +190,7 @@ export function groupRampCompliance(
   const groups = new Map<string, RampComplianceResult[]>();
 
   results.forEach(tx => {
-    const raw = dimension === 'cardholder' ? tx.cardholder : tx.department;
+    const raw = dimension === 'cardholder' ? tx.cardholder : tx.restaurant || tx.department;
     const key = raw?.trim() || (dimension === 'cardholder' ? 'Not identified' : 'Unassigned');
     const existing = groups.get(key) ?? [];
     existing.push(tx);

@@ -3,8 +3,15 @@ import { rampDemoTransactions, type RampTransaction } from './rampCompliance';
 export type RampDataEnvelope = {
   source: 'live' | 'demo' | 'error';
   fetchedAt?: string;
+  fromDate?: string;
+  toDate?: string;
   transactions: RampTransaction[];
   warning?: string;
+};
+
+export type RampDateRange = {
+  fromDate: string;
+  toDate: string;
 };
 
 function demoFallbackAllowed() {
@@ -19,12 +26,14 @@ function errorText(value: unknown): string {
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
-export async function loadRampTransactions(): Promise<RampDataEnvelope> {
+export async function loadRampTransactions(range: RampDateRange): Promise<RampDataEnvelope> {
   try {
-    const response = await fetch('/api/ramp/compliance', {
+    const query = new URLSearchParams({ fromDate: range.fromDate, toDate: range.toDate });
+    const response = await fetch(`/api/ramp/compliance?${query}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       credentials: 'include',
+      cache: 'no-store',
     });
 
     const payload = await response.json().catch(() => ({})) as RampDataEnvelope & { error?: string; detail?: string };
