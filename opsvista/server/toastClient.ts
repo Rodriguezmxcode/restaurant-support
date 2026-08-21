@@ -3,8 +3,9 @@ type ToastAuthResponse={token?:{accessToken?:string;expiresIn?:number}};
 type TokenCache={accessToken:string;expiresAt:number};
 let standardToken:TokenCache|undefined;
 let analyticsToken:TokenCache|undefined;
-let standardRequestQueue:Promise<void>=Promise.resolve();
-let lastStandardRequestAt=0;
+let standardAuthentication:Promise<TokenCache>|undefined;
+const standardRequestQueues=new Map<string,Promise<void>>();
+const lastStandardRequestAt=new Map<string,number>();
 const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function cleanHost(value:string|undefined){return (value||'').replace(/\/$/,'');}
@@ -41,14 +42,21 @@ export async function standardToastRequest(path:string,restaurantGuid?:string){
   const clientId=process.env.TOAST_CLIENT_ID||'';
   const clientSecret=process.env.TOAST_CLIENT_SECRET||'';
   if(!host||!clientId||!clientSecret)throw new Error('Toast Standard API environment variables are not configured');
-  standardToken=await authenticate(host,clientId,clientSecret,standardToken);
+  if(!standardToken||standardToken.expiresAt<=Date.now()+60_000){
+    if(!standardAuthentication)standardAuthentication=authenticate(host,clientId,clientSecret,standardToken).finally(()=>{standardAuthentication=undefined});
+    standardToken=await standardAuthentication;
+  }
   const headers:Record<string,string>={Authorization:`Bearer ${standardToken.accessToken}`};
   if(restaurantGuid)headers['Toast-Restaurant-External-ID']=restaurantGuid;
+  // Toast applies the ordersBulk limit per client and restaurant. Keeping one
+  // queue per restaurant preserves that limit without forcing every location
+  // to wait for the previous restaurant to finish.
+  const queueKey=restaurantGuid||'global';
   const execute=async()=>{
-    const spacing=Math.max(0,175-(Date.now()-lastStandardRequestAt));
+    const spacing=Math.max(0,210-(Date.now()-(lastStandardRequestAt.get(queueKey)||0)));
     if(spacing)await wait(spacing);
     for(let attempt=0;attempt<5;attempt++){
-      lastStandardRequestAt=Date.now();
+      lastStandardRequestAt.set(queueKey,Date.now());
       const response=await fetch(`${host}${path}`,{headers});
       if(response.ok)return response.json();
       const detail=await response.text().catch(()=>"");
@@ -61,8 +69,11 @@ export async function standardToastRequest(path:string,restaurantGuid?:string){
     }
     throw new Error(`Toast API request failed after retries for ${path}`);
   };
-  const queued=standardRequestQueue.then(execute);
-  standardRequestQueue=queued.then(()=>undefined,()=>undefined);
+  const previous=standardRequestQueues.get(queueKey)||Promise.resolve();
+  const queued=previous.then(execute);
+  const settled=queued.then(()=>undefined,()=>undefined);
+  standardRequestQueues.set(queueKey,settled);
+  void settled.finally(()=>{if(standardRequestQueues.get(queueKey)===settled)standardRequestQueues.delete(queueKey)});
   return queued;
 }
 

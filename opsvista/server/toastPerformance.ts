@@ -186,19 +186,17 @@ async function resolvedToastLocationEntries(requestedLocations?:string[]){
 
 export async function getToastEmployeeLabor(start:string,end:string,requestedLocations?:string[]):Promise<ToastEmployeeLabor[]>{
   const entries=await resolvedToastLocationEntries(requestedLocations);
-  const output:ToastEmployeeLabor[]=[];
-  for(const [location,guid] of entries){
+  const output=await Promise.all(entries.map(async ([location,guid])=>{
     let labor:TimeEntry[],employees:ToastEmployee[];
     try{[labor,employees]=await Promise.all([getLaborForRange(guid,start,end),getEmployees(guid)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:'Toast request failed'}`);}
-    output.push(...summarizeEmployeeLabor(labor,employees,location));
-  }
-  return output;
+    return summarizeEmployeeLabor(labor,employees,location);
+  }));
+  return output.flat();
 }
 
 export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
   const entries=await resolvedToastLocationEntries(requestedLocations);
-  const output:PerformanceLocation[]=[];
-  for(const [location,guid] of entries){
+  return Promise.all(entries.map(async ([location,guid])=>{
     let orders:ToastOrder[],labor:TimeEntry[],employees:ToastEmployee[];
     try{[orders,labor,employees]=await Promise.all([getOrdersForRange(guid,start,end),getLaborForRange(guid,start,end),getEmployees(guid)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:"Toast request failed"}`);}
     const sales=summarizeOrders(orders,start,end);
@@ -207,7 +205,6 @@ export async function getToastPerformance(start:string,end:string,requestedLocat
     const voidPct=sales.netSales?round(sales.voidAmount/sales.netSales*100):0;
     const laborPct=sales.netSales?round(laborTotals.hourlyLaborCost/sales.netSales*100):0;
     const splh=laborTotals.hourlyHours?round(sales.netSales/laborTotals.hourlyHours):null;
-    output.push({location,...sales,...laborTotals,discountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)});
-  }
-  return output;
+    return {location,...sales,...laborTotals,discountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)};
+  }));
 }
