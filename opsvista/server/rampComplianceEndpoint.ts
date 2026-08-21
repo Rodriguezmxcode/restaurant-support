@@ -1,5 +1,5 @@
-import { rampGet } from './rampClient';
-import { normalizeRampTransaction } from './rampNormalize';
+import { rampGet } from './rampClient.js';
+import { normalizeRampTransaction } from './rampNormalize.js';
 
 type Page<T> = { data?: T[]; page?: { next?: string | null } };
 

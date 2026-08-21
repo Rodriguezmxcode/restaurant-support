@@ -1,5 +1,5 @@
-import { getRampCompliancePayload } from '../../server/rampComplianceEndpoint';
-import { isRole, readSession } from '../../server/authSession';
+import { getRampCompliancePayload } from '../../server/rampComplianceEndpoint.js';
+import { isRole, readSession } from '../../server/authSession.js';
 
 type ApiRequest = {
   method?: string;
