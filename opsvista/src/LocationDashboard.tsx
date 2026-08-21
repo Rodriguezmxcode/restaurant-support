@@ -49,6 +49,8 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
   const [previous,setPrevious]=useState<PerformanceResponse|null>(null);
   const [tasks,setTasks]=useState<TasksResponse|null>(null);
   const [loading,setLoading]=useState(true);
+  const [comparisonLoading,setComparisonLoading]=useState(false);
+  const [tasksLoading,setTasksLoading]=useState(false);
   const [error,setError]=useState('');
   const [comparisonError,setComparisonError]=useState('');
   const [tasksError,setTasksError]=useState('');
@@ -63,21 +65,45 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
   useEffect(()=>{window.localStorage.setItem('opsvista-locations-period',period);window.localStorage.setItem('opsvista-locations-custom-start',customStart);window.localStorage.setItem('opsvista-locations-custom-end',customEnd);window.localStorage.setItem('opsvista-locations-selection',JSON.stringify(selectedLocations))},[period,customStart,customEnd,selectionKey]);
   useEffect(()=>{
     if(rangeError){setLoading(false);return}
-    const controller=new AbortController();setLoading(true);setError('');setComparisonError('');setTasksError('');
+    const controller=new AbortController();
+    let cancelled=false;
+    setLoading(true);setComparisonLoading(false);setTasksLoading(true);
+    setCurrent(null);setPrevious(null);setTasks(null);
+    setError('');setComparisonError('');setTasksError('');
     const currentParams=new URLSearchParams({start:range.start,end:range.end});
     const priorParams=new URLSearchParams({start:prior.start,end:prior.end,include_tasks:'false'});
     if(selectedLocations.length){const locations=selectedLocations.join(',');currentParams.set('locations',locations);priorParams.set('locations',locations)}
     const tasksParams=new URLSearchParams({start:range.start,end:range.end});
-    Promise.allSettled([
-      fetch(`/api/operations/performance?${currentParams}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as PerformanceResponse&{error?:string};if(!response.ok)throw new Error(body.error||'No fue posible cargar el desempeño actual');return body}),
-      fetch(`/api/operations/performance?${priorParams}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as PerformanceResponse&{error?:string};if(!response.ok)throw new Error(body.error||'No fue posible cargar la comparación');return body}),
-      fetch(`/api/tasks/weekly?${tasksParams}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as TasksResponse;if(!response.ok)throw new Error(body.error||'No fue posible cargar Logbook');return body}),
-    ]).then(([currentResult,previousResult,tasksResult])=>{
-      if(currentResult.status==='fulfilled')setCurrent(currentResult.value);else if(currentResult.reason?.name!=='AbortError'){setCurrent(null);setError(currentResult.reason instanceof Error?currentResult.reason.message:'No fue posible cargar las locaciones')}
-      if(previousResult.status==='fulfilled')setPrevious(previousResult.value);else if(previousResult.reason?.name!=='AbortError'){setPrevious(null);setComparisonError(previousResult.reason instanceof Error?previousResult.reason.message:'Comparación no disponible')}
-      if(tasksResult.status==='fulfilled')setTasks(tasksResult.value);else if(tasksResult.reason?.name!=='AbortError'){setTasks(null);setTasksError(tasksResult.reason instanceof Error?tasksResult.reason.message:'Tasks y Logbook no disponibles')}
-    }).finally(()=>setLoading(false));
-    return()=>controller.abort();
+    const performanceRequest=(params:URLSearchParams,message:string)=>fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as PerformanceResponse&{error?:string};if(!response.ok)throw new Error(body.error||message);return body});
+
+    // Render the selected Toast period first. The prior-period comparison is
+    // deliberately requested afterward so a 30-day comparison cannot block it.
+    void performanceRequest(currentParams,'No fue posible cargar el desempeño actual').then(async body=>{
+      if(cancelled)return;
+      setCurrent(body);setLoading(false);setComparisonLoading(true);
+      try{
+        const comparison=await performanceRequest(priorParams,'No fue posible cargar la comparación');
+        if(!cancelled)setPrevious(comparison);
+      }catch(reason){
+        if(!cancelled&&reason instanceof Error&&reason.name!=='AbortError')setComparisonError(reason.message||'Comparación no disponible');
+      }finally{
+        if(!cancelled)setComparisonLoading(false);
+      }
+    }).catch(reason=>{
+      if(!cancelled&&reason instanceof Error&&reason.name!=='AbortError'){setError(reason.message||'No fue posible cargar las locaciones');setLoading(false)}
+    });
+
+    // Tasks and Logbook are independent from Toast. A 7shifts failure cannot
+    // clear valid location cards or leave the primary loading state stuck.
+    void fetch(`/api/tasks/weekly?${tasksParams}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as TasksResponse;if(!response.ok)throw new Error(body.error||'No fue posible cargar Logbook');return body}).then(body=>{
+      if(!cancelled)setTasks(body);
+    }).catch(reason=>{
+      if(!cancelled&&reason instanceof Error&&reason.name!=='AbortError')setTasksError(reason.message||'Tasks y Logbook no disponibles');
+    }).finally(()=>{
+      if(!cancelled)setTasksLoading(false);
+    });
+
+    return()=>{cancelled=true;controller.abort()};
   },[range.start,range.end,prior.start,prior.end,selectionKey,rangeError]);
 
   const visibleLocations=selectedLocations.length?selectedLocations:allowedLocations;
@@ -111,7 +137,7 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
         <label className="location-dashboard-period"><span>PERIODO</span><select value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this-week">This week</option><option value="previous-week">Prior week</option><option value="this-month">This month</option><option value="last-30-days">Last 30 days</option><option value="custom">Custom</option></select></label>
         <CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end)}} ariaLabel="Seleccionar periodo de Locaciones"/>
       </div>
-      <div className={`location-dashboard-source ${error||rangeError?'error':''}`}><span><strong>{range.label}</strong> · {range.start} → {range.end}</span><span>{loading?'Actualizando Toast y 7shifts…':error||rangeError||`Live · ${current?.source||'Fuentes pendientes'}`}</span></div>
+      <div className={`location-dashboard-source ${error||rangeError?'error':''}`}><span><strong>{range.label}</strong> · {range.start} → {range.end}</span><span>{loading?'Actualizando Toast…':error||rangeError||(current?`Live · ${comparisonLoading?'comparación cargando':tasksLoading?'7shifts cargando':current.source}`:'Fuentes pendientes')}</span></div>
     </section>
 
     {(comparisonError||tasksError||tasks?.logbookError)&&<section className="location-dashboard-warning"><strong>Fuentes parciales</strong><span>{[comparisonError,tasksError,tasks?.logbookError].filter(Boolean).join(' · ')}</span></section>}
