@@ -319,7 +319,7 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const provider = (id: ProviderState['id'], name: string, count: number): ProviderState => ({
     id,
     name,
-    state: count > 0 ? (id === 'weather' && /open-meteo/i.test(name) ? 'fallback' : 'live') : 'error',
+    state: count > 0 ? (id === 'weather' && /(open-meteo|national weather service)/i.test(name) ? 'fallback' : 'live') : 'error',
     detail: count > 0 ? `${count}/${rows.length} locations updated through PV Operations` : 'Existing provider did not return data',
   });
   return {
