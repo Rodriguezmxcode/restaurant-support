@@ -96,6 +96,7 @@ async function getWeather(place: LocationPoint, weatherKey?: string) {
       precipitation: Number(data.precip1Hour ?? 0), windMph: Number(data.windSpeed ?? 0),
       phrase: String(data.wxPhraseLong || 'Condiciones actuales'),
       updatedAt: data.validTimeUtc ? new Date(Number(data.validTimeUtc) * 1000).toISOString() : new Date().toISOString(),
+      forecast: null,
     };
   }
 
@@ -114,6 +115,7 @@ async function getWeather(place: LocationPoint, weatherKey?: string) {
     precipitation: Number(current.precipitation ?? 0), windMph: Number(current.wind_speed_10m ?? 0),
     phrase: Number(current.precipitation ?? 0) > 0 ? 'Precipitación activa' : 'Sin precipitación activa',
     updatedAt: String(current.time || new Date().toISOString()),
+    forecast: null,
   };
 }
 
@@ -176,14 +178,23 @@ function operatingAssessment(weather: any, traffic: any, events: any, horizonDay
   const recommendations: string[] = [];
   let riskScore = 0;
   if (weather) {
-    if (weather.precipitation > 0) { riskScore += 2; recommendations.push('Protege delivery, entradas y estacionamiento por precipitación activa.'); }
-    if (weather.windMph >= 25) { riskScore += 2; recommendations.push('Revisa patio, letreros y seguridad exterior por viento fuerte.'); }
+    const rainProbability = Number(weather.forecast?.maxPrecipProbability ?? 0);
+    const projectedRain = Number(weather.forecast?.totalPrecipitation ?? 0);
+    const projectedWind = Number(weather.forecast?.maxWindMph ?? weather.windMph ?? 0);
+    if (weather.precipitation > 0) {
+      riskScore += 2;
+      recommendations.push('Protege delivery, entradas y estacionamiento por precipitación activa.');
+    } else if (rainProbability >= 60 || projectedRain >= 0.25) {
+      riskScore += 2;
+      recommendations.push(`Prepara delivery, entradas y estacionamiento: el pronóstico alcanza ${Math.round(rainProbability)}% de probabilidad de lluvia.`);
+    }
+    if (projectedWind >= 25) { riskScore += 2; recommendations.push('Revisa patio, letreros y seguridad exterior por viento fuerte en el periodo.'); }
   }
   if (traffic) {
     if (traffic.roadClosure) { riskScore += 3; recommendations.push('Existe un cierre vial cercano; avisa al equipo y anticipa retrasos de clientes y delivery.'); }
     else if (traffic.congestionPct >= 30 || traffic.incidentCount > 0) { riskScore += 2; recommendations.push('Escalona entradas y comunica rutas alternas por congestión o incidentes cercanos.'); }
   }
-  if (events?.eventCount >= 5) { riskScore += 2; recommendations.push(`Revisa reservas, prep e inventario: hay varios eventos cercanos en el horizonte de ${horizonDays} día${horizonDays === 1 ? '' : 's'}.`); }
+  if (events?.eventCount >= 5) { riskScore += 2; recommendations.push(`Revisa staffing, reservas, prep e inventario: hay ${events.eventCount} eventos cercanos en el horizonte de ${horizonDays} día${horizonDays === 1 ? '' : 's'}.`); }
   else if (events?.eventCount > 0) recommendations.push('Compara los eventos cercanos con reservas y ventas históricas antes de ajustar staffing.');
   if (!recommendations.length) recommendations.push('Sin señales externas críticas ahora; conserva el staffing planificado y monitorea cambios.');
   return {
@@ -226,6 +237,7 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const weatherRows = Array.isArray(source.weather) ? source.weather : [];
   const trafficRows = Array.isArray(source.traffic) ? source.traffic : [];
   const eventRows = Array.isArray(source.events) ? source.events : [];
+  const sourceErrors = source.errors && typeof source.errors === 'object' ? source.errors : {};
   const byName = (rows: any[]) => new Map(rows.map(row => [String(row.name || row.location || ''), row]));
   const weatherByName = byName(weatherRows);
   const trafficByName = byName(trafficRows);
@@ -235,6 +247,7 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
     const weatherSource = weatherByName.get(place.name);
     const trafficSource = trafficByName.get(place.name);
     const eventsSource = eventsByName.get(place.name);
+    const forecastSource = weatherSource?.forecast;
     let weather = weatherSource ? {
       provider: String(weatherSource.provider || 'The Weather Company'),
       temperature: Number(weatherSource.temperature ?? 0),
@@ -243,6 +256,17 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
       windMph: Number(weatherSource.wind ?? weatherSource.windMph ?? 0),
       phrase: String(weatherSource.phrase || (Number(weatherSource.precipitation ?? 0) > 0 ? 'Precipitación activa' : 'Sin precipitación activa')),
       updatedAt: String(weatherSource.updated || weatherSource.updatedAt || new Date().toISOString()),
+      forecast: forecastSource ? {
+        requestedDays: Number(forecastSource.requestedDays ?? horizon.horizonDays),
+        daysAvailable: Number(forecastSource.daysAvailable ?? 0),
+        rangeStart: forecastSource.rangeStart ? String(forecastSource.rangeStart) : null,
+        rangeEnd: forecastSource.rangeEnd ? String(forecastSource.rangeEnd) : null,
+        highF: forecastSource.highF == null ? null : Number(forecastSource.highF),
+        lowF: forecastSource.lowF == null ? null : Number(forecastSource.lowF),
+        maxPrecipProbability: forecastSource.maxPrecipProbability == null ? null : Number(forecastSource.maxPrecipProbability),
+        totalPrecipitation: forecastSource.totalPrecipitation == null ? null : Number(forecastSource.totalPrecipitation),
+        maxWindMph: forecastSource.maxWindMph == null ? null : Number(forecastSource.maxWindMph),
+      } : null,
     } : null;
     if (!weather) {
       try {
@@ -280,7 +304,11 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
       weather,
       traffic,
       events,
-      errors: { weather: '', traffic: '', events: '' },
+      errors: {
+        weather: weather ? '' : String(sourceErrors.weather?.[0] || 'La fuente compartida no devolvió clima.'),
+        traffic: traffic ? '' : String(sourceErrors.traffic?.[0] || 'La fuente compartida no devolvió tráfico.'),
+        events: events ? '' : String(sourceErrors.events?.[0] || 'La fuente compartida no devolvió eventos.'),
+      },
       assessment: operatingAssessment(weather, traffic, events, horizon.horizonDays),
     };
   }));
@@ -291,8 +319,8 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const provider = (id: ProviderState['id'], name: string, count: number): ProviderState => ({
     id,
     name,
-    state: count > 0 ? 'live' : 'error',
-    detail: count > 0 ? `${count}/${rows.length} locations updated through the existing connection` : 'Existing provider did not return data',
+    state: count > 0 ? (id === 'weather' && /open-meteo/i.test(name) ? 'fallback' : 'live') : 'error',
+    detail: count > 0 ? `${count}/${rows.length} locations updated through PV Operations` : 'Existing provider did not return data',
   });
   return {
     source: 'Existing PV Operations provider connections',
