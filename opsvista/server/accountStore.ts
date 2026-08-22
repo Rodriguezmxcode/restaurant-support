@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import postgres from 'postgres';
 import { getManagedUser } from './managementStore.js';
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '../shared/supabaseConfig.js';
 
 let client: ReturnType<typeof postgres> | undefined;
 let initialized = false;
@@ -87,12 +88,18 @@ export async function acceptInvitation(token:string,password:string) {
   const managed=await getManagedUser(String(invitation.user_id));
   if (!managed || !managed.active) throw new Error('Account is not active');
   if (!managed.email || managed.email.toLowerCase() !== String(invitation.email).toLowerCase()) throw new Error('Invitation account mismatch');
-  const salt=randomBytes(16).toString('hex');
-  const hash=scryptSync(password,salt,64).toString('hex');
+  const signup=await fetch(`${SUPABASE_URL}/auth/v1/signup`,{
+    method:'POST',
+    headers:{apikey:SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({email:managed.email.toLowerCase(),password,data:{full_name:managed.name}}),
+  });
+  if(!signup.ok){
+    const body=await signup.json().catch(()=>({})) as {msg?:string;message?:string};
+    throw new Error(body.message||body.msg||'Unable to create the secure Supabase account');
+  }
   await db.begin(async tx=>{
-    await tx`insert into opsvista_auth_credentials (user_id,email,password_salt,password_hash,password_set_at,updated_at) values (${managed.id},${managed.email.toLowerCase()},${salt},${hash},now(),now()) on conflict (user_id) do update set email=excluded.email,password_salt=excluded.password_salt,password_hash=excluded.password_hash,password_set_at=now(),updated_at=now()`;
     await tx`update opsvista_auth_invitations set status='accepted',accepted_at=now() where id=${String(invitation.id)}`;
-    await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('invite_accept')},now(),${managed.id},${managed.name},${managed.id},${managed.name},'Invitation accepted','Password not established','Password established','User accepted onboarding invitation and created their password.',true)`;
+    await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('invite_accept')},now(),${managed.id},${managed.name},${managed.id},${managed.name},'Invitation accepted','Supabase account not activated','Supabase identity activated','User accepted onboarding invitation and created a password with the shared identity provider.',true)`;
   });
   return managed;
 }

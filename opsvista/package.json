@@ -10,12 +10,13 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "5.9.3",
+    "postgres": "^3.4.7",
     "react": "latest",
     "react-dom": "latest",
-    "postgres": "^3.4.7"
+    "typescript": "5.9.3",
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual, scryptSync } from 'node:crypto';
-import { getManagedUser } from './managementStore.js';
+import { getManagedUser, getManagedUserByEmail } from './managementStore.js';
 import { authenticateStoredCredential } from './accountStore.js';
 import { getOrganizationMembership } from './organizationStore.js';
 
@@ -27,7 +27,9 @@ type AuthUserRecord = SessionUser & {
 type SessionPayload = SessionUser & { exp: number; iat: number };
 
 const COOKIE_NAME = 'opsvista_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 12;
+// Supabase owns the long-lived browser session. This short server session is
+// refreshed silently while the user is active and limits stale role access.
+const SESSION_TTL_SECONDS = 60 * 60 * 2;
 
 function configuredSecret() {
   const value = process.env.OPSVISTA_SESSION_SECRET;
@@ -82,6 +84,12 @@ async function sessionFromManaged(record:{userId:string;email:string}, managed:N
     locations:effectiveManagedLocations(managed),
     ...(membership ?? {}),
   };
+}
+
+export async function sessionForSupabaseIdentity(email: string): Promise<SessionUser | null> {
+  const managed = await getManagedUserByEmail(email);
+  if (!managed || !managed.active || !managed.email) return null;
+  return sessionFromManaged({ userId: managed.id, email: managed.email }, managed);
 }
 
 export async function authenticateUser(email: string, password: string): Promise<SessionUser | null> {

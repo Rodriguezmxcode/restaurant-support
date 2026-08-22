@@ -66,8 +66,8 @@ export const initialManagedDirectory: ManagedDirectoryUser[] = [
 ];
 
 function sql() {
-  const url = process.env.OPSVISTA_DATABASE_URL;
-  if (!url) throw new Error('OPSVISTA_DATABASE_URL is not configured');
+  const url = process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL;
+  if (!url) throw new Error('OpsVista database URL is not configured');
   if (!sqlClient) sqlClient = postgres(url, { max: 4, idle_timeout: 20, connect_timeout: 10 });
   return sqlClient;
 }
@@ -165,6 +165,13 @@ export async function listManagedUsers() {
 export async function getManagedUser(id: string) {
   await bootstrapInitialDirectory();
   const rows = await sql()`select * from opsvista_management_users where id=${id} limit 1`;
+  return rows[0] ? normalizeUser(rows[0]) : null;
+}
+
+export async function getManagedUserByEmail(email: string) {
+  await bootstrapInitialDirectory();
+  const normalized = email.trim().toLowerCase();
+  const rows = await sql()`select * from opsvista_management_users where lower(email)=lower(${normalized}) limit 1`;
   return rows[0] ? normalizeUser(rows[0]) : null;
 }
 
