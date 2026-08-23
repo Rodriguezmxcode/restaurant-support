@@ -1,6 +1,7 @@
 import { readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
+import { getWeeklyGoogleReviews } from '../server/googleBusinessReviews.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, type LocalIntelligenceHorizonKey } from '../server/localIntelligence.js';
 import { authorize } from '../server/authorization.js';
@@ -146,6 +147,18 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...tasksResult.value,logbook,...(logbookError?{logbookError}:{})});
 }
 
+async function reviews(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
+ const defaults=operationalWeek(),start=q(req,'start')||defaults.start,end=q(req,'end')||defaults.end;
+ if(!validDate(start)||!validDate(end)||new Date(start)>new Date(end))return res.status(400).json({error:'Valid start and end dates are required'});
+ const span=(new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000+1;
+ if(span>31)return res.status(400).json({error:'Google Reviews requests are limited to 31 days'});
+ const requested=q(req,'location');const unrestricted=['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role);
+ if(requested&&!unrestricted&&!user.locations.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
+ const scope=requested?[requested]:unrestricted?undefined:user.locations;
+ return res.status(200).json(await getWeeklyGoogleReviews(start,end,scope));
+}
+
 async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const requested=q(req,'location');
@@ -164,5 +177,5 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
+ try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':resource==='reviews'?'google-business-profile':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=(resource==='tasks'||resource==='reviews')&&/not configured|credentials|not available/i.test(message);return res.status(resource==='tasks'||resource==='reviews'?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'||resource==='reviews'?{configured:!missing}:{})});}
 }
