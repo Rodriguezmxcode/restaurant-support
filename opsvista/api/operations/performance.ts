@@ -74,17 +74,18 @@ export default async function handler(req:Req,res:Res){
       };
     });
     const totals=locations.reduce((acc,row)=>({
-      netSales:acc.netSales+row.netSales,discountAmount:acc.discountAmount+row.discountAmount,voidAmount:acc.voidAmount+row.voidAmount,
+      netSales:acc.netSales+row.netSales,discountAmount:acc.discountAmount+row.discountAmount,bonusDiscountAmount:acc.bonusDiscountAmount+row.bonusDiscountAmount,uberEatsDiscountAmount:acc.uberEatsDiscountAmount+row.uberEatsDiscountAmount,voidAmount:acc.voidAmount+row.voidAmount,
       hourlyHours:acc.hourlyHours+row.hourlyHours,overtimeHours:acc.overtimeHours+row.overtimeHours,regularLaborCost:acc.regularLaborCost+row.regularLaborCost,
       overtimeLaborCost:acc.overtimeLaborCost+row.overtimeLaborCost,hourlyLaborCost:acc.hourlyLaborCost+row.hourlyLaborCost,
       salaryLaborCost:acc.salaryLaborCost+row.salaryLaborCost,totalLaborCost:acc.totalLaborCost+row.totalLaborCost,
-    }),{netSales:0,discountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
+    }),{netSales:0,discountAmount:0,bonusDiscountAmount:0,uberEatsDiscountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
       source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,scheduleStart,scheduleEnd,overtimeEnd,locations,
       salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,
+        bonusDiscountPct:totals.netSales?round(totals.bonusDiscountAmount/totals.netSales*100):0,
         voidPct:totals.netSales?round(totals.voidAmount/totals.netSales*100):0,
         laborPct:totals.netSales?round(totals.hourlyLaborCost/totals.netSales*100):0,
         hourlyLaborPct:totals.netSales?round(totals.hourlyLaborCost/totals.netSales*100):0,
@@ -96,7 +97,8 @@ export default async function handler(req:Req,res:Res){
       notes:{
         salaryLabor:salary.configured?'Weekly salaries allocated proportionally across the selected date range.':'Configure OPSVISTA_WEEKLY_SALARY_LABOR_JSON with the real weekly salary cost by location.',
         tasks:'Tasks require the 7shifts production feed.',
-        overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.'
+        overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.',
+        bonusDiscounts:'Weekly Bonus excludes applied Toast discounts identified as Uber Eats. Total discounts remain unchanged in Sales and other modules.'
       }
     });
   }catch(error){

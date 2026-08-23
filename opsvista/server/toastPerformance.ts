@@ -1,6 +1,6 @@
 import { standardToastConfigured,standardToastRequest,toastLocations } from './toastClient.js';
 
-type ToastDiscount={discountAmount?:number;processingState?:string};
+type ToastDiscount={discountAmount?:number;processingState?:string;name?:string;externalId?:string;appliedPromoCode?:string;discountPlu?:string;discount?:ExternalReference;appliedDiscountReason?:{name?:string;description?:string;comment?:string}};
 type ToastSelection={price?:number;quantity?:number;voided?:boolean;deleted?:boolean;deferred?:boolean;selectionType?:string;appliedDiscounts?:ToastDiscount[]};
 type ToastPayment={refund?:{refundAmount?:number}};
 type ToastCheck={amount?:number;voided?:boolean;deleted?:boolean;selections?:ToastSelection[];payments?:ToastPayment[];appliedDiscounts?:ToastDiscount[]};
@@ -16,6 +16,9 @@ export type PerformanceLocation={
   netSales:number;
   discountAmount:number;
   discountPct:number;
+  bonusDiscountAmount:number;
+  bonusDiscountPct:number;
+  uberEatsDiscountAmount:number;
   voidAmount:number;
   voidPct:number;
   hourlyHours:number;
@@ -50,14 +53,22 @@ const ymd=(iso:string)=>Number(iso.replaceAll('-',''));
 const rangeStart=(iso:string)=>`${iso}T00:00:00.000Z`;
 function dayAfter(iso:string){const d=new Date(`${iso}T00:00:00.000Z`);d.setUTCDate(d.getUTCDate()+1);return d.toISOString();}
 
-function activeDiscountAmount(items:ToastDiscount[]|undefined){
-  return (items||[]).filter(d=>!['VOID','PENDING_VOID'].includes(String(d.processingState||'').toUpperCase())).reduce((sum,d)=>sum+Number(d.discountAmount||0),0);
+function discountIdentity(discount:ToastDiscount){
+  return [discount.name,discount.externalId,discount.appliedPromoCode,discount.discountPlu,discount.discount?.externalId,discount.appliedDiscountReason?.name,discount.appliedDiscountReason?.description,discount.appliedDiscountReason?.comment].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+export function isUberEatsDiscount(discount:ToastDiscount){
+  return /(^|[^a-z0-9])(uber\s*eats|ubereats|uber)([^a-z0-9]|$)/i.test(discountIdentity(discount));
+}
+function activeDiscountAmounts(items:ToastDiscount[]|undefined){
+  return (items||[]).filter(discount=>!['VOID','PENDING_VOID'].includes(String(discount.processingState||'').toUpperCase())).reduce((totals,discount)=>{
+    const amount=Math.abs(Number(discount.discountAmount||0));totals.total+=amount;if(isUberEatsDiscount(discount))totals.uberEats+=amount;return totals;
+  },{total:0,uberEats:0});
 }
 function selectionGross(selection:ToastSelection){return Number(selection.price||0)*Math.max(1,Number(selection.quantity||1));}
 
 function summarizeOrders(orders:ToastOrder[],start:string,end:string){
   const min=ymd(start),max=ymd(end);
-  let netSales=0,discountAmount=0,voidAmount=0;
+  let netSales=0,discountAmount=0,uberEatsDiscountAmount=0,voidAmount=0;
   for(const order of orders){
     const businessDate=Number(order.businessDate||0);
     if(businessDate<min||businessDate>max)continue;
@@ -74,14 +85,15 @@ function summarizeOrders(orders:ToastOrder[],start:string,end:string){
         if(selection.deleted)continue;
         if(selection.voided){voidAmount+=selectionGross(selection);continue;}
         if(selection.deferred||selection.selectionType==='HOUSE_ACCOUNT_PAY_BALANCE')checkNet-=selectionGross(selection);
-        discountAmount+=activeDiscountAmount(selection.appliedDiscounts);
+        const discounts=activeDiscountAmounts(selection.appliedDiscounts);discountAmount+=discounts.total;uberEatsDiscountAmount+=discounts.uberEats;
       }
-      discountAmount+=activeDiscountAmount(check.appliedDiscounts);
+      const checkDiscounts=activeDiscountAmounts(check.appliedDiscounts);discountAmount+=checkDiscounts.total;uberEatsDiscountAmount+=checkDiscounts.uberEats;
       for(const payment of check.payments||[])checkNet-=Number(payment.refund?.refundAmount||0);
       netSales+=checkNet;
     }
   }
-  return {netSales:round(netSales),discountAmount:round(discountAmount),voidAmount:round(voidAmount)};
+  const bonusDiscountAmount=Math.max(0,discountAmount-uberEatsDiscountAmount);
+  return {netSales:round(netSales),discountAmount:round(discountAmount),bonusDiscountAmount:round(bonusDiscountAmount),uberEatsDiscountAmount:round(uberEatsDiscountAmount),voidAmount:round(voidAmount)};
 }
 
 async function getOrdersForRange(restaurantGuid:string,start:string,end:string){
@@ -202,9 +214,10 @@ export async function getToastPerformance(start:string,end:string,requestedLocat
     const sales=summarizeOrders(orders,start,end);
     const laborTotals=summarizeLabor(labor);
     const discountPct=sales.netSales?round(sales.discountAmount/sales.netSales*100):0;
+    const bonusDiscountPct=sales.netSales?round(sales.bonusDiscountAmount/sales.netSales*100):0;
     const voidPct=sales.netSales?round(sales.voidAmount/sales.netSales*100):0;
     const laborPct=sales.netSales?round(laborTotals.hourlyLaborCost/sales.netSales*100):0;
     const splh=laborTotals.hourlyHours?round(sales.netSales/laborTotals.hourlyHours):null;
-    return {location,...sales,...laborTotals,discountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)};
+    return {location,...sales,...laborTotals,discountPct,bonusDiscountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)};
   }));
 }
