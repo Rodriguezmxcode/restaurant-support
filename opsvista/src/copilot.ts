@@ -1,7 +1,7 @@
 export type CopilotSource = 'Action Center' | 'Ramp' | 'Labor' | 'Evidence' | 'Tasks';
 
 export type CopilotAction = {
-  id: number;
+  id: string | number;
   location: string;
   category: string;
   title: string;

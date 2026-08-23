@@ -8,22 +8,24 @@ export type ServerCapability =
   | 'actions:read'
   | 'actions:write'
   | 'actions:verify'
+  | 'projects:read'
+  | 'projects:write'
   | 'automation:run'
   | 'payments:approve'
   | 'users:manage'
   | 'platform:admin'
   | 'integrations:manage';
 
-const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','automation:run','payments:approve','users:manage'];
+const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write','automation:run','payments:approve','users:manage'];
 
 const capabilities: Record<ServerRole, ServerCapability[]> = {
   Founder: [...operational,'platform:admin','integrations:manage'],
   Corporate: operational,
-  'Location Manager': ['labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify'],
-  Kitchen: ['evidence:read','evidence:review','actions:read','actions:write','actions:verify'],
-  HR: ['labor:read','actions:read','actions:write'],
-  Administration: ['ramp:read','actions:read','actions:write','actions:verify','payments:approve'],
-  Maintenance: ['evidence:read','actions:read','actions:write','actions:verify'],
+  'Location Manager': ['labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
+  Kitchen: ['evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
+  HR: ['labor:read','actions:read','actions:write','projects:read','projects:write'],
+  Administration: ['ramp:read','actions:read','actions:write','actions:verify','projects:read','projects:write','payments:approve'],
+  Maintenance: ['evidence:read','actions:read','actions:write','actions:verify','projects:read','projects:write'],
 };
 
 const globalLocationRoles: ServerRole[] = ['Founder','Corporate','HR','Administration','Maintenance'];

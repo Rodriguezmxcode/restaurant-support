@@ -3,6 +3,9 @@ import { createPayment, decidePayment, getPayment, issuePayment, listPayments, p
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, type LocalIntelligenceHorizonKey } from '../server/localIntelligence.js';
+import { authorize } from '../server/authorization.js';
+import { createAction, getAction, listActionAudit, listActions, updateActionRecord, type ActionSeverity, type ActionStatus, type ActionVerificationStatus } from '../server/actionStore.js';
+import { createProject, getProject, listProjectAudit, listProjects, updateProjectRecord, type ProjectMilestone, type ProjectPriority, type ProjectStatus } from '../server/projectStore.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -13,7 +16,15 @@ const q=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.que
 const isApprover=(role:string)=>role==='Founder'||role==='Corporate';
 const isIssuer=(role:string)=>role==='Administration';
 const canUseLocation=(u:NonNullable<ReturnType<typeof readSession>>,location:string)=>isApprover(u.role)||u.role==='Administration'||u.locations.includes(location);
+const userOrganization=(u:NonNullable<ReturnType<typeof readSession>>)=>u.organizationId||'org-puerto-vallarta';
 const validDate=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v);
+const stringList=(value:unknown)=>Array.isArray(value)?value.filter(item=>typeof item==='string').map(item=>item.trim()).filter(Boolean):[];
+const has=(value:Record<string,unknown>|undefined,key:string)=>Boolean(value&&Object.prototype.hasOwnProperty.call(value,key));
+const actionSeverities:ActionSeverity[]=['High','Medium','Low'];
+const actionStatuses:ActionStatus[]=['Open','Assigned','Investigating','Completed','Dismissed'];
+const verificationStatuses:ActionVerificationStatus[]=['Pending','Worked','Did not work','Not enough evidence yet'];
+const projectStatuses:ProjectStatus[]=['Planning','In Progress','Blocked','Completed','Cancelled'];
+const projectPriorities:ProjectPriority[]=['High','Medium','Low'];
 
 function operationalWeek(){const now=new Date();const day=now.getUTCDay();const since=(day-3+7)%7;const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-since));const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
 
@@ -57,6 +68,69 @@ async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTy
  res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
 }
 
+async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const access=authorize(user,'actions:read');if(!access.ok)return res.status(access.status).json({error:access.error});
+ if(!req.method||req.method==='GET'){
+  const id=q(req,'id');if(!id)return res.status(200).json({actions:await listActions(user)});
+  const action=await getAction(id);if(!action||action.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
+  const scoped=authorize(user,'actions:read',action.location);if(!scoped.ok)return res.status(scoped.status).json({error:scoped.error});
+  return res.status(200).json({action,audit:await listActionAudit(id)});
+ }
+ if(req.method==='POST'){
+  const location=text(req.body?.location),category=text(req.body?.category),title=text(req.body?.title),severity=text(req.body?.severity) as ActionSeverity;
+  const write=authorize(user,'actions:write',location);if(!write.ok)return res.status(write.status).json({error:write.error});
+  const signal=text(req.body?.signal),cause=text(req.body?.cause),recommendation=text(req.body?.recommendation),impact=text(req.body?.impact);
+  if(!locations.includes(location)||!category||!title||!actionSeverities.includes(severity)||!signal||!cause||!recommendation)return res.status(400).json({error:'Location, category, title, severity, signal, cause and recommendation are required'});
+  const dueAt=text(req.body?.dueAt);if(dueAt&&!validDate(dueAt))return res.status(400).json({error:'Due date must use YYYY-MM-DD'});
+  const priorityScore=Math.max(0,Math.min(100,Number(req.body?.priorityScore)||0));
+  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:text(req.body?.ownerId)||undefined,ownerName:text(req.body?.ownerName)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),detectedAt:text(req.body?.detectedAt)||undefined},user);
+  return res.status(201).json({action});
+ }
+ if(req.method==='PUT'){
+  const id=text(req.body?.id);if(!id)return res.status(400).json({error:'Action id required'});const existing=await getAction(id);if(!existing||existing.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
+  const write=authorize(user,'actions:write',existing.location);if(!write.ok)return res.status(write.status).json({error:write.error});
+  const status=text(req.body?.status) as ActionStatus;const verificationStatus=text(req.body?.verificationStatus) as ActionVerificationStatus;
+  if(status&&!actionStatuses.includes(status))return res.status(400).json({error:'Unknown action status'});
+  if(verificationStatus&&!verificationStatuses.includes(verificationStatus))return res.status(400).json({error:'Unknown verification status'});
+  if(has(req.body,'dueAt')&&text(req.body?.dueAt)&&!validDate(text(req.body?.dueAt)))return res.status(400).json({error:'Due date must use YYYY-MM-DD'});
+  if(verificationStatus&&verificationStatus!=='Pending'){
+   const verify=authorize(user,'actions:verify',existing.location);if(!verify.ok)return res.status(verify.status).json({error:verify.error});
+   if(!text(req.body?.verificationNote))return res.status(400).json({error:'A verification note describing the evidence is required'});
+  }
+  const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:text(req.body?.ownerId)||undefined}:{}),...(has(req.body,'ownerName')?{ownerName:text(req.body?.ownerName)||undefined}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
+  return res.status(200).json({action});
+ }
+ res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
+}
+
+async function projects(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const access=authorize(user,'projects:read');if(!access.ok)return res.status(access.status).json({error:access.error});
+ if(!req.method||req.method==='GET'){
+  const id=q(req,'id');if(!id)return res.status(200).json({projects:await listProjects(user)});
+  const project=await getProject(id);if(!project||project.organizationId!==userOrganization(user))return res.status(404).json({error:'Project not found'});
+  if(!project.locations.every(location=>authorize(user,'projects:read',location).ok))return res.status(403).json({error:'Project outside your access scope'});
+  return res.status(200).json({project,audit:await listProjectAudit(id)});
+ }
+ if(req.method==='POST'){
+  const name=text(req.body?.name),description=text(req.body?.description),objective=text(req.body?.objective),ownerName=text(req.body?.ownerName);
+  const selectedLocations=stringList(req.body?.locations);const status=text(req.body?.status) as ProjectStatus;const priority=text(req.body?.priority) as ProjectPriority;
+  const startDate=text(req.body?.startDate),dueDate=text(req.body?.dueDate),budget=Math.max(0,Number(req.body?.budget)||0);
+  if(!name||!description||!objective||!ownerName||!selectedLocations.length||!selectedLocations.every(location=>locations.includes(location))||!projectStatuses.includes(status)||!projectPriorities.includes(priority)||!validDate(startDate)||!validDate(dueDate)||startDate>dueDate)return res.status(400).json({error:'Name, objective, owner, valid locations, status, priority and dates are required'});
+  for(const location of selectedLocations){const write=authorize(user,'projects:write',location);if(!write.ok)return res.status(write.status).json({error:write.error});}
+  const project=await createProject({name,description,objective,locations:selectedLocations,ownerName,ownerId:text(req.body?.ownerId)||undefined,collaborators:stringList(req.body?.collaborators),status,priority,startDate,dueDate,budget,actualSpend:Math.max(0,Number(req.body?.actualSpend)||0),progress:Math.max(0,Math.min(100,Number(req.body?.progress)||0)),milestones:Array.isArray(req.body?.milestones)?req.body?.milestones as ProjectMilestone[]:[]},user);
+  return res.status(201).json({project});
+ }
+ if(req.method==='PUT'){
+  const id=text(req.body?.id);if(!id)return res.status(400).json({error:'Project id required'});const existing=await getProject(id);if(!existing||existing.organizationId!==userOrganization(user))return res.status(404).json({error:'Project not found'});
+  for(const location of existing.locations){const write=authorize(user,'projects:write',location);if(!write.ok)return res.status(write.status).json({error:write.error});}
+  const status=text(req.body?.status) as ProjectStatus;const priority=text(req.body?.priority) as ProjectPriority;
+  if(status&&!projectStatuses.includes(status))return res.status(400).json({error:'Unknown project status'});if(priority&&!projectPriorities.includes(priority))return res.status(400).json({error:'Unknown project priority'});
+  const project=await updateProjectRecord(id,{...(status?{status}:{}),...(priority?{priority}:{}),...(has(req.body,'ownerName')?{ownerName:text(req.body?.ownerName)||undefined}:{}),...(has(req.body,'progress')?{progress:Math.max(0,Math.min(100,Number(req.body?.progress)||0))}:{}),...(has(req.body,'actualSpend')?{actualSpend:Math.max(0,Number(req.body?.actualSpend)||0)}:{}),...(Array.isArray(req.body?.milestones)?{milestones:req.body.milestones as ProjectMilestone[]}:{})},text(req.body?.reason)||'Project updated',user);
+  return res.status(200).json({project});
+ }
+ res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
+}
+
 async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const defaults=operationalWeek(),start=q(req,'start')||defaults.start,end=q(req,'end')||defaults.end;
@@ -90,5 +164,5 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':resource==='local_intelligence'?'local-intelligence':'payments';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
+ try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const source=resource==='tasks'?'7shifts':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=resource==='tasks'&&/not configured|credentials/i.test(message);return res.status(resource==='tasks'?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'?{configured:!missing}:{})});}
 }
