@@ -7,6 +7,10 @@ export type SevenShiftsTaskAccountability={
   date:string;
   locationId:number;
   locationName:string;
+  taskListId?:number;
+  taskListName?:string;
+  position?:string;
+  frequency?:string;
   taskId?:number;
   taskName:string;
   userId?:number;
@@ -339,6 +343,26 @@ function numberField(o:Json,names:string[]){for(const name of names){const v=Num
 function stringField(o:Json,names:string[]){for(const name of names){const v=o[name];if(typeof v==='string'&&v.trim())return v.trim();}return undefined;}
 function boolField(o:Json,names:string[]){for(const name of names){const v=o[name];if(typeof v==='boolean')return v;if(v===1||v==='1'||v==='true')return true;if(v===0||v==='0'||v==='false')return false;}return undefined;}
 
+function taskPosition(value:string){
+  const normalized=value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const roles:Array<[RegExp,string]>=[
+    [/(^|\b)(sub\s*chef|sous\s*chef)(\b|$)/,'Subchef'],
+    [/(^|\b)(key\s*holder|keyholder)(\b|$)/,'Keyholder'],
+    [/(^|\b)(food\s*runner|runner)(\b|$)/,'Food Runner'],
+    [/(^|\b)(line\s*leader)(\b|$)/,'Line Leader'],
+    [/(^|\b)(dishwasher|lavaplatos)(\b|$)/,'Dishwasher'],
+    [/(^|\b)(bartender|cantinero)(\b|$)/,'Bartender'],
+    [/(^|\b)(barback)(\b|$)/,'Barback'],
+    [/(^|\b)(manager|management|gerente|mgr)(\b|$)/,'Manager'],
+    [/(^|\b)(chef)(\b|$)/,'Chef'],
+    [/(^|\b)(busser|busboy)(\b|$)/,'Busser'],
+    [/(^|\b)(server|mesero|mesera)(\b|$)/,'Server'],
+    [/(^|\b)(host|hostess|anfitrion|anfitriona)(\b|$)/,'Host'],
+    [/(^|\b)(cook|cocinero|cocinera)(\b|$)/,'Cook'],
+  ];
+  return roles.find(([pattern])=>pattern.test(normalized))?.[1];
+}
+
 function summaryCounts(raw:unknown){
   const candidates:Json[]=[];
   if(raw&&typeof raw==='object'){
@@ -366,10 +390,19 @@ function summaryCounts(raw:unknown){
 
 function accountabilityFromRaw(raw:unknown,date:string,locationId:number,locationName:string){
   const out:SevenShiftsTaskAccountability[]=[];const seen=new Set<string>();
-  const walk=(value:unknown,path:string)=>{
-    if(Array.isArray(value)){value.forEach((x,i)=>walk(x,`${path}.${i}`));return;}
+  type TaskContext={taskListId?:number;taskListName?:string;position?:string;frequency?:string};
+  const walk=(value:unknown,path:string,parent:TaskContext={})=>{
+    if(Array.isArray(value)){value.forEach((x,i)=>walk(x,`${path}.${i}`,parent));return;}
     if(!value||typeof value!=='object')return;
     const o=value as Json;
+    const taskArray=Array.isArray(o.tasks)||Array.isArray(o.task_items)||Array.isArray(o.items);
+    const explicitListName=stringField(o,['task_list_name','taskListName','checklist_name','checklistName','template_name','templateName']);
+    const objectName=taskArray?stringField(o,['name','title']):undefined;
+    const taskListName=explicitListName||objectName||parent.taskListName;
+    const taskListId=numberField(o,['task_list_id','taskListId','checklist_id','template_id'])??(taskArray?numberField(o,['id']):undefined)??parent.taskListId;
+    const frequency=stringField(o,['frequency','frequency_name','recurrence','repeat'])||parent.frequency;
+    const position=stringField(o,['position_name','position','role_name','role'])||taskPosition(taskListName||'')||parent.position;
+    const context={taskListId,taskListName,position,frequency};
     const taskId=numberField(o,['task_id','taskId','id']);
     const taskName=stringField(o,['task_name','taskName','title','name','task']);
     const explicitCompleted=boolField(o,['completed','is_completed','isComplete','complete']);
@@ -379,13 +412,13 @@ function accountabilityFromRaw(raw:unknown,date:string,locationId:number,locatio
     const userName=stringField(o,['completed_by_name','completedByName','user_name','userName','assignee_name','employee_name']);
     const dueAt=stringField(o,['due_at','dueAt','due_time','dueTime','deadline']);
     const hasCompletionSignal=explicitCompleted!==undefined||status==='completed'||status==='complete'||!!completedAt||userId!==undefined;
-    if(taskName&&hasCompletionSignal){
+    if(taskName&&hasCompletionSignal&&!taskArray){
       const completed=explicitCompleted??(status==='completed'||status==='complete'||!!completedAt);
       const key=`${date}:${locationId}:${taskId??path}:${taskName}`;
       if(!seen.has(key)){seen.add(key);let late: boolean|undefined; if(completedAt&&dueAt){const c=Date.parse(completedAt),d=Date.parse(dueAt);if(Number.isFinite(c)&&Number.isFinite(d))late=c>d;}
-        out.push({key,date,locationId,locationName,taskId,taskName,userId,userName,completed,completedAt,late});}
+        out.push({key,date,locationId,locationName,taskListId,taskListName,position:position||taskPosition(taskName),frequency,taskId,taskName,userId,userName,completed,completedAt,late});}
     }
-    for(const [k,v] of Object.entries(o)){if(['raw','meta'].includes(k))continue;if(v&&typeof v==='object')walk(v,`${path}.${k}`);}
+    for(const [k,v] of Object.entries(o)){if(['raw','meta'].includes(k))continue;if(v&&typeof v==='object')walk(v,`${path}.${k}`,context);}
   };
   walk(raw,'root');return out;
 }
