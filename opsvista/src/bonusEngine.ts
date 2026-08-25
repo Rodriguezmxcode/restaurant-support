@@ -46,16 +46,18 @@ export function calculateWeeklyBonus(input:BonusInputs):BonusResult{
     {key:'overtime',label:'Overtime',weight:w.overtime,value:input.overtimeLaborPct,points:input.overtimeLaborPct===undefined?undefined:w.overtime*lowerIsBetter(input.overtimeLaborPct,8),source:'Toast / Labor',ready:input.overtimeLaborPct!==undefined,note:'15% of score · eligibility maximum 8.00% of labor'},
     {key:'reviews',label:'Google Reviews',weight:w.reviews,value:input.reviewAverage,points:googleReviewPoints(input.reviewAverage,input.reviewCount),source:'Google Business Profile',ready:input.reviewAverage!==undefined&&input.reviewCount!==undefined,note:'5% of score · minimum 5 weekly reviews · quality 80% + volume 20%'},
     {key:'liquorCost',label:'Liquor Cost',weight:w.liquorCost,value:input.liquorCostScorePct,points:input.liquorCostScorePct===undefined?undefined:w.liquorCost*clamp(input.liquorCostScorePct/100),source:'Inventory / R365',ready:input.liquorCostScorePct!==undefined,note:'5% of score · rolling operating performance'},
-    {key:'leadership',label:'Logbook / Leadership',weight:w.leadership,value:input.leadershipScorePct,points:input.leadershipScorePct===undefined?undefined:w.leadership*clamp(input.leadershipScorePct/100),source:'7shifts Logbook',ready:input.leadershipScorePct!==undefined&&input.logbookComplete!==undefined,note:'5% of score · 4 verified summaries per operating week'},
+    {key:'leadership',label:'Logbook / Leadership',weight:w.leadership,value:input.leadershipScorePct,points:input.leadershipScorePct===undefined?undefined:w.leadership*clamp(input.leadershipScorePct/100),source:'7shifts Logbook',ready:input.leadershipScorePct!==undefined&&input.logbookComplete!==undefined,note:'5% of score · 4 verified summaries per operating week · does not block qualification'},
   ];
-  const eligibilityKnown=input.tasksPct!==undefined&&input.discountsPct!==undefined&&input.voidsPct!==undefined&&input.overtimeLaborPct!==undefined&&input.logbookComplete!==undefined&&input.disciplinaryIssue!==undefined;
+  // Qualification is decided by the operating gates. Leadership/Logbook
+  // contributes points to the ranking, but an incomplete Logbook cannot
+  // disqualify a restaurant that passed Tasks, Discounts, Voids and OT.
+  const eligibilityKnown=input.tasksPct!==undefined&&input.discountsPct!==undefined&&input.voidsPct!==undefined&&input.overtimeLaborPct!==undefined;
   const reasons:string[]=[];
   if(input.tasksPct!==undefined&&input.tasksPct<80)reasons.push(`Tasks ${input.tasksPct.toFixed(1)}% < 80%`);
   if(input.discountsPct!==undefined&&input.discountsPct>2)reasons.push(`Discounts ${input.discountsPct.toFixed(2)}% > 2.00%`);
   if(input.voidsPct!==undefined&&input.voidsPct>0.5)reasons.push(`Voids ${input.voidsPct.toFixed(2)}% > 0.50%`);
   if(input.overtimeLaborPct!==undefined&&input.overtimeLaborPct>8)reasons.push(`OT ${input.overtimeLaborPct.toFixed(2)}% > 8.00% of labor`);
   if(input.reviewCount!==undefined&&input.reviewCount<bonusPolicy.requirements.minimumWeeklyReviews)reasons.push(`Google Reviews ${input.reviewCount} < ${bonusPolicy.requirements.minimumWeeklyReviews} minimum`);
-  if(input.logbookComplete===false)reasons.push('Logbook incomplete');
   if(input.disciplinaryIssue===true)reasons.push('Disciplinary issue present');
   const ready=metrics.every(m=>m.ready);
   const score=ready?metrics.reduce((sum,m)=>sum+(m.points??0),0):null;
