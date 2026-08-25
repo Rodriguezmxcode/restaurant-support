@@ -11,6 +11,7 @@ import {
 import { loadRampTransactions } from './rampDataSource';
 import CustomDateRangePicker from './CustomDateRangePicker';
 import './rampCompliance.css';
+import MaxDataInsights from './MaxDataInsights';
 
 type Escalation = {
   location: string;
@@ -222,6 +223,8 @@ export default function RampComplianceView({ onEscalate }: Props) {
       <article className="ramp-summary-card"><span>MISSING RECEIPTS</span><strong>{summary.missingReceipts}</strong><p>Receipt evidence required</p></article>
       <article className="ramp-summary-card"><span>MISSING MEMOS</span><strong>{summary.missingMemos}</strong><p>Purpose of spend incomplete</p></article>
     </section>
+
+    {!!locationRows.length&&<MaxDataInsights title="Gasto expuesto y cumplimiento" subtitle="Comparación por restaurante o departamento; los filtros cruzados revelan dónde falta evidencia y cuánto gasto está en riesgo." rows={locationRows.map(row=>({location:row.key,primary:row.exposedSpend,secondary:row.score,status:row.score<70?'bad':row.score<90?'watch':'good'}))} primaryLabel="Gasto expuesto" secondaryLabel="Compliance score" primaryFormat={value=>money(value)} secondaryFormat={value=>`${value.toFixed(0)} / 100`} conclusion={filtered=>{if(!filtered.length)return['Sin gastos para este filtro.'];const exposure=[...filtered].sort((a,b)=>b.primary-a.primary);const compliance=[...filtered].sort((a,b)=>(a.secondary??100)-(b.secondary??100));const alerts=filtered.filter(row=>row.status!=='good');return[`${exposure[0].location} concentra ${money(exposure[0].primary)} de gasto expuesto.`,`${compliance[0].location} tiene el menor compliance score: ${(compliance[0].secondary??0).toFixed(0)} / 100.`,alerts.length?`Solicita recibos y memos en ${alerts.map(row=>row.location).join(', ')}.`:'Todas las unidades visibles alcanzan 90 puntos o más.'];}}/>}
 
     <section className="ramp-policy-strip">
       <div><strong>OpsVista Compliance Policy</strong><span>Cardholder, restaurant/department, memo and receipt are required. Missing receipt or memo becomes overdue after 48 hours.</span></div>

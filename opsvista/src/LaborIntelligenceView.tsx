@@ -3,6 +3,7 @@ import './laborIntelligence.css';
 import './laborFilters.css';
 import ScheduleOvertimeMonitor, { type ScheduleRisk } from './ScheduleOvertimeMonitor';
 import CustomDateRangePicker from './CustomDateRangePicker';
+import MaxDataInsights from './MaxDataInsights';
 
 type LaborEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:'High'|'Medium'|'Low'};
 type Props={onEscalate?:(item:LaborEscalation)=>void;allowedLocations?:string[]};
@@ -83,6 +84,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
       <article className="labor-card"><span>OT HOURS</span><strong>{totals.ot.toFixed(1)}h</strong><p>Live worked overtime</p></article>
       <article className="labor-card"><span>NEEDS ACTION</span><strong>{rows.filter(r=>r.severity==='Action').length}</strong><p>{rows.filter(r=>r.severity==='Watch').length} additional watch locations</p></article>
     </section>
+    {!!rows.length&&<MaxDataInsights title="Labor por locación" subtitle="Costo sobre ventas y overtime con filtros cruzados para detectar presión operativa sin perder contexto de cobertura." rows={rows.map(row=>({location:row.location,primary:row.totalLaborPct,secondary:row.overtimeHours,status:row.severity==='Action'?'bad':row.severity==='Watch'?'watch':'good'}))} primaryLabel="Labor total" secondaryLabel="Overtime trabajado" primaryFormat={value=>`${value.toFixed(1)}%`} secondaryFormat={value=>`${value.toFixed(1)} h`} conclusion={filtered=>{if(!filtered.length)return['Sin datos de labor para este filtro.'];const gap=[...filtered].sort((a,b)=>b.primary-a.primary);const overtime=[...filtered].sort((a,b)=>(b.secondary??0)-(a.secondary??0));const action=filtered.filter(row=>row.status==='bad');return[`${gap[0].location} tiene la mayor proporción de labor: ${gap[0].primary.toFixed(1)}%.`,`${overtime[0].location} concentra ${(overtime[0].secondary??0).toFixed(1)} horas de overtime.`,action.length?`Prioriza ${action.map(row=>row.location).join(', ')} y protege rush, prep y cierre antes de ajustar turnos.`:'No hay locaciones en estado Acción dentro del filtro.'];}}/>}
     <section className="labor-guidance"><div><strong>OpsVista Labor Guardrail</strong><span>Review actual demand, required positions, service levels, prep and closing standards before reducing hours.</span></div><div className="labor-guide-chips"><span>Live sales</span><span>Hourly + salary</span><span>Total labor %</span><span>SPLH</span><span>Overtime</span></div></section>
     <ScheduleOvertimeMonitor data={data?.scheduleRisk||null} error={data?.scheduleRiskError} loading={loading} onEscalate={onEscalate}/>
     <section className="labor-panel"><div className="labor-panel-head"><div><h2>Live Labor Intelligence by Location</h2><p>Actual performance for the selected operating period.</p></div><span>{rows.length} locations</span></div>

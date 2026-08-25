@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import './localIntelligence.css';
+import MaxDataInsights from './MaxDataInsights';
 
 type Provider = { id: 'weather' | 'traffic' | 'events'; name: string; state: 'live' | 'fallback' | 'error' | 'not_configured'; detail: string };
 type WeatherForecast = { requestedDays: number; daysAvailable: number; rangeStart?: string | null; rangeEnd?: string | null; highF?: number | null; lowF?: number | null; maxPrecipProbability?: number | null; totalPrecipitation?: number | null; maxWindMph?: number | null };
@@ -79,6 +80,8 @@ export default function LocalIntelligenceView({ allowedLocations }: { allowedLoc
       {!payload && loading && ['Weather', 'TomTom Traffic', 'Ticketmaster'].map(name => <article className="provider-card loading" key={name}><span>{name}</span><strong>Conectando…</strong><small>Consultando la fuente real</small></article>)}
       <article className="provider-card summary"><span>IMPACTO ALTO</span><strong>{highRisk}</strong><small>{events} eventos encontrados en el horizonte actual</small></article>
     </section>
+
+    {!!payload?.locations.length&&<MaxDataInsights title="Mapa de señales externas" subtitle="Eventos y congestión por restaurante; usa la ubicación relativa real para identificar concentraciones de riesgo." rows={payload.locations.map(row=>({location:row.location,primary:row.events?.eventCount??0,secondary:row.traffic?.congestionPct,status:row.assessment.level==='high'?'bad':row.assessment.level==='watch'?'watch':'good'}))} primaryLabel="Eventos cercanos" secondaryLabel="Congestión actual" primaryFormat={value=>value.toFixed(0)} secondaryFormat={value=>`${value.toFixed(0)}%`} conclusion={filtered=>{if(!filtered.length)return['Sin señales externas para este filtro.'];const eventsRank=[...filtered].sort((a,b)=>b.primary-a.primary);const traffic=[...filtered].filter(row=>row.secondary!=null).sort((a,b)=>(b.secondary??0)-(a.secondary??0));const risk=filtered.filter(row=>row.status!=='good');return[`${eventsRank[0].location} concentra ${eventsRank[0].primary.toFixed(0)} eventos publicados en el horizonte.`,traffic.length?`${traffic[0].location} muestra la mayor congestión actual: ${(traffic[0].secondary??0).toFixed(0)}%.`:'TomTom aún no está disponible.',risk.length?`Revisa staffing, prep y rutas en ${risk.map(row=>row.location).join(', ')}.`:'No hay señales externas que exijan intervención inmediata.'];}}/>}
 
     <section className="local-location-grid">
       {(payload?.locations ?? []).map(row => {

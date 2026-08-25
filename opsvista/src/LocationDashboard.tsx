@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import CustomDateRangePicker from './CustomDateRangePicker';
 import './locationDashboard.css';
+import MaxDataInsights from './MaxDataInsights';
 
 type PeriodKey='today'|'yesterday'|'this-week'|'previous-week'|'this-month'|'last-30-days'|'custom';
 type LiveRow={location:string;netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
@@ -150,6 +151,8 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
       <SummaryKpi label="TASKS COMPLIANCE" value={taskTotals?.total?`${taskTotals.compliancePct.toFixed(1)}%`:'—'} note={taskTotals?.total?`${taskTotals.completed} de ${taskTotals.total} completadas`:'Sin Tasks verificables'} tone={taskTotals?.total?(taskTotals.compliancePct>=80?'good':'bad'):'neutral'}/>
       <SummaryKpi label="NEEDS ACTION" value={String(locationsAtRisk)} note={`${cards.length-locationsAtRisk} locaciones dentro de guardrails`} tone={locationsAtRisk?'bad':'good'}/>
     </section>
+
+    {!!cards.length&&<MaxDataInsights title="Red de locaciones" subtitle="Comparación ejecutiva de ventas y labor. Pulsa una barra, punto, mapa o fila para actualizar el foco y las conclusiones." rows={cards.map(card=>({location:card.row.location,primary:card.row.netSales,secondary:card.row.totalLaborPct,status:card.alerts>1?'bad':card.alerts===1?'watch':'good'}))} primaryLabel="Ventas netas" secondaryLabel="Labor total" primaryFormat={value=>money0.format(value)} secondaryFormat={value=>`${value.toFixed(1)}%`} conclusion={filtered=>{if(!filtered.length)return['Sin datos para las locaciones seleccionadas.'];const sales=[...filtered].sort((a,b)=>b.primary-a.primary);const alerts=filtered.filter(row=>row.status!=='good');return[`${sales[0].location} lidera ventas con ${money0.format(sales[0].primary)}.`,`${alerts.length} de ${filtered.length} locaciones muestran al menos una señal que revisar.`,alerts.length?`Abre el detalle de ${alerts.map(row=>row.location).join(', ')} antes de definir la acción.`:'La red visible permanece dentro de los guardrails configurados.'];}}/>}
 
     <section className="location-dashboard-heading"><div><h2>Desempeño por locación</h2><p>Comparación contra el periodo inmediatamente anterior de la misma duración.</p></div><span>{cards.length} locaciones</span></section>
     {!loading&&!error&&!cards.length&&<section className="location-dashboard-empty">No se recibieron locaciones para este periodo y alcance. OpsVista no sustituirá información demo.</section>}
