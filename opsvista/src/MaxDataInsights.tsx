@@ -16,6 +16,7 @@ type Props = {
   secondaryLabel?: string;
   primaryFormat?: (value: number) => string;
   secondaryFormat?: (value: number) => string;
+  primaryColorScale?: 'status' | 'higher-is-better';
   conclusion?: (rows: MaxDataRow[]) => string[];
 };
 
@@ -41,7 +42,7 @@ const defaultConclusions = (rows: MaxDataRow[], label: string, format: (value: n
   ];
 };
 
-export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, secondaryLabel, primaryFormat = number, secondaryFormat = number, conclusion }: Props) {
+export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, secondaryLabel, primaryFormat = number, secondaryFormat = number, primaryColorScale = 'status', conclusion }: Props) {
   const [selected, setSelected] = useState('All locations');
   const available = useMemo(() => rows.filter(row => Number.isFinite(row.primary)), [rows]);
   const filtered = selected === 'All locations' ? available : available.filter(row => row.location === selected);
@@ -51,6 +52,12 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
   const secondaryMax = secondaryValues.length ? Math.max(...secondaryValues) : 1;
   const insights = conclusion ? conclusion(filtered) : defaultConclusions(filtered, primaryLabel, primaryFormat);
   const choose = (location: string) => setSelected(current => current === location ? 'All locations' : location);
+  const primaryTone = (row: MaxDataRow) => {
+    if (primaryColorScale === 'status') return row.status || 'neutral';
+    if (maxPrimary <= 0) return 'neutral';
+    const shareOfLeader = row.primary / maxPrimary;
+    return shareOfLeader >= .8 ? 'good' : shareOfLeader >= .6 ? 'watch' : 'bad';
+  };
 
   return <section className="mmd-insights" aria-label={`${title} interactive dashboard`}>
     <header className="mmd-insights-head">
@@ -63,10 +70,10 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
 
     <div className="mmd-visual-grid">
       <section className="mmd-visual-card">
-        <div className="mmd-visual-title"><div><span>COMPARACIÓN</span><h3>{primaryLabel}</h3></div><small>Pulsa una barra para filtrar</small></div>
+        <div className="mmd-visual-title"><div><span>COMPARACIÓN</span><h3>{primaryLabel}</h3></div><small>{primaryColorScale === 'higher-is-better' ? 'Verde ≥80% del líder · Amarillo 60–79% · Rojo <60%' : 'Pulsa una barra para filtrar'}</small></div>
         <div className="mmd-bars" role="list">
           {available.map(row => <button key={row.location} role="listitem" className={`mmd-bar-row ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} onClick={() => choose(row.location)} aria-label={`Filtrar ${row.location}: ${primaryFormat(row.primary)}`}>
-            <span>{row.location}</span><i><b className={row.status || 'neutral'} style={{ width: `${Math.max(3, row.primary / maxPrimary * 100)}%` }} /></i><strong>{primaryFormat(row.primary)}</strong>
+            <span>{row.location}</span><i><b className={primaryTone(row)} style={{ width: `${Math.max(3, row.primary / maxPrimary * 100)}%` }} /></i><strong>{primaryFormat(row.primary)}</strong>
           </button>)}
         </div>
       </section>
