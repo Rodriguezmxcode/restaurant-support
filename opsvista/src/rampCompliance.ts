@@ -55,49 +55,6 @@ export type RampComplianceGroup = {
 
 export const RAMP_EVIDENCE_DEADLINE_HOURS = 48;
 
-export const rampDemoTransactions: RampTransaction[] = [
-  {
-    id: 'ramp-1001', date: '2026-08-13', merchant: 'Concept Design', amount: 125,
-    cardholder: 'Roberto Rodriguez', department: '', memo: '', receiptAttached: true,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1002', date: '2026-08-13', merchant: 'The Home Depot', amount: 57.04,
-    cardholder: 'Jacob Rodriguez', department: 'Orange', memo: 'Repair materials', receiptAttached: false,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1003', date: '2026-08-13', merchant: 'Exxon', amount: 4.32,
-    cardholder: '', department: '', memo: '', receiptAttached: false,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1004', date: '2026-08-13', merchant: 'Exxon', amount: 4.32,
-    cardholder: '', department: '', memo: '', receiptAttached: false,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1005', date: '2026-08-12', merchant: 'Amazon Prime', amount: 14.99,
-    cardholder: 'Gladys Valdez', department: 'Corporate', memo: 'Office subscription', receiptAttached: true,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1006', date: '2026-08-14', merchant: 'Staples', amount: 53.90,
-    cardholder: 'Roberto Rodriguez', department: 'Avon', memo: 'Menu printing and office supplies for Avon', receiptAttached: true,
-    state: 'CLEARED', source: 'Ramp'
-  },
-  {
-    id: 'ramp-1007', date: '2026-08-14', merchant: 'Grainger Industrial Supply', amount: 936.50,
-    cardholder: 'Roberto Rodriguez', department: 'Stamford', memo: 'Dishwasher relief valve replacement', receiptAttached: true,
-    state: 'CLEARED', source: 'Ramp', anomalyScore: 0.88
-  },
-  {
-    id: 'ramp-1008', date: '2026-08-14', merchant: 'ShopRite', amount: 20.97,
-    cardholder: 'Jacob Rodriguez', department: 'Orange', memo: 'Groceries for Orange location', receiptAttached: true,
-    state: 'CLEARED', source: 'Ramp'
-  },
-];
-
 const duplicateKeys = (transactions: RampTransaction[]) => {
   const counts = new Map<string, number>();
   transactions.forEach(tx => {

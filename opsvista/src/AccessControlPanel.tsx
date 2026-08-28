@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { activeLocationGrants, demoUsers, rolePermissions, seedUsers, type LocationAccessGrant, type OpsVistaRole, type OpsVistaUser } from './accessControl';
+import { activeLocationGrants, rolePermissions, type LocationAccessGrant, type OpsVistaRole, type OpsVistaUser } from './accessControl';
 import { diffUserChanges, loadManagedUsers, loadManagementAudit, persistManagedUsers, persistManagementAudit, type ManagementAuditEvent } from './managementAudit';
 
-type Props = { currentUser: OpsVistaUser; onChangeUser: (user: OpsVistaUser) => void };
+type Props = { currentUser: OpsVistaUser };
 type StoreState = 'loading' | 'central' | 'local-dev' | 'error';
 
 const roles = Object.keys(rolePermissions) as OpsVistaRole[];
@@ -25,7 +25,7 @@ function AuditRow({ event }: { event: ManagementAuditEvent }) {
   </div>;
 }
 
-export default function AccessControlPanel({ currentUser, onChangeUser }: Props) {
+export default function AccessControlPanel({ currentUser }: Props) {
   const permissions = rolePermissions[currentUser.role];
   const grants = grantsFor(currentUser);
   const primary = grants.find(grant=>grant.type==='Primary')?.location ?? '';
@@ -53,7 +53,7 @@ export default function AccessControlPanel({ currentUser, onChangeUser }: Props)
       if (!usersRes.ok || !auditRes.ok) throw new Error(usersRes.status===403?'Corporate user-management permission required.':'Central management store unavailable.');
       const usersBody = await usersRes.json() as { users?: OpsVistaUser[] };
       const auditBody = await auditRes.json() as { events?: ManagementAuditEvent[] };
-      const users = usersBody.users?.length ? usersBody.users : seedUsers.map(cloneUser);
+      const users = usersBody.users ?? [];
       setManagedUsers(users);
       setAudit(auditBody.events ?? []);
       setTargetId(id => id || users[0]?.id || currentUser.id);
@@ -61,7 +61,8 @@ export default function AccessControlPanel({ currentUser, onChangeUser }: Props)
       setStoreMessage('Central SQL store connected. Changes are shared across authorized management sessions.');
     } catch (error) {
       if (isLocalDev()) {
-        const users = loadManagedUsers();
+        const cached = loadManagedUsers();
+        const users = cached.length ? cached : [cloneUser(currentUser)];
         setManagedUsers(users);
         setAudit(loadManagementAudit());
         setTargetId(id => id || users[0]?.id || currentUser.id);

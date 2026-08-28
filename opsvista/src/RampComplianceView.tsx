@@ -24,7 +24,7 @@ type Escalation = {
 };
 
 type Props = { onEscalate?: (item: Escalation) => void };
-type RampSourceState = 'loading' | 'live' | 'demo' | 'error';
+type RampSourceState = 'loading' | 'live' | 'error';
 type RampPeriod = 'today' | 'yesterday' | 'this_week' | 'prior_week' | 'last_30' | 'custom';
 
 const periodLabels: Record<RampPeriod, string> = {
@@ -192,8 +192,8 @@ export default function RampComplianceView({ onEscalate }: Props) {
     setEscalated(ids => [...new Set([...ids, ...pending.map(tx => tx.id)])]);
   };
 
-  const sourceLabel = dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'demo' ? 'DEMO DATA' : dataSource === 'error' ? 'RAMP CONNECTION ERROR' : 'CONNECTING...';
-  const sourceTitle = dataSource === 'live' ? 'Connected to Ramp' : dataSource === 'demo' ? 'Local demo mode' : dataSource === 'error' ? 'Ramp data unavailable' : 'Connecting to Ramp...';
+  const sourceLabel = dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'error' ? 'RAMP CONNECTION ERROR' : 'CONNECTING...';
+  const sourceTitle = dataSource === 'live' ? 'Connected to Ramp' : dataSource === 'error' ? 'Ramp data unavailable' : 'Connecting to Ramp...';
 
   return <div className="ramp-page">
     <section className="ramp-filter-bar">
@@ -212,7 +212,7 @@ export default function RampComplianceView({ onEscalate }: Props) {
 
     {dataSource === 'error' && <section className="ramp-production-warning">
       <strong>Live Ramp data is required here.</strong>
-      <span>OpsVista intentionally did not substitute demo transactions. Configure the existing Ramp credentials in the deployment environment and refresh.</span>
+      <span>OpsVista did not substitute test transactions. Configure the existing Ramp credentials in the deployment environment and refresh.</span>
     </section>}
 
     <section className="ramp-summary-grid">

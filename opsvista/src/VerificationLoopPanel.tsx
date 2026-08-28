@@ -1,4 +1,4 @@
-import { measurementFor, verifyAction, type VerificationStatus } from './verificationLoop';
+import { verifyAction, type VerificationMeasurement, type VerificationStatus } from './verificationLoop';
 import './verificationLoop.css';
 
 type ActionLike = {
@@ -11,13 +11,13 @@ type ActionLike = {
 
 type Props = {
   action: ActionLike;
+  measurement?: VerificationMeasurement;
   onApply: (status: VerificationStatus, note: string) => void;
 };
 
 const statusClass = (status: VerificationStatus) => status.toLowerCase().replaceAll(' ', '-');
 
-export default function VerificationLoopPanel({ action, onApply }: Props) {
-  const measurement = measurementFor(action.automationKey);
+export default function VerificationLoopPanel({ action, measurement, onApply }: Props) {
   const result = verifyAction(action, measurement);
 
   return <section className="verification-v2">

@@ -1,13 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { demoUsers, type OpsVistaUser } from './accessControl';
+import { bindAuthenticatedUser, type OpsVistaUser } from './accessControl';
 import { supabase } from './supabaseClient';
 
 type SessionResponse = { authenticated?: boolean; user?: OpsVistaUser & { email?: string }; error?: string };
 type AuthStage = 'password' | 'verify' | 'enroll';
-
-function bindAuthenticatedUser(user: OpsVistaUser) {
-  demoUsers.splice(0, demoUsers.length, user);
-}
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();

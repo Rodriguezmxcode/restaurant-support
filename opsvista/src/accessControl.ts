@@ -84,36 +84,20 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   },
 };
 
-const grants = (locations: string[]): LocationAccessGrant[] => locations.map((location,index)=>({ location, type:index===0?'Primary':'Additional', note:index===0?'Home location':'Permanent management coverage' }));
-
-export const seedUsers: OpsVistaUser[] = [
-  { id:'usr-founder-roberto', name:'Roberto Rodríguez', email:'rodriguez.evolife@gmail.com', role:'Founder', title:'Founder / Owner / Super Admin', locations:[], active:true },
-  { id:'usr-roberto-ops', name:'Roberto Rodríguez', email:'roberto@puertovallartausa.com', role:'Corporate', title:'Operations', locations:[], active:true },
-  { id:'usr-jacob', name:'Jacob Rodríguez', email:'jacob@puertovallartausa.com', role:'Corporate', title:'President', locations:[], active:true },
-  { id:'usr-esaul', name:'Esaul Rodríguez', email:'esaul08@gmail.com', role:'Corporate', title:'CEO', locations:[], active:true },
-  { id:'usr-caleb', name:'Caleb Kyllo', email:'caleb@puertovallartausa.com', role:'Corporate', title:'Corporate', locations:[], active:true },
-  { id:'usr-gladys', name:'Gladys Valdez', email:'gvaldez1223@outlook.com', role:'HR', title:'Human Resources & Payroll', locations:[], active:true },
-  { id:'usr-eduardo', name:'Eduardo Santos', email:'lalo@puertovallartausa.com', role:'Kitchen', title:'Kitchen Operations', locations:['Stamford','Orange','Fairfield','Danbury','Avon','Southington'], locationGrants:grants(['Stamford','Orange','Fairfield','Danbury','Avon','Southington']), active:true },
-  { id:'usr-miguel', name:'Miguel Bello', email:'miguel@puertovallartausa.com', role:'Maintenance', title:'Maintenance', locations:[], active:true },
-  { id:'usr-samantha', name:'Samantha Lora', email:'invoicepv@puertovallartausa.com', role:'Administration', title:'Administration', locations:[], active:true },
-  { id:'usr-jonathan', name:'Jonathan Rodríguez', email:'jonathan@puertovallartausa.com', role:'Administration', title:'Administration', locations:[], active:true },
-  { id:'usr-ali', name:'Ali Vinicio', email:'ali@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Avon'], locationGrants:grants(['Avon']), active:true },
-  { id:'usr-christopher', name:'Christopher Guerrero', email:'cristopher@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Danbury'], locationGrants:grants(['Danbury']), active:true },
-  { id:'usr-daniel', name:'Daniel Castro', email:'daniel@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Danbury'], locationGrants:grants(['Danbury']), active:true },
-  { id:'usr-janneth', name:'Janneth Domínguez', email:'janneth@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Orange'], locationGrants:grants(['Orange']), active:true },
-  { id:'usr-jhohan', name:'Jhohan Hernández', email:'jhohan@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Southington','Avon'], locationGrants:grants(['Southington','Avon']), active:true },
-  { id:'usr-juan-delgado', name:'Juan Delgado', email:'juandelgado@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Stamford'], locationGrants:grants(['Stamford']), active:true },
-  { id:'usr-juan-sebastian', name:'Juan Sebastián Zuleta', email:'jzuleta@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Southington'], locationGrants:grants(['Southington']), active:true },
-  { id:'usr-juan-zuleta', name:'Juan Zuleta', email:'juanzuleta@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Stamford','Southington'], locationGrants:grants(['Stamford','Southington']), active:true },
-  { id:'usr-michael', name:'Michael Monsalve', email:'michael@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Fairfield'], locationGrants:grants(['Fairfield']), active:true },
-  { id:'usr-pedro', name:'Pedro Santiago', email:'pedro@puertovallartausa.com', role:'Location Manager', title:'Restaurant Manager', locations:['Orange'], locationGrants:grants(['Orange']), active:true },
-];
-
 function cloneUser(user: OpsVistaUser): OpsVistaUser {
   return { ...user, locations:[...user.locations], locationGrants:user.locationGrants?.map(grant=>({...grant})) };
 }
 
-export const demoUsers: OpsVistaUser[] = seedUsers.map(cloneUser);
+let authenticatedUser: OpsVistaUser | null = null;
+
+export function bindAuthenticatedUser(user: OpsVistaUser) {
+  authenticatedUser = cloneUser(user);
+}
+
+export function currentAuthenticatedUser() {
+  if (!authenticatedUser) throw new Error('Authenticated OpsVista user is unavailable');
+  return cloneUser(authenticatedUser);
+}
 
 export function permissionsFor(user: OpsVistaUser) { return rolePermissions[user.role]; }
 export function canAccessModule(user: OpsVistaUser, module: string) { return permissionsFor(user).modules.includes(module as OpsVistaModule); }

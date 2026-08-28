@@ -1,7 +1,7 @@
-import { rampDemoTransactions, type RampTransaction } from './rampCompliance';
+import type { RampTransaction } from './rampCompliance';
 
 export type RampDataEnvelope = {
-  source: 'live' | 'demo' | 'error';
+  source: 'live' | 'error';
   fetchedAt?: string;
   fromDate?: string;
   toDate?: string;
@@ -22,12 +22,6 @@ export type RampDateRange = {
   fromDate: string;
   toDate: string;
 };
-
-function demoFallbackAllowed() {
-  if (typeof window === 'undefined') return false;
-  const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
-}
 
 function errorText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -52,14 +46,10 @@ export async function loadRampTransactions(range: RampDateRange): Promise<RampDa
   } catch (error) {
     const warning = error instanceof Error ? error.message : 'Ramp live data unavailable';
 
-    if (demoFallbackAllowed()) {
-      return { source: 'demo', transactions: rampDemoTransactions, warning };
-    }
-
     return {
       source: 'error',
       transactions: [],
-      warning: `${warning}. OpsVista will not substitute demo transactions in a non-local environment.`,
+      warning: `${warning}. OpsVista will not substitute test transactions.`,
     };
   }
 }

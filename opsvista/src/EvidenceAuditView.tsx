@@ -88,25 +88,6 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
     setRejectionReason('');
   };
 
-  const simulateResubmission = () => {
-    if (!selected) return;
-    const at = new Date().toISOString();
-    const updated = addAuditEvent({
-      ...selected,
-      previousPhotoUrl: selected.photoUrl,
-      photoUrl: `evidence://resubmission-${Date.now()}`,
-      status: 'Resubmitted',
-      submittedAt: at,
-      resubmissionCount: selected.resubmissionCount + 1,
-    }, {
-      id: `audit-${Date.now()}`,
-      at,
-      actor: selected.employee,
-      action: 'Resubmitted',
-    });
-    setItems(rows => rows.map(row => row.id === selected.id ? updated : row));
-  };
-
   const escalate = () => {
     if (!selected) return;
     onEscalate?.({
@@ -123,7 +104,13 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
     setEscalated(ids => ids.includes(selected.id) ? ids : [...ids, selected.id]);
   };
 
-  if (!items.length) return <div className="evidence-page"><SevenShiftsTasksPanel allowedLocations={allowedLocations}/></div>;
+  if (!items.length) return <div className="evidence-page">
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
+    <section className="panel">
+      <div className="panel-header"><div><h2>Evidence Audit</h2><p>La cola se activará cuando la fuente de fotos y evidencia real esté conectada.</p></div><span className="count-pill">FUENTE PENDIENTE</span></div>
+      <div style={{padding:18}}><div className="detail-block"><label>ESTADO DE LA FUENTE</label><p>No hay evidencia recibida. OpsVista no mostrará envíos, fotos ni decisiones de prueba.</p></div></div>
+    </section>
+  </div>;
 
   return <div className="evidence-page">
     <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
@@ -179,7 +166,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
         </div>}
 
         {['Submitted', 'Resubmitted'].includes(selected.status) && !canReview && <div className="evidence-feedback"><label>READ ONLY</label><p>Your role can view this evidence but cannot approve or reject it.</p></div>}
-        {selected.status === 'Rejected' && canReview && <div className="evidence-correction-box"><strong>Correction required</strong><p>The task remains open until new evidence is submitted and approved.</p><button onClick={simulateResubmission}>Simulate employee resubmission</button></div>}
+        {selected.status === 'Rejected' && canReview && <div className="evidence-correction-box"><strong>Correction required</strong><p>The task remains open until a real resubmission is received from the originating evidence system and approved.</p></div>}
 
         {selected.status !== 'Approved' && <button className="evidence-escalate" disabled={escalated.includes(selected.id)} onClick={escalate}>{escalated.includes(selected.id) ? 'Added to Action Center' : 'Send to Action Center'}</button>}
 

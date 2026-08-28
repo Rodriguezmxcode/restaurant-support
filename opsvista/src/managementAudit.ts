@@ -1,4 +1,4 @@
-import { seedUsers, type LocationAccessGrant, type OpsVistaUser } from './accessControl';
+import { type LocationAccessGrant, type OpsVistaUser } from './accessControl';
 
 export type ManagementAuditAction =
   | 'User created'
@@ -39,14 +39,14 @@ function cloneUser(user: OpsVistaUser): OpsVistaUser {
 }
 
 export function loadManagedUsers(): OpsVistaUser[] {
-  if (typeof window === 'undefined') return seedUsers.map(cloneUser);
+  if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(USERS_KEY);
-    if (!raw) return seedUsers.map(cloneUser);
+    if (!raw) return [];
     const parsed = JSON.parse(raw) as OpsVistaUser[];
     return parsed.map(cloneUser);
   } catch {
-    return seedUsers.map(cloneUser);
+    return [];
   }
 }
 
