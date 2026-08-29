@@ -180,8 +180,27 @@ async function googleReviews(req:ApiRequest,res:ApiResponse,user:NonNullable<Ret
  if(requested&&!unrestricted&&!user.locations.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
  const scope=requested?[requested]:unrestricted?undefined:user.locations;
  const organizationId=userOrganization(user);
- if(await googleBusinessProfileConfigured(organizationId))return res.status(200).json(await getGoogleReviewSummaries(start,end,scope,organizationId));
- if(reviewImportConfigured()){const imported=await getImportedReviewSummaries(start,end,scope);if(imported.hasData)return res.status(200).json(imported);}
+ let liveError:unknown;
+ if(await googleBusinessProfileConfigured(organizationId)){
+  try{return res.status(200).json({...await getGoogleReviewSummaries(start,end,scope,organizationId),sourceStatus:'live'});}
+  catch(error){liveError=error;}
+ }
+ if(reviewImportConfigured()){
+  const imported=await getImportedReviewSummaries(start,end,scope);
+  if(imported.hasData){
+   const liveMessage=liveError instanceof Error?liveError.message:'Google Business Profile is temporarily unavailable';
+   return res.status(200).json({...imported,sourceStatus:'fallback',liveSource:'Google Business Profile',sourceWarning:'Google Business Profile no pudo actualizarse. OpsVista está usando el reporte verificado de Vista Social para mantener activo el módulo y el Bono semanal.',liveSourceError:liveMessage});
+  }
+ }
+ if(liveError){
+  const message=liveError instanceof Error?liveError.message:'Google Business Profile is temporarily unavailable';
+  const accessPending=/\b429\b|quota|resource_exhausted/i.test(message);
+  return res.status(503).json({
+   error:accessPending?'Google está conectado correctamente, pero el proyecto todavía tiene cuota 0. La aprobación de acceso básico de Google Business Profile sigue pendiente; no cambies el Client ID ni el Client Secret.':message,
+   errorCode:accessPending?'GOOGLE_API_ACCESS_PENDING':'GOOGLE_API_UNAVAILABLE',
+   source:'google-business-profile',configured:true,connected:true,
+  });
+ }
  return res.status(503).json({error:'Google Business Profile is not connected. A Founder can connect all managed locations from Configuración.',configured:false,setupModule:'Configuración'});
 }
 

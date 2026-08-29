@@ -4,6 +4,7 @@ import MaxDataInsights from './MaxDataInsights';
 import { bonusPolicy, googleReviewPoints } from './bonusEngine';
 import { parseVistaSocialReviewsCsv } from './vistaSocialCsv';
 import './googleReviews.css';
+import './googleReviewsFallback.css';
 
 type Period = 'this-week' | 'previous-week' | 'this-month' | 'last-30-days' | 'custom';
 type Review = { id: string; reviewer: string; rating: number; comment: string; createTime: string; answered: boolean };
@@ -22,6 +23,10 @@ type LocationSummary = {
 };
 type ReviewsPayload = {
   source?: string;
+  sourceStatus?: 'live' | 'fallback';
+  sourceWarning?: string;
+  liveSourceError?: string;
+  errorCode?: string;
   start?: string;
   end?: string;
   minimumReviews?: number;
@@ -145,11 +150,12 @@ export default function GoogleReviewsView({ allowedLocations, canImportReviews =
     </section>
 
     <section className="reviews-source-banner">
-      <div><strong>✓ Fuente compartida con Bono semanal</strong><span>{range.start} → {range.end} · {payload?.source || 'Google Business Profile'}</span></div>
+      <div><strong>{payload?.sourceStatus === 'fallback' ? '◷ Respaldo verificado activo' : '✓ Fuente compartida con Bono semanal'}</strong><span>{range.start} → {range.end} · {payload?.source || 'Google Business Profile'}</span></div>
       <p>La métrica de Reviews del Bono semanal se actualiza automáticamente: <b>5 puntos</b>, mínimo <b>{bonusPolicy.requirements.minimumWeeklyReviews} reseñas</b>, calidad <b>80%</b> y volumen <b>20%</b>.</p>
     </section>
 
     {error && <section className="reviews-error"><strong>No fue posible actualizar Google Reviews</strong><span>{error}</span></section>}
+    {payload?.sourceStatus === 'fallback' && <section className="reviews-fallback"><strong>{payload.sourceWarning}</strong><span>{payload.lastUpdated ? `Última importación: ${formatDate(payload.lastUpdated)}.` : 'Importa un reporte nuevo cuando quieras actualizar los resultados.'}</span>{payload.liveSourceError && <small>Estado de Google: {payload.liveSourceError}</small>}</section>}
     {notice && <section className="reviews-notice">{notice}</section>}
 
     <section className="reviews-metrics-grid">
@@ -182,6 +188,6 @@ export default function GoogleReviewsView({ allowedLocations, canImportReviews =
       {reviewFeed.map(review => <article className="review-row" key={`${review.location}-${review.id}`}><div className={`review-rating rating-${review.rating}`}><strong>{review.rating}.0</strong><span>{stars(review.rating)}</span></div><div className="review-copy"><div><strong>{review.reviewer}</strong><span>{review.location} · {formatDate(review.createTime)}</span></div><p>{review.comment || 'El cliente dejó una calificación sin comentario.'}</p></div><span className={review.answered ? 'review-status answered' : 'review-status pending'}>{review.answered ? 'Respondida' : 'Sin respuesta'}</span></article>)}
     </section>
 
-    {canImportReviews && <section className="reviews-import panel"><div><strong>Importación de respaldo</strong><span>Disponible únicamente para Founder y Corporate si se necesita cargar un CSV histórico.</span></div><label className="primary">{importing ? 'Importando…' : 'Importar Reviews CSV'}<input type="file" accept=".csv,text/csv" disabled={importing} onChange={event => { void importReviews(event.target.files?.[0]); event.currentTarget.value = ''; }} /></label></section>}
+    {canImportReviews && <section className="reviews-import panel"><div><strong>Importación de respaldo</strong><span>Usa el CSV del reporte Review performance de Vista Social mientras Google termina de aprobar el acceso. Los datos alimentan esta pantalla y el Bono semanal.</span></div><label className="primary">{importing ? 'Importando…' : 'Importar Reviews CSV'}<input type="file" accept=".csv,text/csv" disabled={importing} onChange={event => { void importReviews(event.target.files?.[0]); event.currentTarget.value = ''; }} /></label></section>}
   </div>;
 }
