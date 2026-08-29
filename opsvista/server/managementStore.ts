@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import type { ServerRole, SessionUser } from './authSession';
+import type { ServerRole, SessionUser } from './authSession.js';
 
 export type StoredLocationGrant = {
   location: string;

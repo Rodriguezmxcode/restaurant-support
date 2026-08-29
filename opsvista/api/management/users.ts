@@ -1,6 +1,6 @@
-import { readSession, type ServerRole } from '../../server/authSession';
-import { authorize } from '../../server/authorization';
-import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore';
+import { readSession, type ServerRole } from '../../server/authSession.js';
+import { authorize } from '../../server/authorization.js';
+import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore.js';
 
 type ApiRequest = {
   method?: string;

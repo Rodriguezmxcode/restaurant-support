@@ -1,7 +1,7 @@
-import { readSession } from '../../server/authSession';
-import { authorize } from '../../server/authorization';
-import { createInvitation, listInvitations } from '../../server/accountStore';
-import { getManagedUser } from '../../server/managementStore';
+import { readSession } from '../../server/authSession.js';
+import { authorize } from '../../server/authorization.js';
+import { createInvitation, listInvitations } from '../../server/accountStore.js';
+import { getManagedUser } from '../../server/managementStore.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string;host?:string;'x-forwarded-proto'?:string;origin?:string};body?:{userId?:string}};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};

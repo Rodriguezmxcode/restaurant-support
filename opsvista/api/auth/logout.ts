@@ -1,4 +1,4 @@
-import { clearSessionCookie } from '../../server/authSession';
+import { clearSessionCookie } from '../../server/authSession.js';
 
 type ApiRequest = { method?: string };
 type ApiResponse = { status: (code: number) => ApiResponse; json: (body: unknown) => void; setHeader?: (name: string, value: string) => void };

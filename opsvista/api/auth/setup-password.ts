@@ -1,4 +1,4 @@
-import { acceptInvitation } from '../../server/accountStore';
+import { acceptInvitation } from '../../server/accountStore.js';
 
 type ApiRequest={method?:string;body?:{token?:string;password?:string}};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};

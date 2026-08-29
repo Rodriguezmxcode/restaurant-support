@@ -1,6 +1,6 @@
-import { readSession } from '../../server/authSession';
-import { authorize } from '../../server/authorization';
-import { listManagementAudit } from '../../server/managementStore';
+import { readSession } from '../../server/authSession.js';
+import { authorize } from '../../server/authorization.js';
+import { listManagementAudit } from '../../server/managementStore.js';
 
 type ApiRequest = { method?:string; headers?:{ cookie?:string }; query?:{ limit?:string|string[] } };
 type ApiResponse = { status:(code:number)=>ApiResponse; json:(body:unknown)=>void; setHeader?:(name:string,value:string)=>void };
