@@ -177,9 +177,10 @@ async function googleReviews(req:ApiRequest,res:ApiResponse,user:NonNullable<Ret
  const unrestricted=['Founder','Corporate','Administration'].includes(user.role);
  if(requested&&!unrestricted&&!user.locations.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
  const scope=requested?[requested]:unrestricted?undefined:user.locations;
- if(googleBusinessProfileConfigured())return res.status(200).json(await getGoogleReviewSummaries(start,end,scope));
+ const organizationId=userOrganization(user);
+ if(await googleBusinessProfileConfigured(organizationId))return res.status(200).json(await getGoogleReviewSummaries(start,end,scope,organizationId));
  if(reviewImportConfigured()){const imported=await getImportedReviewSummaries(start,end,scope);if(imported.hasData)return res.status(200).json(imported);}
- return res.status(503).json({error:'Google Business Profile is awaiting authorization. Import a Vista Social CSV to use the temporary review source.',configured:false,requiredEnvironmentVariables:['GOOGLE_BUSINESS_PROFILE_CLIENT_ID','GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET','GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN']});
+ return res.status(503).json({error:'Google Business Profile is not connected. A Founder can connect all managed locations from Configuración.',configured:false,setupModule:'Configuración'});
 }
 
 async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){

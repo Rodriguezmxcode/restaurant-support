@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { getGoogleBusinessCredentials, type GoogleBusinessCredentials } from './integrationStore.js';
+
 const ACCOUNT_API = 'https://mybusinessaccountmanagement.googleapis.com/v1';
 const BUSINESS_INFO_API = 'https://mybusinessbusinessinformation.googleapis.com/v1';
 const REVIEWS_API = 'https://mybusiness.googleapis.com/v4';
@@ -44,12 +47,23 @@ export type GoogleReviewLocationSummary = {
   mappingError?: string;
 };
 
-let tokenCache: { token: string; expiresAt: number } | undefined;
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-function required(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is not configured`);
-  return value;
+function environmentCredentials(): GoogleBusinessCredentials | null {
+  const clientId = process.env.GOOGLE_BUSINESS_PROFILE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET?.trim();
+  const refreshToken = process.env.GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN?.trim();
+  return clientId && clientSecret && refreshToken ? { clientId, clientSecret, refreshToken } : null;
+}
+
+async function credentials(organizationId: string) {
+  try {
+    const stored = await getGoogleBusinessCredentials(organizationId);
+    if (stored?.clientId && stored.clientSecret && stored.refreshToken) return stored;
+  } catch (error) {
+    if (!environmentCredentials()) throw error;
+  }
+  return environmentCredentials();
 }
 
 function normalized(value: string) {
@@ -70,23 +84,27 @@ function easternDate(value?: string) {
   return `${item.year}-${item.month}-${item.day}`;
 }
 
-async function accessToken() {
-  if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.token;
+async function accessToken(credential: GoogleBusinessCredentials) {
+  if (!credential.refreshToken) throw new Error('Google Business Profile authorization is incomplete');
+  const cacheKey = createHash('sha256').update(`${credential.clientId}:${credential.refreshToken}`).digest('base64url');
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
   const body = new URLSearchParams({
-    client_id: required('GOOGLE_BUSINESS_PROFILE_CLIENT_ID'),
-    client_secret: required('GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET'),
-    refresh_token: required('GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN'),
+    client_id: credential.clientId,
+    client_secret: credential.clientSecret,
+    refresh_token: credential.refreshToken,
     grant_type: 'refresh_token',
   });
   const response = await fetch(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
   const payload = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
   if (!response.ok || !payload.access_token) throw new Error(`Google OAuth failed (${response.status}): ${payload.error_description || payload.error || 'access token unavailable'}`);
-  tokenCache = { token: payload.access_token, expiresAt: Date.now() + (Number(payload.expires_in) || 3600) * 1000 };
-  return tokenCache.token;
+  const next = { token: payload.access_token, expiresAt: Date.now() + (Number(payload.expires_in) || 3600) * 1000 };
+  tokenCache.set(cacheKey, next);
+  return next.token;
 }
 
-async function googleJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const token = await accessToken();
+async function googleJson<T>(url: string, credential: GoogleBusinessCredentials, init?: RequestInit): Promise<T> {
+  const token = await accessToken(credential);
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Accept', 'application/json');
@@ -104,22 +122,22 @@ function configuredLocationMap() {
   return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
 }
 
-async function accountName() {
+async function accountName(credential: GoogleBusinessCredentials) {
   const configured = process.env.GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID?.trim();
   if (configured) return configured.startsWith('accounts/') ? configured : `accounts/${configured}`;
-  const payload = await googleJson<{ accounts?: GoogleAccount[] }>(`${ACCOUNT_API}/accounts`);
+  const payload = await googleJson<{ accounts?: GoogleAccount[] }>(`${ACCOUNT_API}/accounts`, credential);
   const account = payload.accounts?.[0];
   if (!account?.name) throw new Error('No Google Business Profile account is available for this Google authorization');
   return account.name;
 }
 
-async function listLocations(account: string) {
+async function listLocations(account: string, credential: GoogleBusinessCredentials) {
   const locations: GoogleLocation[] = [];
   let pageToken = '';
   do {
     const params = new URLSearchParams({ readMask: 'name,title,storeCode,storefrontAddress', pageSize: '100' });
     if (pageToken) params.set('pageToken', pageToken);
-    const payload = await googleJson<{ locations?: GoogleLocation[]; nextPageToken?: string }>(`${BUSINESS_INFO_API}/${account}/locations?${params}`);
+    const payload = await googleJson<{ locations?: GoogleLocation[]; nextPageToken?: string }>(`${BUSINESS_INFO_API}/${account}/locations?${params}`, credential);
     locations.push(...(payload.locations || []));
     pageToken = payload.nextPageToken || '';
   } while (pageToken);
@@ -137,7 +155,7 @@ function matchLocation(internalName: string, locations: GoogleLocation[], config
   });
 }
 
-async function reviewsForLocation(account: string, locationName: string, start: string, end: string) {
+async function reviewsForLocation(account: string, locationName: string, start: string, end: string, credential: GoogleBusinessCredentials) {
   const reviews: GoogleReview[] = [];
   const parent = locationName.startsWith('accounts/') ? locationName : `${account}/${locationName}`;
   let pageToken = '';
@@ -145,7 +163,7 @@ async function reviewsForLocation(account: string, locationName: string, start: 
   do {
     const params = new URLSearchParams({ pageSize: '50', orderBy: 'updateTime desc' });
     if (pageToken) params.set('pageToken', pageToken);
-    const payload = await googleJson<{ reviews?: GoogleReview[]; nextPageToken?: string }>(`${REVIEWS_API}/${parent}/reviews?${params}`);
+    const payload = await googleJson<{ reviews?: GoogleReview[]; nextPageToken?: string }>(`${REVIEWS_API}/${parent}/reviews?${params}`, credential);
     const page = payload.reviews || [];
     reviews.push(...page.filter(review => {
       const date = easternDate(review.createTime);
@@ -190,20 +208,21 @@ function summarize(location: string, googleLocation: GoogleLocation | undefined,
   };
 }
 
-export function googleBusinessProfileConfigured() {
-  return ['GOOGLE_BUSINESS_PROFILE_CLIENT_ID','GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET','GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN'].every(name => Boolean(process.env[name]?.trim()));
+export async function googleBusinessProfileConfigured(organizationId = 'org-puerto-vallarta') {
+  return Boolean(await credentials(organizationId));
 }
 
-export async function getGoogleReviewSummaries(start: string, end: string, scope?: string[]) {
-  if (!googleBusinessProfileConfigured()) throw new Error('Google Business Profile credentials are not configured');
-  const account = await accountName();
-  const googleLocations = await listLocations(account);
+export async function getGoogleReviewSummaries(start: string, end: string, scope?: string[], organizationId = 'org-puerto-vallarta') {
+  const credential = await credentials(organizationId);
+  if (!credential) throw new Error('Google Business Profile credentials are not configured');
+  const account = await accountName(credential);
+  const googleLocations = await listLocations(account, credential);
   const configured = configuredLocationMap();
   const requested = (scope?.length ? scope : [...OPSVISTA_LOCATIONS]).filter(location => OPSVISTA_LOCATIONS.includes(location as typeof OPSVISTA_LOCATIONS[number]));
   const summaries = await Promise.all(requested.map(async location => {
     const match = matchLocation(location, googleLocations, configured);
     if (!match) return summarize(location, undefined, []);
-    return summarize(location, match, await reviewsForLocation(account, match.name, start, end));
+    return summarize(location, match, await reviewsForLocation(account, match.name, start, end, credential));
   }));
   return { source: 'Google Business Profile', account, start, end, minimumReviews: 5, scoring: { qualityWeight: 90, volumeWeight: 10, volumeTarget: 10 }, locations: summaries };
 }
