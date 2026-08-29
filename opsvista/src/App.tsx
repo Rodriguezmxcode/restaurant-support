@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { ExternalEscalation } from './actionCenterTypes';
 import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
+import GoogleBusinessIntegrationPanel from './GoogleBusinessIntegrationPanel';
 
 const RampComplianceView=lazy(()=>import('./RampComplianceView'));
 const LaborIntelligenceView=lazy(()=>import('./LaborIntelligenceView'));
@@ -16,25 +17,33 @@ const TransferLedgerView=lazy(()=>import('./TransferLedgerView'));
 const PaymentRequestsView=lazy(()=>import('./PaymentRequestsView'));
 const ActionCenterView=lazy(()=>import('./ActionCenterView'));
 const ProjectsView=lazy(()=>import('./ProjectsView'));
-const GoogleBusinessIntegrationPanel=lazy(()=>import('./GoogleBusinessIntegrationPanel'));
-
 const allLocations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Bono semanal':'★','Action Center':'⚡',Proyectos:'◆',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Configuración:'⚙'};
+
+function storedSection(){
+  if(typeof window==='undefined')return null;
+  try{return window.localStorage.getItem('opsvista-section')??window.sessionStorage.getItem('opsvista-section');}
+  catch{return null;}
+}
+
+function rememberSection(section:OpsVistaModule){
+  try{window.sessionStorage.setItem('opsvista-section',section);window.localStorage.setItem('opsvista-section',section);}catch{/* Storage can be unavailable in restrictive Safari sessions. */}
+}
 
 export default function App(){
   const [currentUser]=useState(currentAuthenticatedUser);
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const nav=permissions.modules;
-  const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=typeof window!=='undefined'?(window.localStorage.getItem('opsvista-section')??window.sessionStorage.getItem('opsvista-section')):null;return (integration&&permissions.modules.includes('Configuración')?'Configuración':saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
+  const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=storedSection();return (integration&&permissions.modules.includes('Configuración')?'Configuración':saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
   const [search,setSearch]=useState('');
 
   useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);},[currentUser]);
-  useEffect(()=>{window.sessionStorage.setItem('opsvista-section',section);window.localStorage.setItem('opsvista-section',section)},[section]);
+  useEffect(()=>{rememberSection(section)},[section]);
 
   const escalateExternal=(item:ExternalEscalation,category:string)=>{if(!permissions.canEscalateActions||!canAccessLocation(currentUser,item.location))return;const automationKey=item.automationKey||`external::${category}::${item.location}::${item.title}::${item.signal}`;void fetch('/api/workflows?resource=actions',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,category,automationKey,automated:true,priorityScore:item.priorityScore??(item.severity==='High'?80:item.severity==='Medium'?50:25),sources:item.sources??[category],detectedAt:item.detectedAt??new Date().toISOString()})}).then(async response=>{const body=await response.json().catch(()=>({})) as {error?:string};if(!response.ok)throw new Error(body.error||'Action could not be saved');setSection('Action Center');setSearch('')}).catch(error=>window.alert(error instanceof Error?error.message:'Action could not be saved'));};
   const logout=async()=>{try{await fetch('/api/auth/logout',{method:'POST',credentials:'include'})}finally{window.location.assign('/')}};
-  const refreshData=()=>{window.sessionStorage.setItem('opsvista-section',section);window.localStorage.setItem('opsvista-section',section);window.location.reload()};
+  const refreshData=()=>{rememberSection(section);window.location.reload()};
 
   const isOverview=section==='Resumen'||section==='Ventas';
   const isLocations=section==='Locaciones';
