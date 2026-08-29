@@ -9,9 +9,11 @@ import { createAction, getAction, listActionAudit, listActions, updateActionReco
 import { createProject, getProject, listProjectAudit, listProjects, updateProjectRecord, type ProjectMilestone, type ProjectPriority, type ProjectStatus } from '../server/projectStore.js';
 import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../server/googleBusinessProfile.js';
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
+import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
+import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
 
-type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
-type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
+type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
+type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const WORKFLOW_VERSION='7shifts-workflow-v5';
 const text=(v:unknown)=>typeof v==='string'?v.trim():'';
@@ -183,6 +185,43 @@ async function googleReviews(req:ApiRequest,res:ApiResponse,user:NonNullable<Ret
  return res.status(503).json({error:'Google Business Profile is not connected. A Founder can connect all managed locations from Configuración.',configured:false,setupModule:'Configuración'});
 }
 
+async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const permission=authorize(user,'integrations:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+ const organizationId=userOrganization(user);
+ if(!req.method||req.method==='GET'){
+  const saved=await getGoogleBusinessCredentials(organizationId);const redirectUri=googleBusinessRedirectUri(req.headers||{});
+  if(q(req,'action')==='authorize'){
+   if(!saved?.clientId||!saved.clientSecret)return res.status(400).json({error:'Save the Google OAuth client before connecting'});
+   if(!res.setHeader||!res.end)return res.status(500).json({error:'Google redirect is unavailable'});
+   res.setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));res.status(302).end();return;
+  }
+  return res.status(200).json({provider:'google-business-profile',configured:Boolean(saved?.clientId&&saved.clientSecret),connected:Boolean(saved?.refreshToken),clientId:saved?.clientId||'',connectedEmail:saved?.connectedEmail,connectedAt:saved?.connectedAt,redirectUri});
+ }
+ if(req.method==='POST'){
+  const action=text(req.body?.action);
+  if(action==='save'){
+   const clientId=text(req.body?.clientId),clientSecret=text(req.body?.clientSecret);
+   if(!clientId.endsWith('.apps.googleusercontent.com')||!clientSecret.startsWith('GOCSPX-'))return res.status(400).json({error:'A valid Google OAuth Client ID and Client Secret are required'});
+   await saveGoogleBusinessClient(organizationId,clientId,clientSecret);return res.status(200).json({saved:true});
+  }
+  if(action==='disconnect'){await disconnectGoogleBusiness(organizationId);return res.status(200).json({disconnected:true});}
+  return res.status(400).json({error:'Unknown integration action'});
+ }
+ res.setHeader?.('Allow','GET, POST');return res.status(405).json({error:'Method not allowed'});
+}
+
+async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const origin=publicOrigin(req.headers||{});const redirect=(status:'connected'|'error',message?:string)=>{if(!res.setHeader||!res.end)throw new Error('Google callback redirect is unavailable');const suffix=message?`&message=${encodeURIComponent(message)}`:'';res.setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);res.status(302).end();};
+ try{
+  if(user.role!=='Founder')throw new Error('Founder session is required to connect Google Business');
+  const providerError=q(req,'error');if(providerError)throw new Error(q(req,'error_description')||providerError);
+  const state=verifyOAuthState(q(req,'state'));if(state.userId!==user.id)throw new Error('Google authorization belongs to a different OpsVista session');
+  const credential=await getGoogleBusinessCredentials(state.organizationId);if(!credential)throw new Error('Google OAuth client is not saved in OpsVista');
+  const result=await exchangeAuthorizationCode(credential,q(req,'code'),googleBusinessRedirectUri(req.headers||{}));
+  await saveGoogleBusinessAuthorization(state.organizationId,result.refreshToken,result.email);redirect('connected');return;
+ }catch(error){redirect('error',error instanceof Error?error.message:'Google authorization failed');return;}
+}
+
 async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const requested=q(req,'location');
@@ -201,5 +240,5 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }
