@@ -189,10 +189,11 @@ function summarize(location: string, googleLocation: GoogleLocation | undefined,
   const reviewCount = normalizedReviews.length;
   const averageRating = reviewCount ? normalizedReviews.reduce((sum, review) => sum + review.rating, 0) / reviewCount : null;
   const minimumMet = reviewCount >= 5;
-  // Quality intentionally dominates volume: five 5-star reviews outrank seven 4.5-star reviews.
-  const quality = averageRating === null ? 0 : averageRating / 5;
+  // Match the Weekly Bonus formula: only performance above 4.0 earns the
+  // quality portion, and five 5-star reviews outrank seven 4.5-star reviews.
+  const quality = averageRating === null ? 0 : Math.max(0, Math.min(1, averageRating - 4));
   const volume = Math.min(1, reviewCount / 10);
-  const scorePct = minimumMet ? Math.min(100, (quality * 0.9 + volume * 0.1) * 100) : 0;
+  const scorePct = minimumMet ? Math.min(100, (quality * 0.8 + volume * 0.2) * 100) : 0;
   return {
     location,
     googleLocationName: googleLocation.name,
@@ -224,5 +225,5 @@ export async function getGoogleReviewSummaries(start: string, end: string, scope
     if (!match) return summarize(location, undefined, []);
     return summarize(location, match, await reviewsForLocation(account, match.name, start, end, credential));
   }));
-  return { source: 'Google Business Profile', account, start, end, minimumReviews: 5, scoring: { qualityWeight: 90, volumeWeight: 10, volumeTarget: 10 }, locations: summaries };
+  return { source: 'Google Business Profile', account, start, end, minimumReviews: 5, scoring: { qualityWeight: 80, volumeWeight: 20, volumeTarget: 10 }, locations: summaries };
 }
