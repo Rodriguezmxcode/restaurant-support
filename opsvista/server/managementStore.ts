@@ -50,9 +50,9 @@ export const initialManagedDirectory: ManagedDirectoryUser[] = [
   {id:'usr-caleb',name:'Caleb Kyllo',email:'caleb@puertovallartausa.com',role:'Corporate',title:'Corporate',locations:[],active:true},
   {id:'usr-gladys',name:'Gladys Valdez',email:'gvaldez1223@outlook.com',role:'HR',title:'Human Resources & Payroll',locations:[],active:true},
   {id:'usr-eduardo',name:'Eduardo Santos',email:'lalo@puertovallartausa.com',role:'Kitchen',title:'Kitchen Operations',locations,locationGrants:grants(locations),active:true},
-  {id:'usr-miguel',name:'Miguel Bello',email:'miguel@puertovallartausa.com',role:'Maintenance',title:'Maintenance',locations:[],active:true},
+  {id:'usr-miguel',name:'Miguel Bello',email:'miguel@puertovallartausa.com',role:'Maintenance',title:'Head of Maintenance · All Locations',locations:[],active:true},
   {id:'usr-samantha',name:'Samantha Lora',email:'invoicepv@puertovallartausa.com',role:'Administration',title:'Administration',locations:[],active:true},
-  {id:'usr-jonathan',name:'Jonathan Rodríguez',email:'jonathan@puertovallartausa.com',role:'Administration',title:'Administration',locations:[],active:true},
+  {id:'usr-jonathan',name:'Jonathan Rodriguez',email:'jonathan@puertovallartausa.com',role:'Administration',title:'Corporate Secretary · Payments, Vendors & Restaurant365',locations:[],active:true},
   {id:'usr-ali',name:'Ali Vinicio',email:'ali@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Avon'],locationGrants:grants(['Avon']),active:true},
   {id:'usr-christopher',name:'Christopher Guerrero',email:'cristopher@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Danbury'],locationGrants:grants(['Danbury']),active:true},
   {id:'usr-daniel',name:'Daniel Castro',email:'daniel@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Danbury'],locationGrants:grants(['Danbury']),active:true},
@@ -63,6 +63,11 @@ export const initialManagedDirectory: ManagedDirectoryUser[] = [
   {id:'usr-juan-zuleta',name:'Juan Zuleta',email:'juanzuleta@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Stamford','Southington'],locationGrants:grants(['Stamford','Southington']),active:true},
   {id:'usr-michael',name:'Michael Monsalve',email:'michael@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Fairfield'],locationGrants:grants(['Fairfield']),active:true},
   {id:'usr-pedro',name:'Pedro Santiago',email:'pedro@puertovallartausa.com',role:'Location Manager',title:'Restaurant Manager',locations:['Orange'],locationGrants:grants(['Orange']),active:true},
+];
+
+const approvedDirectoryProfiles: Pick<ManagedDirectoryUser,'id'|'name'|'email'|'role'|'title'>[] = [
+  {id:'usr-miguel',name:'Miguel Bello',email:'miguel@puertovallartausa.com',role:'Maintenance',title:'Head of Maintenance · All Locations'},
+  {id:'usr-jonathan',name:'Jonathan Rodriguez',email:'jonathan@puertovallartausa.com',role:'Administration',title:'Corporate Secretary · Payments, Vendors & Restaurant365'},
 ];
 
 function sql() {
@@ -116,25 +121,43 @@ async function bootstrapInitialDirectory() {
   if (bootstrapped) return;
   await ensureSchema();
   const db = sql();
-  const countRows = await db`select count(*)::int as count from opsvista_management_users`;
-  if (Number(countRows[0]?.count ?? 0) === 0) {
-    const at = new Date().toISOString();
-    await db.begin(async tx => {
-      for (const user of initialManagedDirectory) {
-        await tx`
-          insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
-          values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},'initial-directory-v1')
-          on conflict (id) do nothing
-        `;
-        await tx`
-          insert into opsvista_management_audit
-          (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
-          values (${`bootstrap-${user.id}`},${at},'initial-directory-v1','OpsVista Initial Migration',${user.id},${user.name},'User created','No account',${`${user.role}${user.email?` · ${user.email}`:''}`},'Initial management directory approved for OpsVista migration.',true)
-          on conflict (id) do nothing
-        `;
-      }
-    });
-  }
+  const at = new Date().toISOString();
+  await db.begin(async tx => {
+    for (const user of initialManagedDirectory) {
+      const inserted = await tx`
+        insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
+        values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},'initial-directory-v2')
+        on conflict (id) do nothing
+        returning id
+      `;
+      if (!inserted.length) continue;
+      await tx`
+        insert into opsvista_management_audit
+        (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
+        values (${`bootstrap-${user.id}`},${at},'initial-directory-v2','OpsVista Directory Migration',${user.id},${user.name},'User created','No account',${`${user.role}${user.email?` · ${user.email}`:''}`},'Missing approved directory user added without changing existing accounts.',true)
+        on conflict (id) do nothing
+      `;
+    }
+    for (const profile of approvedDirectoryProfiles) {
+      const rows = await tx`select name,email,role,title from opsvista_management_users where id=${profile.id} limit 1`;
+      const existing = rows[0];
+      if (!existing) continue;
+      const before = `${String(existing.name)} · ${String(existing.role)} · ${String(existing.title)} · ${String(existing.email ?? '')}`;
+      const after = `${profile.name} · ${profile.role} · ${profile.title} · ${profile.email ?? ''}`;
+      if (before === after) continue;
+      await tx`
+        update opsvista_management_users
+        set name=${profile.name},email=${profile.email ?? null},role=${profile.role},title=${profile.title},updated_at=now(),updated_by='approved-directory-profile-v1'
+        where id=${profile.id}
+      `;
+      await tx`
+        insert into opsvista_management_audit
+        (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic)
+        values (${`approved-profile-${profile.id}-v1`},${at},'approved-directory-profile-v1','OpsVista Directory Migration',${profile.id},${profile.name},'Authorized profile updated',${before},${after},'Email, title and role responsibilities confirmed by Operations.',true)
+        on conflict (id) do nothing
+      `;
+    }
+  });
   bootstrapped = true;
 }
 
