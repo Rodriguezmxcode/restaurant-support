@@ -12,7 +12,11 @@ export default class AppErrorBoundary extends Component<Props, State> {
     console.error('OpsVista could not render the authenticated application', error, info);
   }
 
-  private recover = () => {
+  private retry = () => {
+    window.location.reload();
+  };
+
+  private openOverview = () => {
     try {
       window.localStorage.removeItem('opsvista-section');
       window.sessionStorage.removeItem('opsvista-section');
@@ -26,8 +30,11 @@ export default class AppErrorBoundary extends Component<Props, State> {
       <section style={{maxWidth:560,padding:28,border:'1px solid #e2e8f0',borderRadius:16,background:'#fff',boxShadow:'0 18px 50px rgba(15,23,42,.10)'}}>
         <div style={{fontSize:12,fontWeight:800,letterSpacing:'.12em',color:'#64748b'}}>OPSVISTA · RECUPERACIÓN SEGURA</div>
         <h1 style={{margin:'10px 0 8px',fontSize:28,color:'#0f172a'}}>La vista necesita reiniciarse</h1>
-        <p style={{margin:'0 0 20px',lineHeight:1.6,color:'#475569'}}>Tu sesión y tus datos siguen seguros. Reiniciaremos únicamente la última pantalla guardada para abrir el Resumen.</p>
-        <button onClick={this.recover} style={{border:0,borderRadius:10,padding:'11px 16px',background:'#0f172a',color:'#fff',fontWeight:800,cursor:'pointer'}}>Volver a OpsVista</button>
+        <p style={{margin:'0 0 20px',lineHeight:1.6,color:'#475569'}}>Tu sesión y tus datos siguen seguros. Puedes intentar abrir nuevamente la misma sección o volver al Resumen.</p>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <button onClick={this.retry} style={{border:0,borderRadius:10,padding:'11px 16px',background:'#0f172a',color:'#fff',fontWeight:800,cursor:'pointer'}}>Intentar nuevamente</button>
+          <button onClick={this.openOverview} style={{border:'1px solid #cbd5e1',borderRadius:10,padding:'11px 16px',background:'#fff',color:'#334155',fontWeight:800,cursor:'pointer'}}>Abrir Resumen</button>
+        </div>
       </section>
     </main>;
   }

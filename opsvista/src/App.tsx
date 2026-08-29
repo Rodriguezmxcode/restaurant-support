@@ -1,23 +1,46 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react';
 import type { ExternalEscalation } from './actionCenterTypes';
 import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
 import GoogleBusinessIntegrationPanel from './GoogleBusinessIntegrationPanel';
 
-const RampComplianceView=lazy(()=>import('./RampComplianceView'));
-const LaborIntelligenceView=lazy(()=>import('./LaborIntelligenceView'));
-const EvidenceAuditView=lazy(()=>import('./EvidenceAuditView'));
-const WeeklyBonusLivePanel=lazy(()=>import('./WeeklyBonusLivePanel'));
-const AccessControlPanel=lazy(()=>import('./AccessControlPanel'));
-const InvitationManager=lazy(()=>import('./InvitationManager'));
-const ChangePasswordPanel=lazy(()=>import('./ChangePasswordPanel'));
-const OperationalOverview=lazy(()=>import('./OperationalOverview'));
-const LocationDashboard=lazy(()=>import('./LocationDashboard'));
-const GoogleReviewsView=lazy(()=>import('./GoogleReviewsView'));
-const LocalIntelligenceView=lazy(()=>import('./LocalIntelligenceView'));
-const TransferLedgerView=lazy(()=>import('./TransferLedgerView'));
-const PaymentRequestsView=lazy(()=>import('./PaymentRequestsView'));
-const ActionCenterView=lazy(()=>import('./ActionCenterView'));
-const ProjectsView=lazy(()=>import('./ProjectsView'));
+const moduleReloadKey='opsvista-module-reload';
+const staleModulePattern=/Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk|ChunkLoadError/i;
+
+function recoverableLazy<T extends ComponentType<any>>(loader:()=>Promise<{default:T}>){
+  return lazy(async()=>{
+    try{
+      const loaded=await loader();
+      try{window.sessionStorage.removeItem(moduleReloadKey);}catch{/* Storage can be unavailable. */}
+      return loaded;
+    }catch(error){
+      const message=error instanceof Error?`${error.name}: ${error.message}`:String(error);
+      let alreadyReloaded=false;
+      try{alreadyReloaded=window.sessionStorage.getItem(moduleReloadKey)==='1';}catch{/* Storage can be unavailable. */}
+      if(typeof window!=='undefined'&&staleModulePattern.test(message)&&!alreadyReloaded){
+        try{window.sessionStorage.setItem(moduleReloadKey,'1');}catch{/* Storage can be unavailable. */}
+        window.location.reload();
+        return await new Promise<{default:T}>(()=>{});
+      }
+      throw error;
+    }
+  });
+}
+
+const RampComplianceView=recoverableLazy(()=>import('./RampComplianceView'));
+const LaborIntelligenceView=recoverableLazy(()=>import('./LaborIntelligenceView'));
+const EvidenceAuditView=recoverableLazy(()=>import('./EvidenceAuditView'));
+const WeeklyBonusLivePanel=recoverableLazy(()=>import('./WeeklyBonusLivePanel'));
+const AccessControlPanel=recoverableLazy(()=>import('./AccessControlPanel'));
+const InvitationManager=recoverableLazy(()=>import('./InvitationManager'));
+const ChangePasswordPanel=recoverableLazy(()=>import('./ChangePasswordPanel'));
+const OperationalOverview=recoverableLazy(()=>import('./OperationalOverview'));
+const LocationDashboard=recoverableLazy(()=>import('./LocationDashboard'));
+const GoogleReviewsView=recoverableLazy(()=>import('./GoogleReviewsView'));
+const LocalIntelligenceView=recoverableLazy(()=>import('./LocalIntelligenceView'));
+const TransferLedgerView=recoverableLazy(()=>import('./TransferLedgerView'));
+const PaymentRequestsView=recoverableLazy(()=>import('./PaymentRequestsView'));
+const ActionCenterView=recoverableLazy(()=>import('./ActionCenterView'));
+const ProjectsView=recoverableLazy(()=>import('./ProjectsView'));
 const allLocations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Google Reviews':'✦','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Bono semanal':'★','Action Center':'⚡',Proyectos:'◆',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Configuración:'⚙'};
 
@@ -68,7 +91,7 @@ export default function App(){
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">OV</div><div><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
-      <nav>{nav.map(item=><button key={item} className={section===item?'active':''} onClick={()=>setSection(item)}><span className="nav-icon">{icon[item]}</span>{item}</button>)}</nav>
+      <nav>{nav.map(item=><button key={item} className={section===item?'active':''} onClick={()=>{rememberSection(item);setSection(item);}}><span className="nav-icon">{icon[item]}</span>{item}</button>)}</nav>
       <div className="user-card"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
     </aside>
 
