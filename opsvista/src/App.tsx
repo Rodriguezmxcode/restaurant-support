@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import type { ExternalEscalation } from './actionCenterTypes';
 import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule, type OpsVistaUser } from './accessControl';
 import GoogleBusinessIntegrationPanel from './GoogleBusinessIntegrationPanel';
@@ -44,6 +44,27 @@ const ProjectsView=recoverableLazy(()=>import('./ProjectsView'));
 const allLocations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Google Reviews':'✦','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Bono semanal':'★','Action Center':'⚡',Proyectos:'◆',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Configuración:'⚙'};
 
+type SearchEntry={section:OpsVistaModule;label:string;description:string;keywords:string[]};
+const searchCatalog:SearchEntry[]=[
+  {section:'Resumen',label:'Resumen',description:'Dashboard, KPIs y desempeño operativo',keywords:['inicio','dashboard','overview','kpi','indicadores','performance']},
+  {section:'Locaciones',label:'Locaciones',description:'Comparación y desempeño por restaurante',keywords:['location','restaurants','restaurantes','stamford','orange','fairfield','danbury','avon','southington']},
+  {section:'Ventas',label:'Ventas',description:'Ventas netas, tendencias y comparaciones',keywords:['sales','revenue','net sales','ingresos','toast','comparacion']},
+  {section:'Google Reviews',label:'Google Reviews',description:'Reseñas, calificaciones y reputación',keywords:['reviews','reseñas','rating','estrellas','google','reputation']},
+  {section:'Local Intelligence',label:'Local Intelligence',description:'Clima, tráfico, eventos y señales locales',keywords:['weather','clima','traffic','trafico','events','eventos','incidents']},
+  {section:'Finanzas',label:'Finanzas',description:'Control financiero y flujo de pagos',keywords:['finance','financial','control','aprobaciones']},
+  {section:'Gastos',label:'Gastos Ramp',description:'Recibos, memos y cumplimiento de gastos',keywords:['ramp','expenses','gastos','receipt','receipts','recibo','recibos','memo','memos','compliance','cardholder']},
+  {section:'Horarios',label:'Horarios',description:'Labor, horarios, overtime y SPLH',keywords:['schedule','schedules','labor','overtime','ot','turnos','splh','7shifts']},
+  {section:'Tasks',label:'Tasks y Logbook',description:'Checklists, tareas y reportes diarios',keywords:['tasks','task','tareas','checklist','logbook','7shifts','evidence']},
+  {section:'Bono semanal',label:'Bono semanal',description:'Scorecard, elegibilidad y ranking',keywords:['bonus','bono','weekly','ranking','score','eligibility']},
+  {section:'Action Center',label:'Action Center',description:'Acciones, responsables y seguimiento',keywords:['actions','acciones','alerts','alertas','incidents','responsables','seguimiento']},
+  {section:'Proyectos',label:'Proyectos',description:'Proyectos, Gantt, fechas y milestones',keywords:['projects','project','gantt','timeline','milestones','presupuesto']},
+  {section:'Prioridades',label:'Prioridades',description:'Pendientes operativos por prioridad',keywords:['priorities','priority','pendientes','urgente','critical']},
+  {section:'Pagos',label:'Pagos',description:'Solicitudes y aprobaciones de pago',keywords:['payments','payment','pago','pagos','requests','solicitudes']},
+  {section:'Transferencias',label:'Transferencias',description:'Movimientos entre restaurantes',keywords:['transfers','transfer','inventory','inventario','movimientos']},
+  {section:'Configuración',label:'Configuración',description:'Usuarios, permisos e integraciones',keywords:['settings','configuration','usuarios','users','permissions','permisos','integrations','invitaciones']},
+];
+const normalizeSearch=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+
 function storedSection(){
   if(typeof window==='undefined')return null;
   try{return window.localStorage.getItem('opsvista-section')??window.sessionStorage.getItem('opsvista-section');}
@@ -64,9 +85,42 @@ export default function App(){
   const nav=permissions.modules;
   const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=storedSection();return (integration&&permissions.modules.includes('Configuración')?'Configuración':saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
   const [search,setSearch]=useState('');
+  const [searchOpen,setSearchOpen]=useState(false);
+  const [searchIndex,setSearchIndex]=useState(0);
+  const searchWrapRef=useRef<HTMLDivElement>(null);
+  const searchInputRef=useRef<HTMLInputElement>(null);
+  const searchResults=useMemo(()=>{
+    const query=normalizeSearch(search);
+    if(!query)return [];
+    return searchCatalog
+      .filter(entry=>nav.includes(entry.section))
+      .map(entry=>{
+        const locationKeywords=entry.section==='Locaciones'?allowedLocations:[];
+        const searchable=normalizeSearch([entry.label,entry.description,...entry.keywords,...locationKeywords].join(' '));
+        const label=normalizeSearch(entry.label);
+        const score=label===query?0:label.startsWith(query)?1:searchable.includes(query)?2:99;
+        return {entry,score};
+      })
+      .filter(result=>result.score<99)
+      .sort((a,b)=>a.score-b.score||a.entry.label.localeCompare(b.entry.label))
+      .slice(0,8)
+      .map(result=>result.entry);
+  },[search,nav,allowedLocations]);
 
   useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);},[currentUser.id,section]);
   useEffect(()=>{rememberSection(section)},[section]);
+  useEffect(()=>{setSearchIndex(0)},[search]);
+  useEffect(()=>{
+    const closeSearch=(event:PointerEvent)=>{if(!searchWrapRef.current?.contains(event.target as Node))setSearchOpen(false);};
+    const focusSearch=(event:KeyboardEvent)=>{
+      const target=event.target as HTMLElement|null;
+      const typing=target?.tagName==='INPUT'||target?.tagName==='TEXTAREA'||target?.isContentEditable;
+      if(event.key==='/'&&!typing){event.preventDefault();searchInputRef.current?.focus();setSearchOpen(true);}
+    };
+    document.addEventListener('pointerdown',closeSearch);
+    document.addEventListener('keydown',focusSearch);
+    return()=>{document.removeEventListener('pointerdown',closeSearch);document.removeEventListener('keydown',focusSearch);};
+  },[]);
   useEffect(()=>{
     if(!previewUser)return;
     const originalFetch=window.fetch.bind(window);
@@ -86,6 +140,21 @@ export default function App(){
   const refreshData=()=>{rememberSection(section);window.location.reload()};
   const startUserPreview=(user:OpsVistaUser)=>{setPreviewNotice('');setPreviewUser(user);setSearch('');};
   const stopUserPreview=()=>{setPreviewUser(null);setPreviewNotice('');setSection('Configuración');};
+  const openSearchResult=(target:OpsVistaModule)=>{
+    if(!nav.includes(target))return;
+    rememberSection(target);
+    setSection(target);
+    setSearch('');
+    setSearchOpen(false);
+    setSearchIndex(0);
+    window.scrollTo({top:0,behavior:'smooth'});
+  };
+  const handleSearchKeyDown=(event:React.KeyboardEvent<HTMLInputElement>)=>{
+    if(event.key==='ArrowDown'&&searchResults.length){event.preventDefault();setSearchOpen(true);setSearchIndex(index=>(index+1)%searchResults.length);}
+    else if(event.key==='ArrowUp'&&searchResults.length){event.preventDefault();setSearchOpen(true);setSearchIndex(index=>(index-1+searchResults.length)%searchResults.length);}
+    else if(event.key==='Enter'&&searchResults.length){event.preventDefault();openSearchResult(searchResults[Math.min(searchIndex,searchResults.length-1)].section);}
+    else if(event.key==='Escape'){setSearch('');setSearchOpen(false);searchInputRef.current?.blur();}
+  };
 
   const isOverview=section==='Resumen'||section==='Ventas';
   const isLocations=section==='Locaciones';
@@ -116,7 +185,19 @@ export default function App(){
     <main>
       {previewUser&&<div className="user-preview-banner" role="status"><div><span>VISTA PREVIA COMO USUARIO</span><strong>{previewUser.name}</strong><small>{previewUser.role} · {permissions.allLocations?'Todas las locaciones':allowedLocations.join(', ')||'Sin locación'} · Solo lectura</small></div><button onClick={stopUserPreview}>Salir de vista previa</button></div>}
       <header className="topbar">
-        <div className="search-wrap"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar en OpsVista..."/></div>
+        <div className={`search-wrap ${searchOpen?'open':''}`} ref={searchWrapRef}>
+          <button type="button" className="search-trigger" aria-label="Abrir búsqueda" onClick={()=>{searchInputRef.current?.focus();setSearchOpen(true);}}>⌕</button>
+          <input ref={searchInputRef} value={search} onChange={event=>{setSearch(event.target.value);setSearchOpen(true);}} onFocus={()=>setSearchOpen(true)} onKeyDown={handleSearchKeyDown} placeholder="Buscar módulos, recibos, ventas..." role="combobox" aria-expanded={searchOpen&&Boolean(search.trim())} aria-controls="opsvista-search-results" aria-autocomplete="list"/>
+          {searchOpen&&Boolean(search.trim())&&<div className="search-results" id="opsvista-search-results" role="listbox">
+            {searchResults.map((result,index)=><button type="button" key={result.section} role="option" aria-selected={index===searchIndex} className={index===searchIndex?'selected':''} onMouseEnter={()=>setSearchIndex(index)} onClick={()=>openSearchResult(result.section)}>
+              <span className="search-result-icon">{icon[result.section]}</span>
+              <span><strong>{result.label}</strong><small>{result.description}</small></span>
+              <em>Abrir</em>
+            </button>)}
+            {!searchResults.length&&<div className="search-empty"><strong>Sin resultados disponibles</strong><span>La búsqueda respeta los permisos de este usuario.</span></div>}
+            <div className="search-hint"><span>↑↓ navegar</span><span>Enter abrir</span><span>Esc cerrar</span></div>
+          </div>}
+        </div>
         <div className="top-actions"><button onClick={previewUser?()=>setPreviewNotice('La vista previa ya consulta datos reales. Sal de este modo para recargar toda la aplicación.'):refreshData}>{previewUser?'✓ Datos en vivo':'↻ Actualizar datos'}</button>{previewUser?<button className="preview-exit" onClick={stopUserPreview}>Salir de vista previa</button>:<button className="danger-outline" onClick={logout}>Cerrar sesión</button>}<div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
       </header>
 
