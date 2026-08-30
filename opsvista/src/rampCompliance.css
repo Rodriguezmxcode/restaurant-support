@@ -1,4 +1,6 @@
 .ramp-page{display:flex;flex-direction:column;gap:16px}
+.ramp-manager-scope{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px 19px;border:1px solid #9dc7ad;border-radius:14px;background:linear-gradient(135deg,#f2fbf5,#e8f7ed);box-shadow:0 8px 24px rgba(26,112,69,.07)}
+.ramp-manager-scope span,.ramp-manager-scope strong{display:block}.ramp-manager-scope span{font-size:9px;font-weight:900;letter-spacing:.09em;color:#28714d}.ramp-manager-scope strong{font-size:20px;color:#164d34;margin-top:3px}.ramp-manager-scope p{font-size:12px;line-height:1.5;color:#49685a;margin:5px 0 0;max-width:800px}.ramp-manager-scope a,.ramp-open-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#17734b;color:white;border:1px solid #17734b;border-radius:9px;padding:11px 15px;font-weight:850;white-space:nowrap}
 .ramp-filter-bar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid #ccd9e8;border-radius:14px;padding:14px 16px;box-shadow:0 8px 24px rgba(25,55,96,.04)}
 .ramp-period-control,.ramp-custom-dates label{display:flex;flex-direction:column;gap:6px}
 .ramp-period-control>span,.ramp-custom-dates span,.ramp-period-summary>span{font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#5b708d}
@@ -41,6 +43,7 @@
 .ramp-policy-chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end}
 .ramp-policy-chips span{background:white;border:1px solid #cddbea;color:#284766;padding:6px 8px;border-radius:999px;font-size:10px;font-weight:750}
 .ramp-accountability-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ramp-accountability-grid.manager-view{grid-template-columns:1fr}
 .ramp-group-panel{background:white;border:1px solid #ccd9e8;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(25,55,96,.05)}
 .ramp-group-head{padding:17px 18px;border-bottom:1px solid #dce5ef;display:flex;align-items:center;justify-content:space-between;gap:14px}
 .ramp-group-head h2{font-size:18px;margin:0}
@@ -67,6 +70,7 @@
 .ramp-controls select{max-width:190px}
 .ramp-table-wrap{overflow:auto}
 .ramp-table{width:100%;border-collapse:collapse;min-width:1780px}
+.ramp-table.manager-view{min-width:1320px}
 .ramp-table th{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#526985;background:#eef4fa;padding:12px;text-align:left}
 .ramp-table td{padding:13px 12px;border-top:1px solid #e3eaf2;font-size:12px;color:#243b58;vertical-align:top}
 .ramp-table td strong,.ramp-table td small{display:block}
@@ -106,10 +110,12 @@
 .ramp-drawer-actions button{flex:1;border:1px solid #c8d6e6;background:white;color:#203b5d;border-radius:9px;padding:11px;font-weight:800;cursor:pointer}
 .ramp-drawer-actions button:disabled{opacity:.55;cursor:default}
 .ramp-drawer-actions .ramp-primary{background:#2368cf;color:white;border-color:#2368cf}
+.ramp-drawer-actions .ramp-open-link{flex:1;background:#17734b;color:white;border-color:#17734b}
 @media(max-width:1350px){.ramp-summary-grid{grid-template-columns:repeat(3,1fr)}
 .ramp-accountability-grid{grid-template-columns:1fr}
 }
 @media(max-width:850px){.ramp-summary-grid{grid-template-columns:repeat(2,1fr)}
+.ramp-manager-scope{align-items:stretch;flex-direction:column}.ramp-manager-scope a{width:100%}
 .ramp-filter-bar{align-items:stretch}
 .ramp-period-control{flex:1 1 180px}
 .ramp-custom-dates{flex:1 1 100%;flex-wrap:wrap}

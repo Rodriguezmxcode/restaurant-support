@@ -1,5 +1,6 @@
 import { rampGet } from './rampClient.js';
 import { normalizeRampTransaction } from './rampNormalize.js';
+import { scopeRampTransactionsForLocations } from '../shared/rampAccess.js';
 import { listManagedUsers, type ManagedDirectoryUser } from './managementStore.js';
 
 type Page<T> = { data?: T[]; page?: { next?: string | null } };
@@ -154,7 +155,30 @@ function userReferences(user: any) {
   };
 }
 
-export async function getRampCompliancePayload(params?: { fromDate?: string; toDate?: string }) {
+function managerSafeTransaction<T extends ReturnType<typeof normalizeRampTransaction>>(tx: T) {
+  return {
+    id:tx.id,
+    date:tx.date,
+    transactionTime:tx.transactionTime,
+    merchant:tx.merchant,
+    merchantLocation:tx.merchantLocation,
+    amount:tx.amount,
+    cardholder:tx.cardholder,
+    department:tx.department,
+    restaurant:tx.verifiedRestaurant,
+    verifiedRestaurant:tx.verifiedRestaurant,
+    memo:tx.memo,
+    receiptAttached:tx.receiptAttached,
+    rampUrl:tx.rampUrl,
+    state:tx.state,
+    source:tx.source,
+  };
+}
+
+export async function getRampCompliancePayload(
+  params?: { fromDate?: string; toDate?: string },
+  access?: { allowedLocations?: string[]; locationScoped?: boolean },
+) {
   const range = validateRange(params?.fromDate, params?.toDate);
   const transactionQuery: Record<string, string | undefined> = {
     // Query slightly wider UTC boundaries, then enforce the exact Connecticut
@@ -211,21 +235,33 @@ export async function getRampCompliancePayload(params?: { fromDate?: string; toD
     })
     .filter(tx => tx.id && tx.date >= range.fromDate && tx.date <= range.toDate);
 
+  const allowedLocationNames = Array.from(new Set((access?.allowedLocations ?? []).map(location=>location.trim()).filter(Boolean)));
+  const scopedTransactions = access?.locationScoped
+    ? scopeRampTransactionsForLocations(normalized,allowedLocationNames)
+    : normalized;
+  const scopedCardholders = new Set(scopedTransactions.map(tx=>tx.cardholder?.trim()).filter(Boolean));
+  const responseTransactions = access?.locationScoped ? scopedTransactions.map(managerSafeTransaction) : scopedTransactions;
+
   return {
     source: 'live' as const,
     fetchedAt: new Date().toISOString(),
     fromDate: range.fromDate,
     toDate: range.toDate,
-    serverVersion: 'ramp-live-v4-attribution',
-    rawTransactionCount: transactions.length,
+    serverVersion: 'ramp-live-v5-location-scope',
+    rawTransactionCount: access?.locationScoped ? scopedTransactions.length : transactions.length,
+    accessScope: {
+      mode: access?.locationScoped ? 'location' as const : 'portfolio' as const,
+      locations: access?.locationScoped ? allowedLocationNames : [],
+      verifiedLocationOnly: Boolean(access?.locationScoped),
+    },
     userEnrichment: {
       available: users.length > 0,
-      userCount: users.length,
-      matchedTransactions: normalized.filter(tx => Boolean(tx.cardholder)).length,
-      directoryMatchedTransactions,
-      warning: userEnrichmentWarning,
+      userCount: access?.locationScoped ? scopedCardholders.size : users.length,
+      matchedTransactions: scopedTransactions.filter(tx => Boolean(tx.cardholder)).length,
+      directoryMatchedTransactions: access?.locationScoped ? undefined : directoryMatchedTransactions,
+      warning: access?.locationScoped ? undefined : userEnrichmentWarning,
     },
-    warning: userEnrichmentWarning,
-    transactions: normalized,
+    warning: access?.locationScoped ? undefined : userEnrichmentWarning,
+    transactions: responseTransactions,
   };
 }

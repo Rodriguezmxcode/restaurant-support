@@ -9,6 +9,11 @@ export type RampDataEnvelope = {
   warning?: string;
   serverVersion?: string;
   rawTransactionCount?: number;
+  accessScope?: {
+    mode: 'portfolio' | 'location';
+    locations: string[];
+    verifiedLocationOnly: boolean;
+  };
   userEnrichment?: {
     available: boolean;
     userCount: number;

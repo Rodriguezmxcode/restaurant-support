@@ -21,7 +21,7 @@ const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read
 const capabilities: Record<ServerRole, ServerCapability[]> = {
   Founder: [...operational,'platform:admin','integrations:manage'],
   Corporate: operational,
-  'Location Manager': ['labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
+  'Location Manager': ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   Kitchen: ['evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   HR: ['labor:read','actions:read','actions:write','projects:read','projects:write'],
   Administration: ['ramp:read','actions:read','actions:write','actions:verify','projects:read','projects:write','payments:approve'],

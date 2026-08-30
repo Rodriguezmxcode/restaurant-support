@@ -19,12 +19,14 @@ export type RampTransaction = {
   role?: string;
   department?: string;
   restaurant?: string;
+  verifiedRestaurant?: string;
   entity?: string;
   category?: string;
   accountingCategory?: string;
   cardLastFour?: string;
   memo?: string;
   receiptAttached: boolean;
+  rampUrl?: string;
   state: 'CLEARED' | 'PENDING';
   source: 'Ramp';
   outOfPolicy?: boolean;

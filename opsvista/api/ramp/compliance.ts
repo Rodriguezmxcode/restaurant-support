@@ -1,5 +1,6 @@
 import { getRampCompliancePayload } from '../../server/rampComplianceEndpoint.js';
-import { isRole, readSession } from '../../server/authSession.js';
+import { readSession } from '../../server/authSession.js';
+import { authorize } from '../../server/authorization.js';
 
 type ApiRequest = {
   method?: string;
@@ -30,16 +31,22 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     console.error('[OpsVista Ramp Auth]', error instanceof Error ? error.message : error);
     return res.status(503).json({ error: 'Authentication is not configured' });
   }
-  if (!user) return res.status(401).json({ error: 'Authentication required' });
-  if (!isRole(user, ['Founder', 'Corporate', 'Administration'])) return res.status(403).json({ error: 'Not authorized for Ramp portfolio data' });
+  const auth = authorize(user, 'ramp:read');
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+  const currentUser = auth.user;
+  const locationScoped = currentUser.role === 'Location Manager';
+  if (locationScoped && !currentUser.locations.length) return res.status(403).json({ error: 'No restaurant location is assigned to this manager account' });
 
   try {
-    const payload = await getRampCompliancePayload({
-      fromDate: one(req.query?.fromDate),
-      toDate: one(req.query?.toDate),
-    });
+    const payload = await getRampCompliancePayload(
+      {
+        fromDate: one(req.query?.fromDate),
+        toDate: one(req.query?.toDate),
+      },
+      { locationScoped, allowedLocations: locationScoped ? currentUser.locations : undefined },
+    );
 
-    res.setHeader?.('Cache-Control', 'private, max-age=0, must-revalidate');
+    res.setHeader?.('Cache-Control', 'private, no-store');
     return res.status(200).json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to load Ramp compliance data';

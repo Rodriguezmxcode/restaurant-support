@@ -9,12 +9,14 @@ export type LiveRampRow = {
   role?: string;
   department?: string;
   restaurant?: string;
+  verifiedRestaurant?: string;
   entity?: string;
   category?: string;
   accountingCategory?: string;
   cardLastFour?: string;
   memo?: string;
   receiptAttached: boolean;
+  rampUrl?: string;
   state: 'CLEARED' | 'PENDING';
   source: 'Ramp';
 };
@@ -107,6 +109,34 @@ function canonicalRestaurant(...values: any[]): string | undefined {
   return restaurants.find(name => new RegExp(`\\b${name.toLowerCase()}\\b`, 'i').test(source));
 }
 
+/**
+ * Returns only an explicit transaction-level restaurant assignment. Cardholder
+ * profile, directory assignment and free-form memo text are intentionally not
+ * accepted here because they are not reliable enough for manager data access.
+ */
+export function trustedRampRestaurant(tx: any): string | undefined {
+  const department = asObject(tx.department);
+  const location = asObject(tx.location);
+  return canonicalRestaurant(
+    tx.location_name,
+    nameOf(location),
+    tx.department_name,
+    nameOf(department),
+    accountingSelection(tx, /department|departamento|restaurant|restaurante|location|locaci[oó]n|ubicaci[oó]n/i),
+  );
+}
+
+function rampUrlOf(tx: any): string | undefined {
+  const raw = firstText(tx.ramp_url, tx.transaction_url, tx.url, asObject(tx.links).web, asObject(tx.links).app);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' && url.hostname === 'app.ramp.com' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function merchantLocationOf(tx: any): string | undefined {
   const location = tx.merchant_location || tx.merchant?.location || tx.merchant?.address || tx.merchant_address;
   if (typeof location === 'string') return location.trim() || undefined;
@@ -142,6 +172,7 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
   const department = asObject(tx.department);
   const location = asObject(tx.location);
   const resolvedMemo = memo || tx.memo || tx.memo_text || lineItemMemo(tx) || '';
+  const verifiedRestaurant = trustedRampRestaurant(tx);
   const resolvedCardholder = firstText(
     typeof tx.card_holder === 'string' ? tx.card_holder : undefined,
     tx.cardholder_name,
@@ -177,7 +208,7 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
     tx.merchant_category_code_description,
     accountingSelection(tx, /category|categor[ií]a|class|clase/i),
   );
-  const resolvedRestaurant = canonicalRestaurant(
+  const resolvedRestaurant = verifiedRestaurant || canonicalRestaurant(
     tx.location_name,
     nameOf(location),
     cardHolder.location_name,
@@ -207,12 +238,14 @@ export function normalizeRampTransaction(tx: any, memo?: string, hasReceipt = fa
     role,
     department: resolvedDepartment,
     restaurant: resolvedRestaurant,
+    verifiedRestaurant,
     entity: nameOf(tx.entity) || tx.entity_name || references.entity,
     category,
     accountingCategory,
     cardLastFour: String(tx.card?.last_four || tx.card?.last_four_digits || tx.card_last_four || tx.last_four || '').trim() || undefined,
     memo: resolvedMemo,
     receiptAttached: hasReceipt || Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length || tx.receipt_attached || tx.has_receipt),
+    rampUrl: rampUrlOf(tx),
     state: status.includes('PENDING') ? 'PENDING' : 'CLEARED',
     source: 'Ramp',
   };
