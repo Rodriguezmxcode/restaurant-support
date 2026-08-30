@@ -14,6 +14,7 @@ export type LocationAccessGrant = {
 export type PermissionSet = {
   modules: OpsVistaModule[];
   allLocations: boolean;
+  canPreviewUsers: boolean;
   canManageUsers: boolean;
   canManagePlatform: boolean;
   canManageIntegrations: boolean;
@@ -42,43 +43,43 @@ const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Re
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
     modules: allModules,
-    allLocations: true, canManageUsers: true, canManagePlatform: true, canManageIntegrations: true,
+    allLocations: true, canPreviewUsers: true, canManageUsers: true, canManagePlatform: true, canManageIntegrations: true,
     canRunAutomation: true, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
   },
   Corporate: {
     modules: allModules,
-    allLocations: true, canManageUsers: true, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: true, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
   },
   'Location Manager': {
     modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias'],
-    allLocations: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Kitchen: {
     modules: ['Resumen','Locaciones','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Transferencias'],
-    allLocations: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   HR: {
     modules: ['Resumen','Locaciones','Horarios','Action Center','Proyectos','Configuración'],
-    allLocations: true, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   Administration: {
     modules: ['Resumen','Finanzas','Gastos','Action Center','Proyectos','Pagos','Transferencias','Configuración'],
-    allLocations: true, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Maintenance: {
     modules: ['Resumen','Locaciones','Tasks','Action Center','Proyectos','Prioridades'],
-    allLocations: true, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
   },

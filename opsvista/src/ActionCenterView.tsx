@@ -32,8 +32,9 @@ export default function ActionCenterView({currentUser,allowedLocations}:Props){
   const [verificationNote,setVerificationNote]=useState('');
   const [form,setForm]=useState({title:'',location:allowedLocations[0]||'',category:'Operations',severity:'Medium' as ActionSeverity,signal:'',cause:'',recommendation:'',impact:''});
 
-  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {actions?:ActionRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Action Center unavailable');setActions(body.actions||[]);setSelectedId(current=>(body.actions||[]).some(item=>item.id===current)?current:(body.actions?.[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Action Center unavailable');}finally{setLoading(false);}};
-  useEffect(()=>{void load();},[]);
+  const locationScopeKey=allowedLocations.join('|');
+  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {actions?:ActionRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Action Center unavailable');const scope=new Set(allowedLocations);const scoped=(body.actions||[]).filter(item=>scope.has(item.location));setActions(scoped);setSelectedId(current=>scoped.some(item=>item.id===current)?current:(scoped[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Action Center unavailable');}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[locationScopeKey]);
   const selected=actions.find(item=>item.id===selectedId)??actions[0];
   useEffect(()=>{if(!selected){setAudit([]);return;}setOwner(selected.ownerName||'');setDueAt(selected.dueAt?.slice(0,10)||'');setVerificationStatus(selected.verificationStatus==='Pending'?'Not enough evidence yet':selected.verificationStatus);setVerificationNote(selected.verificationNote||'');fetch(`${api}&id=${encodeURIComponent(selected.id)}`,{credentials:'include',cache:'no-store'}).then(response=>response.json()).then((body:{audit?:AuditRow[]})=>setAudit(body.audit||[])).catch(()=>setAudit([]));},[selected?.id]);
 

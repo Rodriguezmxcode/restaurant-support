@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react';
 import type { ExternalEscalation } from './actionCenterTypes';
-import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule } from './accessControl';
+import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule, type OpsVistaUser } from './accessControl';
 import GoogleBusinessIntegrationPanel from './GoogleBusinessIntegrationPanel';
 
 const moduleReloadKey='opsvista-module-reload';
@@ -55,19 +55,37 @@ function rememberSection(section:OpsVistaModule){
 }
 
 export default function App(){
-  const [currentUser]=useState(currentAuthenticatedUser);
+  const [authenticatedUser]=useState(currentAuthenticatedUser);
+  const [previewUser,setPreviewUser]=useState<OpsVistaUser|null>(null);
+  const [previewNotice,setPreviewNotice]=useState('');
+  const currentUser=previewUser??authenticatedUser;
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const nav=permissions.modules;
   const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=storedSection();return (integration&&permissions.modules.includes('Configuración')?'Configuración':saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
   const [search,setSearch]=useState('');
 
-  useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);},[currentUser]);
+  useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);},[currentUser.id,section]);
   useEffect(()=>{rememberSection(section)},[section]);
+  useEffect(()=>{
+    if(!previewUser)return;
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=async(input,init)=>{
+      const method=(init?.method||(input instanceof Request?input.method:'GET')).toUpperCase();
+      if(!['GET','HEAD','OPTIONS'].includes(method)){
+        setPreviewNotice('Acción bloqueada: la vista previa es de solo lectura y no guardó ningún cambio.');
+        return new Response(JSON.stringify({error:'Vista previa de solo lectura: no se guardó ningún cambio.'}),{status:403,headers:{'Content-Type':'application/json'}});
+      }
+      return originalFetch(input,init);
+    };
+    return()=>{window.fetch=originalFetch;};
+  },[previewUser?.id]);
 
   const escalateExternal=(item:ExternalEscalation,category:string)=>{if(!permissions.canEscalateActions||!canAccessLocation(currentUser,item.location))return;const automationKey=item.automationKey||`external::${category}::${item.location}::${item.title}::${item.signal}`;void fetch('/api/workflows?resource=actions',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,category,automationKey,automated:true,priorityScore:item.priorityScore??(item.severity==='High'?80:item.severity==='Medium'?50:25),sources:item.sources??[category],detectedAt:item.detectedAt??new Date().toISOString()})}).then(async response=>{const body=await response.json().catch(()=>({})) as {error?:string};if(!response.ok)throw new Error(body.error||'Action could not be saved');setSection('Action Center');setSearch('')}).catch(error=>window.alert(error instanceof Error?error.message:'Action could not be saved'));};
   const logout=async()=>{try{await fetch('/api/auth/logout',{method:'POST',credentials:'include'})}finally{window.location.assign('/')}};
   const refreshData=()=>{rememberSection(section);window.location.reload()};
+  const startUserPreview=(user:OpsVistaUser)=>{setPreviewNotice('');setPreviewUser(user);setSearch('');};
+  const stopUserPreview=()=>{setPreviewUser(null);setPreviewNotice('');setSection('Configuración');};
 
   const isOverview=section==='Resumen'||section==='Ventas';
   const isLocations=section==='Locaciones';
@@ -88,24 +106,26 @@ export default function App(){
   const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isLocations?'Locaciones · Performance Dashboard':isGoogleReviews?'Google Reviews':isLocalIntelligence?'Local Intelligence':isRamp?'Gastos Ramp':isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · 7shifts & Logbook':isBonus?'Bono semanal':isPriorities?'Prioridades · Action Center':isActionCenter?'Action Center':isProjects?'Proyectos':isFinance?'Finanzas · Control de pagos':isPayments?'Pagos · Approval Workflow':isTransfers?'Transferencias · Restaurant Ledger':isSettings?'Configuración · Roles & Permissions':section;
   const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isLocations?'Compara el desempeño completo de cada restaurante con datos reales de Toast, 7shifts y OpsVista.':isGoogleReviews?'Monitorea volumen, calificación, respuestas y reseñas críticas por restaurante desde Google Business Profile.':isLocalIntelligence?'Clima, tráfico, incidentes y eventos cercanos convertidos en impacto y recomendaciones por restaurante.':isRamp?'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.':isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Controla Tasks, responsables y Logbook por ubicación y periodo.':isBonus?'Scorecard semanal con Tasks, descuentos, voids, overtime y reglas de elegibilidad.':isPriorities?'Muestra las acciones persistentes que requieren atención, ordenadas por prioridad y dentro del alcance autorizado.':isActionCenter?'Convierte señales operativas en acciones asignadas, verificables y guardadas permanentemente.':isProjects?'Planifica iniciativas con responsables, fechas, milestones, presupuesto y resultados sin mezclarlas con alertas operativas.':isFinance?'Usa el flujo real de solicitudes, aprobaciones y emisión de pagos con bitácora completa.':isPayments?'Managers solicitan; Corporate aprueba; Administration emite únicamente pagos aprobados, con bitácora completa.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'La fuente de este módulo no está disponible.';
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${previewUser?'user-preview-active':''}`}>
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">OV</div><div><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
       <nav>{nav.map(item=><button key={item} className={section===item?'active':''} onClick={()=>{rememberSection(item);setSection(item);}}><span className="nav-icon">{icon[item]}</span>{item}</button>)}</nav>
-      <div className="user-card"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
+      <div className="user-card"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{previewUser?'Vista previa · ':''}{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
     </aside>
 
     <main>
+      {previewUser&&<div className="user-preview-banner" role="status"><div><span>VISTA PREVIA COMO USUARIO</span><strong>{previewUser.name}</strong><small>{previewUser.role} · {permissions.allLocations?'Todas las locaciones':allowedLocations.join(', ')||'Sin locación'} · Solo lectura</small></div><button onClick={stopUserPreview}>Salir de vista previa</button></div>}
       <header className="topbar">
         <div className="search-wrap"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar en OpsVista..."/></div>
-        <div className="top-actions"><button onClick={refreshData}>↻ Actualizar datos</button><button className="danger-outline" onClick={logout}>Cerrar sesión</button><div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
+        <div className="top-actions"><button onClick={previewUser?()=>setPreviewNotice('La vista previa ya consulta datos reales. Sal de este modo para recargar toda la aplicación.'):refreshData}>{previewUser?'✓ Datos en vivo':'↻ Actualizar datos'}</button>{previewUser?<button className="preview-exit" onClick={stopUserPreview}>Salir de vista previa</button>:<button className="danger-outline" onClick={logout}>Cerrar sesión</button>}<div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
       </header>
 
       <div className="page">
+        {previewNotice&&<div className="user-preview-notice" role="alert">{previewNotice}<button onClick={()=>setPreviewNotice('')}>×</button></div>}
         <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div></div>
 
         <Suspense fallback={<section className="panel"><div className="panel-header"><div><h2>Cargando módulo</h2><p>Preparando la vista solicitada…</p></div><span className="count-pill">CARGANDO</span></div></section>}>
-          {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isLocations?<LocationDashboard allowedLocations={allowedLocations} allLocations={permissions.allLocations} onOpenTasks={()=>setSection('Tasks')} onOpenLabor={()=>setSection('Horarios')}/>:isGoogleReviews?<GoogleReviewsView allowedLocations={allowedLocations} canImportReviews={currentUser.role==='Founder'||currentUser.role==='Corporate'}/>:isLocalIntelligence?<LocalIntelligenceView allowedLocations={allowedLocations}/>:isActionCenter?<ActionCenterView currentUser={currentUser} allowedLocations={allowedLocations}/>:isProjects?<ProjectsView currentUser={currentUser} allowedLocations={allowedLocations} canSeeFinancialImpact={permissions.canSeeFinancialImpact}/>:isPayments?<PaymentRequestsView currentUser={currentUser} allowedLocations={allowedLocations}/>:isTransfers?<TransferLedgerView/>:isSettings?<>{permissions.canManageIntegrations&&<GoogleBusinessIntegrationPanel/>}<ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser}/></>:isRamp?<RampComplianceView onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={allowedLocations} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isBonus?<WeeklyBonusLivePanel allowedLocations={permissions.allLocations?undefined:allowedLocations}/>:isEvidence?<EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/>:<section className="panel"><div className="panel-header"><div><h2>Fuente no disponible</h2><p>OpsVista no mostrará cifras de prueba. Este módulo se habilitará cuando tenga una fuente real verificada.</p></div><span className="count-pill">PENDIENTE</span></div></section>}
+          {isOverview?<OperationalOverview allowedLocations={allowedLocations} allLocations={permissions.allLocations}/>:isLocations?<LocationDashboard allowedLocations={allowedLocations} allLocations={permissions.allLocations} onOpenTasks={()=>setSection('Tasks')} onOpenLabor={()=>setSection('Horarios')}/>:isGoogleReviews?<GoogleReviewsView allowedLocations={allowedLocations} canImportReviews={!previewUser&&(currentUser.role==='Founder'||currentUser.role==='Corporate')}/>:isLocalIntelligence?<LocalIntelligenceView allowedLocations={allowedLocations}/>:isActionCenter?<ActionCenterView currentUser={currentUser} allowedLocations={allowedLocations}/>:isProjects?<ProjectsView currentUser={currentUser} allowedLocations={allowedLocations} canSeeFinancialImpact={permissions.canSeeFinancialImpact}/>:isPayments?<PaymentRequestsView currentUser={currentUser} allowedLocations={allowedLocations}/>:isTransfers?<TransferLedgerView allowedLocations={allowedLocations}/>:isSettings?<>{permissions.canManageIntegrations&&<GoogleBusinessIntegrationPanel/>}<ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onPreviewUser={previewUser?undefined:startUserPreview}/></>:isRamp?<RampComplianceView onEscalate={!previewUser&&permissions.canEscalateActions?item=>escalateExternal(item,'Ramp Compliance'):undefined}/>:isLabor?<LaborIntelligenceView allowedLocations={allowedLocations} onEscalate={!previewUser&&permissions.canEscalateActions?item=>escalateExternal(item,'Labor Intelligence'):undefined}/>:isBonus?<WeeklyBonusLivePanel allowedLocations={permissions.allLocations?undefined:allowedLocations}/>:isEvidence?<EvidenceAuditView allowedLocations={permissions.allLocations?undefined:allowedLocations} canReview={!previewUser&&permissions.canReviewEvidence} reviewerName={currentUser.name} onEscalate={!previewUser&&permissions.canEscalateActions?item=>escalateExternal(item,'Evidence Audit'):undefined}/>:<section className="panel"><div className="panel-header"><div><h2>Fuente no disponible</h2><p>OpsVista no mostrará cifras de prueba. Este módulo se habilitará cuando tenga una fuente real verificada.</p></div><span className="count-pill">PENDIENTE</span></div></section>}
         </Suspense>
       </div>
     </main>

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { activeLocationGrants, rolePermissions, type LocationAccessGrant, type OpsVistaRole, type OpsVistaUser } from './accessControl';
+import { activeLocationGrants, effectiveLocations, rolePermissions, type LocationAccessGrant, type OpsVistaRole, type OpsVistaUser } from './accessControl';
 import { diffUserChanges, loadManagedUsers, loadManagementAudit, persistManagedUsers, persistManagementAudit, type ManagementAuditEvent } from './managementAudit';
 
-type Props = { currentUser: OpsVistaUser };
+type Props = {
+  currentUser: OpsVistaUser;
+  onPreviewUser?: (user: OpsVistaUser) => void;
+};
 type StoreState = 'loading' | 'central' | 'local-dev' | 'error';
 
 const roles = Object.keys(rolePermissions) as OpsVistaRole[];
@@ -25,7 +28,7 @@ function AuditRow({ event }: { event: ManagementAuditEvent }) {
   </div>;
 }
 
-export default function AccessControlPanel({ currentUser }: Props) {
+export default function AccessControlPanel({ currentUser, onPreviewUser }: Props) {
   const permissions = rolePermissions[currentUser.role];
   const grants = grantsFor(currentUser);
   const primary = grants.find(grant=>grant.type==='Primary')?.location ?? '';
@@ -37,6 +40,8 @@ export default function AccessControlPanel({ currentUser }: Props) {
   const [storeMessage,setStoreMessage] = useState('Loading central management directory…');
   const [targetId,setTargetId] = useState('');
   const target = managedUsers.find(user=>user.id===targetId) ?? managedUsers[0];
+  const [previewTargetId,setPreviewTargetId] = useState('');
+  const previewTarget = managedUsers.find(user=>user.id===previewTargetId);
   const [draft,setDraft] = useState<OpsVistaUser>(()=>cloneUser(currentUser));
   const [reason,setReason] = useState('');
   const [saveMessage,setSaveMessage] = useState('');
@@ -57,6 +62,7 @@ export default function AccessControlPanel({ currentUser }: Props) {
       setManagedUsers(users);
       setAudit(auditBody.events ?? []);
       setTargetId(id => id || users[0]?.id || currentUser.id);
+      setPreviewTargetId(id => id || users.find(user=>user.active&&user.id!==currentUser.id)?.id || '');
       setStoreState('central');
       setStoreMessage('Central SQL store connected. Changes are shared across authorized management sessions.');
     } catch (error) {
@@ -66,6 +72,7 @@ export default function AccessControlPanel({ currentUser }: Props) {
         setManagedUsers(users);
         setAudit(loadManagementAudit());
         setTargetId(id => id || users[0]?.id || currentUser.id);
+        setPreviewTargetId(id => id || users.find(user=>user.active&&user.id!==currentUser.id)?.id || '');
         setStoreState('local-dev');
         setStoreMessage('Local development fallback active. Production fails closed without the central store.');
       } else {
@@ -134,6 +141,19 @@ export default function AccessControlPanel({ currentUser }: Props) {
     <section className="panel"><div className="panel-header"><div><h2>Central Management Data Store</h2><p>Authoritative directory and management audit history shared across OpsVista.</p></div><span className="count-pill">{storeState==='central'?'CENTRAL':storeState==='local-dev'?'LOCAL DEV':storeState.toUpperCase()}</span></div><div style={{padding:18}}><div className="detail-block"><label>DATA STORE STATUS</label><p>{storeMessage}</p></div></div></section>
 
     <section className="panel"><div className="panel-header"><div><h2>Roles & Permissions</h2><p>Least-privilege access by module, department/location and operational responsibility.</p></div><span className="count-pill">{roles.length} roles</span></div><div style={{padding:18,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:10}}><div className="impact-box"><span>Role</span><strong>{currentUser.role}</strong></div><div className="impact-box"><span>Active location scope</span><strong>{permissions.allLocations?'All locations':active.map(grant=>grant.location).join(', ')||'None'}</strong></div><div className="impact-box"><span>User management</span><strong>{permissions.canManageUsers?'Allowed':'Restricted'}</strong></div><div className="impact-box"><span>Financial impact</span><strong>{permissions.canSeeFinancialImpact?'Visible':'Restricted'}</strong></div></div></section>
+
+    {permissions.canPreviewUsers && onPreviewUser && <section className="panel user-preview-panel">
+      <div className="panel-header"><div><h2>Vista previa como usuario</h2><p>Revisa exactamente los módulos y las locaciones autorizadas sin usar la contraseña ni modificar la cuenta.</p></div><span className="count-pill">SOLO LECTURA</span></div>
+      <div className="user-preview-body">
+        <div><label className="user-preview-label">USUARIO</label><select value={previewTargetId} onChange={event=>setPreviewTargetId(event.target.value)} className="user-preview-select"><option value="" disabled>Selecciona un usuario</option>{managedUsers.filter(user=>user.active&&user.id!==currentUser.id).map(user=><option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></div>
+        {previewTarget&&<div className="user-preview-summary">
+          <div><span>Rol</span><strong>{previewTarget.role}</strong></div>
+          <div><span>Locaciones</span><strong>{rolePermissions[previewTarget.role].allLocations?'Todas las locaciones':effectiveLocations(previewTarget).join(', ')||'Sin locación'}</strong></div>
+          <div><span>Módulos</span><strong>{rolePermissions[previewTarget.role].modules.length}</strong></div>
+        </div>}
+        <div className="user-preview-actions"><p>La vista usa datos reales dentro del alcance seleccionado. Aprobar, editar, enviar, invitar y guardar permanecerán bloqueados.</p><button className="primary" disabled={!previewTarget} onClick={()=>previewTarget&&onPreviewUser(cloneUser(previewTarget))}>Abrir vista previa</button></div>
+      </div>
+    </section>}
 
     {permissions.canManageUsers && target && <section className="panel">
       <div className="panel-header"><div><h2>User Management</h2><p>Edit role, status, primary location and temporary coverage. Saving requires a reason and writes field-level audit events.</p></div><span className="count-pill">{managedUsers.length} users</span></div>

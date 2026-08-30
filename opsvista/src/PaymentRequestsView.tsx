@@ -14,8 +14,9 @@ export default function PaymentRequestsView({currentUser,allowedLocations}:{curr
  const [decisionNote,setDecisionNote]=useState<Record<string,string>>({});const [checkNumber,setCheckNumber]=useState<Record<string,string>>({});const [checkDate,setCheckDate]=useState<Record<string,string>>({});const [paymentNote,setPaymentNote]=useState<Record<string,string>>({});
  const isApprover=currentUser.role==='Founder'||currentUser.role==='Corporate';const isIssuer=currentUser.role==='Administration';
  const requestLocations=(currentUser.role==='Founder'||currentUser.role==='Corporate'||currentUser.role==='Administration')?allLocations:allowedLocations;
- const load=async()=>{const r=await fetch('/api/payments',{credentials:'include',cache:'no-store'});const b=await r.json().catch(()=>({})) as {payments?:Payment[];error?:string};if(r.ok)setPayments(b.payments||[]);else setMessage(b.error||'Unable to load payments');};
- useEffect(()=>{void load()},[]);
+ const locationScopeKey=allowedLocations.join('|');
+ const load=async()=>{const r=await fetch('/api/payments',{credentials:'include',cache:'no-store'});const b=await r.json().catch(()=>({})) as {payments?:Payment[];error?:string};if(r.ok){const scope=new Set(allowedLocations);setPayments((b.payments||[]).filter(payment=>scope.has(payment.location)));}else setMessage(b.error||'Unable to load payments');};
+ useEffect(()=>{void load()},[locationScopeKey]);
  useEffect(()=>{if(!requestLocations.includes(location))setLocation(requestLocations[0]||'')},[currentUser.id]);
  const pending=useMemo(()=>payments.filter(p=>p.status==='Pending Approval'),[payments]);
  const approved=useMemo(()=>payments.filter(p=>p.status==='Approved'),[payments]);
