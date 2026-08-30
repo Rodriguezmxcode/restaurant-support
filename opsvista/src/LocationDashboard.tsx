@@ -9,7 +9,7 @@ type TaskLocation={location:string;completed:number;total:number;compliancePct:n
 type ScheduleLocation={location:string;monitoredEmployees:number;riskEmployees:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number};
 type PerformanceResponse={source:string;start:string;end:string;salaryLaborConfigured:boolean;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};taskCompliance?:{locations:TaskLocation[];totals:{completed:number;total:number;compliancePct:number}}|null;taskComplianceError?:string;scheduleRisk?:{locations:ScheduleLocation[];projectedOvertimeHours:number;estimatedOvertimeCost:number}|null;scheduleRiskError?:string;notes?:{salaryLabor?:string;tasks?:string;overtime?:string}};
 type LogbookEntry={id:number;date:string;locationName:string;author:string;category:string;message:string;attachments:number};
-type TasksResponse={locations?:Array<{locationName:string;completed:number;total:number;completionPct:number|null}>;logbook?:LogbookEntry[];logbookError?:string;error?:string};
+type TasksResponse={locations?:Array<{locationName:string;completed:number;total:number;completionPct:number|null}>;logbook?:LogbookEntry[];logbookComplete?:boolean;logbookError?:string;error?:string};
 type Props={allowedLocations:string[];allLocations:boolean;onOpenTasks?:()=>void;onOpenLabor?:()=>void};
 
 const money0=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
@@ -109,6 +109,7 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
 
   const visibleLocations=selectedLocations.length?selectedLocations:allowedLocations;
   const toggleLocation=(location:string)=>setSelectedLocations(currentSelection=>{const next=currentSelection.includes(location)?currentSelection.filter(item=>item!==location):[...currentSelection,location];return next.length===allowedLocations.length?[]:next});
+  const logbookAvailable=tasks!==null&&!tasksError&&!tasks.logbookError&&tasks.logbookComplete!==false;
   const cards=useMemo(()=>{
     if(!current)return[];
     const expectedLogbookDays=rangeDays;
@@ -122,10 +123,10 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
       const logs=(tasks?.logbook||[]).filter(entry=>sameLocation(entry.locationName,row.location));
       const logbookDays=new Set(logs.map(entry=>entry.date)).size;
       const delta=priorRow?.netSales?((row.netSales-priorRow.netSales)/priorRow.netSales)*100:null;
-      const alerts=[row.totalLaborPct>30,row.discountPct>2,row.voidPct>.5,taskPct!==null&&taskPct<80,Number(risk?.projectedOvertimeHours||0)>0,tasks!==null&&!tasksError&&logbookDays<expectedLogbookDays].filter(Boolean).length;
+      const alerts=[row.totalLaborPct>30,row.discountPct>2,row.voidPct>.5,taskPct!==null&&taskPct<80,Number(risk?.projectedOvertimeHours||0)>0,logbookAvailable&&logbookDays<expectedLogbookDays].filter(Boolean).length;
       return{row,priorRow,taskRow,taskPct,risk,logs,logbookDays,expectedLogbookDays,delta,alerts};
     });
-  },[current,previous,tasks,tasksError,visibleLocations.join('|'),rangeDays]);
+  },[current,previous,tasks,logbookAvailable,visibleLocations.join('|'),rangeDays]);
   const totals=current?.totals;
   const locationsAtRisk=cards.filter(card=>card.alerts>0).length;
   const taskTotals=current?.taskCompliance?.totals;
@@ -170,7 +171,7 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
           <MetricCell label="Tasks" value={taskPct===null?'—':`${taskPct.toFixed(1)}%`} note={taskPct===null?'Sin registros verificables':taskPct>=80?'Meta ≥ 80%':'Debajo de meta'} tone={taskPct===null?'neutral':taskPct>=80?'good':'bad'}/>
           <MetricCell label="Descuentos" value={`${row.discountPct.toFixed(2)}%`} note={`${money2.format(row.discountAmount)} · meta ≤ 2.00%`} tone={row.discountPct>2?'bad':'good'}/>
           <MetricCell label="Voids" value={`${row.voidPct.toFixed(2)}%`} note={`${money2.format(row.voidAmount)} · meta ≤ 0.50%`} tone={row.voidPct>.5?'bad':'good'}/>
-          <MetricCell label="Logbook" value={tasks===null?'Pendiente':`${logbookDays}/${expectedLogbookDays} días`} note={logs.length?`${logs.length} entradas · última ${logs.map(log=>log.date).sort().at(-1)}`:'Sin registros en el periodo'} tone={tasks===null?'neutral':logbookDays>=expectedLogbookDays?'good':'bad'}/>
+          <MetricCell label="Logbook" value={tasks===null?'Pendiente':!logbookAvailable?'No disponible':`${logbookDays}/${expectedLogbookDays} días`} note={!logbookAvailable?(tasks?.logbookError||tasksError||'7shifts no devolvió el periodo completo'):logs.length?`${logs.length} entradas · última ${logs.map(log=>log.date).sort().at(-1)}`:'Sin registros en el periodo'} tone={!logbookAvailable?'neutral':logbookDays>=expectedLogbookDays?'good':'bad'}/>
         </div>
         <footer><div><span>{current?.source||'Fuentes operativas'}</span>{risk?.employeesMissingHourlyWage?<strong>{risk.employeesMissingHourlyWage} tarifas faltantes</strong>:null}</div><div>{onOpenTasks&&<button onClick={onOpenTasks}>Abrir Tasks →</button>}{onOpenLabor&&<button onClick={onOpenLabor}>Abrir Horarios →</button>}</div></footer>
       </article>;

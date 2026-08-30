@@ -148,7 +148,7 @@ async function tasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<
  if(tasksResult.status==='rejected')throw tasksResult.reason;
  const logbook=logbookResult.status==='fulfilled'?logbookResult.value:[];
  const logbookError=logbookResult.status==='rejected'?(logbookResult.reason instanceof Error?logbookResult.reason.message:'7shifts Logbook unavailable'):undefined;
- return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...tasksResult.value,logbook,...(logbookError?{logbookError}:{})});
+ return res.status(200).json({source:'7shifts',operationalWeek:'Wednesday-Tuesday',...tasksResult.value,logbook,logbookComplete:logbookResult.status==='fulfilled',...(logbookError?{logbookError}:{})});
 }
 
 async function reviews(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){

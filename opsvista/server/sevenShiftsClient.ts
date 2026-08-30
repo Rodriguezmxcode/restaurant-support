@@ -99,14 +99,15 @@ function nextCursor(value:unknown){
   return typeof next==='string'?next:'';
 }
 
-async function requestAll(path:string,maxPages=20){
+async function requestAll(path:string,maxPages=20,requireComplete=false){
   const rows:Json[]=[];let cursor='';const seen=new Set<string>();
   for(let page=0;page<maxPages;page++){
     const separator=path.includes('?')?'&':'?';
     const raw=await request(`${path}${cursor?`${separator}cursor=${encodeURIComponent(cursor)}`:''}`);
     rows.push(...arrayFrom(raw));
     const next=nextCursor(raw);
-    if(!next||seen.has(next))break;
+    if(!next||seen.has(next))return rows;
+    if(page===maxPages-1&&requireComplete)throw new Error(`7shifts pagination exceeded ${maxPages} pages for ${path.split('?')[0]}`);
     seen.add(next);cursor=next;
   }
   return rows;
@@ -487,18 +488,23 @@ export async function listSevenShiftsLogbook(start:string,end:string,locationNam
   const locations=await listSevenShiftsLocations();
   const wanted=locationNames?.length?locations.filter(l=>locationNames.some(n=>n.toLowerCase()===l.name.toLowerCase()||l.name.toLowerCase().includes(n.toLowerCase())||n.toLowerCase().includes(l.name.toLowerCase()))):locations;
   const locationMap=new Map(wanted.map(l=>[l.id,l.name]));
-  const [postsRaw,categoriesRaw,usersRaw]=await Promise.all([
-    request(`/company/${cid}/log_book_posts?posted_date_gte=${encodeURIComponent(start)}&posted_date_lte=${encodeURIComponent(end)}&order_field=date&order_dir=desc&limit=100`),
-    request(`/company/${cid}/log_book_categories`),
-    request(`/company/${cid}/users?limit=100`),
+  const [posts,categoriesRows,usersRows]=await Promise.all([
+    requestAll(`/company/${cid}/log_book_posts?posted_date_gte=${encodeURIComponent(start)}&posted_date_lte=${encodeURIComponent(end)}&order_field=date&order_dir=desc&limit=100`,100,true),
+    requestAll(`/company/${cid}/log_book_categories`,20,true),
+    requestAll(`/company/${cid}/users?limit=100`,20,true),
   ]);
-  const categories=new Map(arrayFrom(categoriesRaw).map(row=>[Number(row.id),String(row.name||'Logbook')]));
-  const users=new Map(arrayFrom(usersRaw).map(row=>[Number(row.id),[row.preferred_first_name||row.first_name,row.preferred_last_name||row.last_name].filter(Boolean).join(' ').trim()||String(row.email||`User ${row.id}`)]));
-  return arrayFrom(postsRaw).flatMap(row=>{
+  const categories=new Map(categoriesRows.map(row=>[Number(row.id),String(row.name||'Logbook')]));
+  const users=new Map(usersRows.map(row=>[Number(row.id),[row.preferred_first_name||row.first_name,row.preferred_last_name||row.last_name].filter(Boolean).join(' ').trim()||String(row.email||`User ${row.id}`)]));
+  const seenEntryIds=new Set<number>();
+  return posts.flatMap(row=>{
     const locationId=Number(row.location_id);if(!locationMap.has(locationId))return [];
-    const id=Number(row.id);const userId=numberField(row,['user_id','created_by_user_id','author_user_id']);
+    const id=Number(row.id);
+    if(Number.isFinite(id)&&id>0){if(seenEntryIds.has(id))return[];seenEntryIds.add(id);}
+    const date=stringField(row,['date','posted_date','created'])?.slice(0,10)||start;
+    if(date<start||date>end)return [];
+    const userId=numberField(row,['user_id','created_by_user_id','author_user_id']);
     const categoryId=numberField(row,['log_book_category_id','category_id']);
     const attachments=Array.isArray(row.attachments)?row.attachments.length:0;
-    return [{id:Number.isFinite(id)?id:0,date:stringField(row,['date','posted_date','created'])?.slice(0,10)||start,locationId,locationName:locationMap.get(locationId)||`Location ${locationId}`,userId,author:userId!==undefined?(users.get(userId)||`User ${userId}`):'Unknown author',categoryId,category:categoryId!==undefined?(categories.get(categoryId)||'Logbook'):'Logbook',message:stringField(row,['message','content','text'])||'',attachments}];
+    return [{id:Number.isFinite(id)?id:0,date,locationId,locationName:locationMap.get(locationId)||`Location ${locationId}`,userId,author:userId!==undefined?(users.get(userId)||`User ${userId}`):'Unknown author',categoryId,category:categoryId!==undefined?(categories.get(categoryId)||'Logbook'):'Logbook',message:stringField(row,['message','content','text'])||'',attachments}];
   });
 }
