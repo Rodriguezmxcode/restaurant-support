@@ -4,7 +4,7 @@ import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirector
 
 type ApiRequest = {
   method?: string;
-  headers?: { cookie?: string };
+  headers?: { cookie?: string; authorization?: string };
   body?: { user?: ManagedDirectoryUser; events?: StoredAuditEvent[] };
 };
 
@@ -17,7 +17,7 @@ type ApiResponse = {
 const roles: ServerRole[] = ['Founder','Corporate','Location Manager','Kitchen','HR','Administration','Maintenance'];
 
 export default async function handler(req:ApiRequest,res:ApiResponse) {
-  const session = readSession(req.headers?.cookie);
+  const session = readSession(req.headers?.cookie, req.headers?.authorization);
   const auth = authorize(session,'users:manage');
   if (!auth.ok) return res.status(auth.status).json({ error:auth.error });
   res.setHeader?.('Cache-Control','private, no-store');

@@ -129,8 +129,9 @@ export function issueSession(user: SessionUser) {
   return `${body}.${sign(body)}`;
 }
 
-export function readSession(cookieHeader?: string): SessionUser | null {
-  const token = parseCookies(cookieHeader)[COOKIE_NAME];
+export function readSession(cookieHeader?: string, authorizationHeader?: string): SessionUser | null {
+  const bearer = authorizationHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const token = bearer || parseCookies(cookieHeader)[COOKIE_NAME];
   if (!token) return null;
   const key = configuredSecret();
   if (!key) return null;

@@ -3,7 +3,7 @@ import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
-type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
+type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string;authorization?:string}};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 
 function asString(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value||'';}
@@ -23,7 +23,7 @@ async function getPerformanceTaskCompliance(start:string,end:string,requested?:s
 
 export default async function handler(req:Req,res:Res){
   if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
-  const user=readSession(req.headers?.cookie);
+  const user=readSession(req.headers?.cookie, req.headers?.authorization);
   if(!user)return res.status(401).json({error:'Authentication required'});
   const start=asString(req.query?.start),end=asString(req.query?.end);
   const defaultSchedule=validDate(end)?operatingWeek(end):{start,end};

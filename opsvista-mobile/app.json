@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "OpsVista",
+    "slug": "opsvista",
+    "scheme": "opsvista",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F4F7FB",
+    "ios": {
+      "bundleIdentifier": "com.getopsvista.mobile",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.getopsvista.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#12395B",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "distribution": "unlisted"
+    }
+  }
+}

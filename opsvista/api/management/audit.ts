@@ -2,11 +2,11 @@ import { readSession } from '../../server/authSession.js';
 import { authorize } from '../../server/authorization.js';
 import { listManagementAudit } from '../../server/managementStore.js';
 
-type ApiRequest = { method?:string; headers?:{ cookie?:string }; query?:{ limit?:string|string[] } };
+type ApiRequest = { method?:string; headers?:{ cookie?:string; authorization?:string }; query?:{ limit?:string|string[] } };
 type ApiResponse = { status:(code:number)=>ApiResponse; json:(body:unknown)=>void; setHeader?:(name:string,value:string)=>void };
 
 export default async function handler(req:ApiRequest,res:ApiResponse) {
-  const session = readSession(req.headers?.cookie);
+  const session = readSession(req.headers?.cookie, req.headers?.authorization);
   const auth = authorize(session,'users:manage');
   if (!auth.ok) return res.status(auth.status).json({ error:auth.error });
   if (req.method && req.method !== 'GET') {

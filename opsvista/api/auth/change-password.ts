@@ -5,7 +5,7 @@ import { getManagedUser } from '../../server/managementStore.js';
 
 type ApiRequest = {
   method?: string;
-  headers?: { cookie?: string };
+  headers?: { cookie?: string; authorization?: string };
   body?: { currentPassword?: string; newPassword?: string };
 };
 
@@ -25,7 +25,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const session = readSession(req.headers?.cookie);
+  const session = readSession(req.headers?.cookie, req.headers?.authorization);
   if (!session) return res.status(401).json({ error: 'Authentication required' });
 
   const currentPassword = req.body?.currentPassword || '';

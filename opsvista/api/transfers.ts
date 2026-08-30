@@ -1,7 +1,7 @@
 import { readSession } from '../server/authSession.js';
 import { createTransfer, getTransfer, listTransfers, listTransferAudit, receiveTransfer, reconcileTransfer, type TransferItem, type TransferReceiptStatus } from '../server/transferStore.js';
 
-type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
+type ApiRequest={method?:string;headers?:{cookie?:string;authorization?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 function bodyString(value:unknown){return typeof value==='string'?value.trim():'';}
@@ -10,7 +10,7 @@ function canUseLocation(user:NonNullable<ReturnType<typeof readSession>>,locatio
 function validItems(value:unknown):value is TransferItem[]{return Array.isArray(value)&&value.length>0&&value.every(item=>item&&typeof item==='object'&&typeof (item as TransferItem).name==='string'&&Number.isFinite(Number((item as TransferItem).expectedQty))&&Number.isFinite(Number((item as TransferItem).unitPrice??0)));}
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
-  const user=readSession(req.headers?.cookie); if(!user)return res.status(401).json({error:'Authentication required'});
+  const user=readSession(req.headers?.cookie, req.headers?.authorization); if(!user)return res.status(401).json({error:'Authentication required'});
   res.setHeader?.('Cache-Control','private, no-store');
   try{
     if(!req.method||req.method==='GET'){

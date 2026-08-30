@@ -3,11 +3,11 @@ import { authorize } from '../../server/authorization.js';
 import { createInvitation, listInvitations } from '../../server/accountStore.js';
 import { getManagedUser } from '../../server/managementStore.js';
 
-type ApiRequest={method?:string;headers?:{cookie?:string;host?:string;'x-forwarded-proto'?:string;origin?:string};body?:{userId?:string}};
+type ApiRequest={method?:string;headers?:{cookie?:string;authorization?:string;host?:string;'x-forwarded-proto'?:string;origin?:string};body?:{userId?:string}};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
-  const session=readSession(req.headers?.cookie);
+  const session=readSession(req.headers?.cookie, req.headers?.authorization);
   const auth=authorize(session,'users:manage');
   if(!auth.ok) return res.status(auth.status).json({error:auth.error});
   res.setHeader?.('Cache-Control','private, no-store');

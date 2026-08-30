@@ -4,7 +4,7 @@ import { isRole, readSession } from '../../server/authSession.js';
 type ApiRequest = {
   method?: string;
   query?: Record<string, string | string[] | undefined>;
-  headers?: { cookie?: string };
+  headers?: { cookie?: string; authorization?: string };
 };
 
 type ApiResponse = {
@@ -25,7 +25,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   let user;
   try {
-    user = readSession(req.headers?.cookie);
+    user = readSession(req.headers?.cookie, req.headers?.authorization);
   } catch (error) {
     console.error('[OpsVista Ramp Auth]', error instanceof Error ? error.message : error);
     return res.status(503).json({ error: 'Authentication is not configured' });

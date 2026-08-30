@@ -26,9 +26,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       if (claimed) user = await authenticateUser(email, password);
     }
     if (!user) return res.status(401).json({ error: 'Invalid credentials or inactive account' });
-    res.setHeader?.('Set-Cookie', sessionCookie(issueSession(user)));
+    const token = issueSession(user);
+    res.setHeader?.('Set-Cookie', sessionCookie(token));
     res.setHeader?.('Cache-Control', 'no-store');
-    return res.status(200).json({ user });
+    return res.status(200).json({ user, token });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Authentication service unavailable';
     console.error('[OpsVista Auth Login]', message);
