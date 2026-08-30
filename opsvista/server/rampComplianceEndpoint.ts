@@ -118,6 +118,17 @@ function userIdOf(value: any): string | undefined {
   return firstText(object.id, object.user_id, object.uuid);
 }
 
+function referenceMap(rows: any[], idKeys: string[], nameKeys: string[]) {
+  const result = new Map<string, string>();
+  rows.forEach(row => {
+    const object = asObject(row);
+    const id = firstText(...idKeys.map(key => object[key]));
+    const name = firstText(...nameKeys.map(key => object[key]));
+    if (id && name) result.set(id, name);
+  });
+  return result;
+}
+
 function transactionUserId(tx: any): string | undefined {
   return firstText(
     tx.card_holder_id,
@@ -194,14 +205,25 @@ export async function getRampCompliancePayload(
   // endpoint or scope is unavailable.
   const transactions = await collect<any>('transactions', transactionQuery);
   let users: any[] = [];
+  let departments: any[] = [];
+  let locations: any[] = [];
   let managedUsers: ManagedDirectoryUser[] = [];
   let userEnrichmentWarning: string | undefined;
-  const [rampUsersResult,managedUsersResult] = await Promise.allSettled([collect<any>('users'), listManagedUsers()]);
+  const [rampUsersResult, managedUsersResult, departmentsResult, locationsResult] = await Promise.allSettled([
+    collect<any>('users'),
+    listManagedUsers(),
+    collect<any>('departments'),
+    collect<any>('locations'),
+  ]);
   if (rampUsersResult.status === 'fulfilled') users = rampUsersResult.value;
   else userEnrichmentWarning = rampUsersResult.reason instanceof Error
     ? `Ramp user enrichment unavailable: ${rampUsersResult.reason.message}`
     : 'Ramp user enrichment unavailable.';
   if (managedUsersResult.status === 'fulfilled') managedUsers = managedUsersResult.value.filter(user => user.active);
+  if (departmentsResult.status === 'fulfilled') departments = departmentsResult.value;
+  if (locationsResult.status === 'fulfilled') locations = locationsResult.value;
+  const departmentsById = referenceMap(departments, ['id', 'uuid', 'department_id'], ['name', 'display_name', 'department_name']);
+  const locationsById = referenceMap(locations, ['id', 'uuid', 'location_id'], ['name', 'display_name', 'location_name']);
   const usersById = new Map<string, any>();
   users.forEach(user => {
     const id = userIdOf(user);
@@ -213,19 +235,62 @@ export async function getRampCompliancePayload(
   const normalized = transactions
     .map(tx => {
       const user = usersById.get(transactionUserId(tx) || '');
+      const rampUserReferences = user ? userReferences(user) : {};
+      const transactionDepartment = asObject(tx.department);
+      const transactionLocation = asObject(tx.location);
+      const userDepartment = asObject(user?.department);
+      const userLocation = asObject(user?.location);
+      const departmentId = firstText(
+        tx.department_id,
+        transactionDepartment.id,
+        transactionDepartment.uuid,
+        user?.department_id,
+        userDepartment.id,
+        userDepartment.uuid,
+      );
+      const locationId = firstText(
+        tx.location_id,
+        transactionLocation.id,
+        transactionLocation.uuid,
+        user?.location_id,
+        userLocation.id,
+        userLocation.uuid,
+      );
+      const officialDepartment = firstText(
+        tx.department_name,
+        transactionDepartment.name,
+        transactionDepartment.display_name,
+        departmentId ? departmentsById.get(departmentId) : undefined,
+        rampUserReferences.department,
+      );
+      const officialLocation = firstText(
+        tx.location_name,
+        transactionLocation.name,
+        transactionLocation.display_name,
+        locationId ? locationsById.get(locationId) : undefined,
+        rampUserReferences.location,
+      );
+      // Department/location IDs are official Ramp relationships. Resolve them
+      // to names before normalization so manager scoping never depends on a
+      // cardholder name, merchant, or free-form memo.
+      const enrichedTx = {
+        ...tx,
+        department_name: officialDepartment,
+        location_name: officialLocation,
+      };
       const memo = tx.memo || tx.memo_text || tx.memos?.[0]?.memo;
       const receipt = Boolean(tx.receipt || tx.receipt_url || tx.receipts?.length || tx.receipt_attached || tx.has_receipt);
       const initial = normalizeRampTransaction(
-        tx,
+        enrichedTx,
         memo,
         receipt,
-        user ? userReferences(user) : {},
+        rampUserReferences,
       );
       const managed = transactionEmails(tx).map(email => managedByEmail.get(email)).find(Boolean)
         || managedByName.get(normalizeIdentity(initial.cardholder));
       if (!managed) return initial;
       directoryMatchedTransactions += 1;
-      return normalizeRampTransaction(tx, memo, receipt, {
+      return normalizeRampTransaction(enrichedTx, memo, receipt, {
         cardholder: initial.cardholder || managed.name,
         role: initial.role || managedRole(managed),
         department: initial.department || managedDepartment(managed),
@@ -247,7 +312,7 @@ export async function getRampCompliancePayload(
     fetchedAt: new Date().toISOString(),
     fromDate: range.fromDate,
     toDate: range.toDate,
-    serverVersion: 'ramp-live-v5-location-scope',
+    serverVersion: 'ramp-live-v6-reference-scope',
     rawTransactionCount: access?.locationScoped ? scopedTransactions.length : transactions.length,
     accessScope: {
       mode: access?.locationScoped ? 'location' as const : 'portfolio' as const,

@@ -52,17 +52,26 @@ async function getAccessToken(): Promise<string> {
   }
 
   const configuredScopes = process.env.RAMP_SCOPES?.trim();
-  const requestedScopes = [...new Set([
+  const coreScopes = [...new Set([
     ...(configuredScopes?.split(/\s+/).filter(Boolean) ?? []),
     'transactions:read',
     'users:read',
   ])].join(' ');
-  let scopes = requestedScopes;
+  const referenceScopes = [...new Set([
+    ...coreScopes.split(/\s+/).filter(Boolean),
+    'departments:read',
+    'locations:read',
+  ])].join(' ');
+  let scopes = referenceScopes;
   let response = await requestAccessToken(scopes, clientId, clientSecret);
 
-  // Transactions remain available when an older Ramp app has not yet been
-  // granted users:read. The API payload will disclose that enrichment is
-  // unavailable instead of dropping the complete expense ledger.
+  // Keep the expense feed available when an older Ramp app has not yet been
+  // granted department/location enrichment. Retry with the existing core
+  // scopes before falling back to transactions only.
+  if (!response.ok && response.status !== 401) {
+    scopes = coreScopes;
+    response = await requestAccessToken(scopes, clientId, clientSecret);
+  }
   if (!response.ok && response.status !== 401) {
     scopes = configuredScopes || 'transactions:read';
     response = await requestAccessToken(scopes, clientId, clientSecret);
