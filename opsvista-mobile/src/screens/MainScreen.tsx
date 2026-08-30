@@ -4,10 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { availableLocations, availableModules } from '../access';
 import { BottomNav, type TabKey } from '../components/BottomNav';
 import { KpiCard } from '../components/KpiCard';
-import { ApiError, getPerformance } from '../lib/api';
+import { ApiError, getActions, getPerformance, getTasksWeekly, updateAction as updateActionRecord } from '../lib/api';
 import { resolveRange, type RangeKey } from '../lib/dates';
 import { colors, shadows } from '../theme';
-import type { OpsVistaUser, PerformanceLocation, PerformanceResponse } from '../types';
+import type { ActionPatch, ActionRecord, OpsVistaUser, PerformanceLocation, PerformanceResponse, TasksWeeklyResponse } from '../types';
+import { ActionCenterScreen } from './ActionCenterScreen';
+import { TasksScreen } from './TasksScreen';
 
 type Props = { user: OpsVistaUser; onLogout: () => void; onSessionExpired: () => Promise<void> };
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -24,9 +26,19 @@ export function MainScreen({ user, onLogout, onSessionExpired }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [readAt, setReadAt] = useState<Date | null>(null);
+  const [tasksData, setTasksData] = useState<TasksWeeklyResponse | null>(null);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksRefreshing, setTasksRefreshing] = useState(false);
+  const [tasksError, setTasksError] = useState('');
+  const [tasksReadAt, setTasksReadAt] = useState<Date | null>(null);
+  const [actions, setActions] = useState<ActionRecord[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [actionsRefreshing, setActionsRefreshing] = useState(false);
+  const [actionsError, setActionsError] = useState('');
+  const [actionsReadAt, setActionsReadAt] = useState<Date | null>(null);
   const period = resolveRange(range);
 
-  const load = useCallback(async (refresh = false) => {
+  const loadPerformance = useCallback(async (refresh = false) => {
     if (!location) return;
     refresh ? setRefreshing(true) : setLoading(true);
     setError('');
@@ -54,7 +66,78 @@ export function MainScreen({ user, onLogout, onSessionExpired }: Props) {
     }
   }, [location, onSessionExpired, period.end, period.start]);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadTasks = useCallback(async (refresh = false) => {
+    if (!location) return;
+    refresh ? setTasksRefreshing(true) : setTasksLoading(true);
+    setTasksError('');
+    const request = () => getTasksWeekly(period.start, period.end, location);
+    try {
+      let result: TasksWeeklyResponse;
+      try {
+        result = await request();
+      } catch (cause) {
+        if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
+        await onSessionExpired();
+        result = await request();
+      }
+      setTasksData(result);
+      setTasksReadAt(new Date());
+    } catch (cause) {
+      setTasksError(cause instanceof Error ? cause.message : 'No fue posible cargar Tasks y Logbook.');
+    } finally {
+      setTasksLoading(false);
+      setTasksRefreshing(false);
+    }
+  }, [location, onSessionExpired, period.end, period.start]);
+
+  const loadActions = useCallback(async (refresh = false) => {
+    refresh ? setActionsRefreshing(true) : setActionsLoading(true);
+    setActionsError('');
+    const request = () => getActions();
+    try {
+      let result: ActionRecord[];
+      try {
+        result = await request();
+      } catch (cause) {
+        if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
+        await onSessionExpired();
+        result = await request();
+      }
+      setActions(result);
+      setActionsReadAt(new Date());
+    } catch (cause) {
+      setActionsError(cause instanceof Error ? cause.message : 'No fue posible cargar Action Center.');
+    } finally {
+      setActionsLoading(false);
+      setActionsRefreshing(false);
+    }
+  }, [onSessionExpired]);
+
+  const updateAction = useCallback(async (id: string, patch: ActionPatch, reason: string) => {
+    const request = () => updateActionRecord(id, patch, reason);
+    let result: ActionRecord;
+    try {
+      result = await request();
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
+      await onSessionExpired();
+      result = await request();
+    }
+    setActions(items => items.map(item => item.id === id ? result : item));
+    setActionsReadAt(new Date());
+    return result;
+  }, [onSessionExpired]);
+
+  useEffect(() => { void loadPerformance(); }, [loadPerformance]);
+  useEffect(() => { if (tab === 'tasks') void loadTasks(); }, [loadTasks, tab]);
+  useEffect(() => { if (tab === 'actions') void loadActions(); }, [loadActions, tab]);
+
+  const refreshCurrent = () => {
+    if (tab === 'tasks') return void loadTasks(true);
+    if (tab === 'actions') return void loadActions(true);
+    return void loadPerformance(true);
+  };
+  const currentRefreshing = tab === 'tasks' ? tasksRefreshing : tab === 'actions' ? actionsRefreshing : refreshing;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -70,11 +153,12 @@ export function MainScreen({ user, onLogout, onSessionExpired }: Props) {
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.teal} />}
+          refreshControl={<RefreshControl refreshing={currentRefreshing} onRefresh={refreshCurrent} tintColor={colors.teal} />}
         >
-          {tab === 'summary' && <Summary user={user} data={data} loading={loading} error={error} location={location} locations={locations} canSeeAll={canSeeAll} range={range} period={period} readAt={readAt} onLocation={setLocation} onRange={setRange} onRetry={() => void load()} />}
+          {tab === 'summary' && <Summary user={user} data={data} loading={loading} error={error} location={location} locations={locations} canSeeAll={canSeeAll} range={range} period={period} readAt={readAt} onLocation={setLocation} onRange={setRange} onRetry={() => void loadPerformance()} />}
           {tab === 'locations' && <Locations data={data} loading={loading} error={error} />}
-          {tab === 'tasks' && <Tasks data={data} loading={loading} error={error} />}
+          {tab === 'tasks' && <TasksScreen data={tasksData} loading={tasksLoading} error={tasksError} range={range} period={period} location={location} locations={locations} canSeeAll={canSeeAll} readAt={tasksReadAt} onRange={setRange} onLocation={setLocation} onRetry={() => void loadTasks()} />}
+          {tab === 'actions' && <ActionCenterScreen user={user} actions={actions} locations={locations} loading={actionsLoading} error={actionsError} readAt={actionsReadAt} onRetry={() => void loadActions()} onUpdate={updateAction} />}
           {tab === 'more' && <More user={user} onLogout={onLogout} />}
         </ScrollView>
 
@@ -151,31 +235,6 @@ function Locations({ data, loading, error }: { data: PerformanceResponse | null;
   );
 }
 
-function Tasks({ data, loading, error }: { data: PerformanceResponse | null; loading: boolean; error: string }) {
-  const rows = data?.taskCompliance?.locations ?? [];
-  return (
-    <>
-      <Text style={styles.eyebrow}>OPERATIONAL VERIFICATION</Text>
-      <Text style={styles.title}>Tasks</Text>
-      <Text style={styles.subtitle}>Cumplimiento directo de 7shifts, separado del Logbook.</Text>
-      {loading && <Loading />}
-      {error && <ErrorCard message={error} />}
-      {!loading && data?.taskComplianceError && <ErrorCard message={data.taskComplianceError} />}
-      {!loading && !data?.taskComplianceError && !rows.length && <Empty message="7shifts no devolvió Tasks verificables para este periodo." />}
-      {rows.map(row => {
-        const good = row.compliancePct >= 80;
-        return (
-          <View key={row.location} style={styles.listCard}>
-            <View style={styles.listRow}><Text style={styles.locationName}>{row.location}</Text><Text style={[styles.score, { color: good ? colors.teal : colors.orange }]}>{row.compliancePct.toFixed(1)}%</Text></View>
-            <View style={styles.progress}><View style={[styles.progressFill, { width: `${Math.min(100, Math.max(0, row.compliancePct))}%`, backgroundColor: good ? colors.teal : colors.orange }]} /></View>
-            <Text style={styles.rowNote}>{row.completed} de {row.total} tareas completadas · Fuente 7shifts</Text>
-          </View>
-        );
-      })}
-    </>
-  );
-}
-
 function More({ user, onLogout }: { user: OpsVistaUser; onLogout: () => void }) {
   return (
     <>
@@ -187,7 +246,7 @@ function More({ user, onLogout }: { user: OpsVistaUser; onLogout: () => void }) 
       </View>
       <Text style={styles.sectionTitle}>MÓDULOS AUTORIZADOS</Text>
       <View style={styles.moduleCard}>{availableModules(user.role).map((module, index, list) => <View key={module} style={[styles.moduleRow, index < list.length - 1 && styles.moduleBorder]}><Text style={styles.moduleBullet}>•</Text><Text style={styles.moduleName}>{module}</Text></View>)}</View>
-      <View style={styles.infoCard}><Text style={styles.infoTitle}>Primera versión móvil</Text><Text style={styles.infoCopy}>Resumen, Locaciones y Tasks ya usan las fuentes reales. Action Center, Logbook, Proyectos y notificaciones se incorporarán en las siguientes entregas.</Text></View>
+      <View style={styles.infoCard}><Text style={styles.infoTitle}>OpsVista Mobile · versión inicial</Text><Text style={styles.infoCopy}>Resumen, Locaciones, Tasks, Logbook y Action Center ya usan las fuentes y permisos reales. Proyectos, evidencia con cámara y notificaciones se incorporarán en las siguientes entregas.</Text></View>
       <Pressable accessibilityRole="button" onPress={onLogout} style={({ pressed }) => [styles.logout, pressed && { opacity: 0.7 }]}><Text style={styles.logoutText}>Cerrar sesión</Text></Pressable>
     </>
   );

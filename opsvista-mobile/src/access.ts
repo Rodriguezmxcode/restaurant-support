@@ -21,3 +21,7 @@ export function availableLocations(role: OpsVistaRole, locations: string[]) {
 export function availableModules(role: OpsVistaRole) {
   return mobileModules[role];
 }
+
+export function canVerifyActions(role: OpsVistaRole) {
+  return role !== 'HR';
+}

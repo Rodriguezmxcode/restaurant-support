@@ -1,5 +1,12 @@
 import { secureStorage } from './storage';
-import type { OpsVistaUser, PerformanceResponse, ServerSessionResponse } from '../types';
+import type {
+  ActionPatch,
+  ActionRecord,
+  OpsVistaUser,
+  PerformanceResponse,
+  ServerSessionResponse,
+  TasksWeeklyResponse,
+} from '../types';
 
 const API_URL = (process.env.EXPO_PUBLIC_OPSVISTA_API_URL
   ?? 'https://restaurant-support.vercel.app').replace(/\/$/, '');
@@ -52,6 +59,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const token = await loadSessionToken();
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -64,6 +72,26 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 export function getPerformance(start: string, end: string, location: string) {
   const params = new URLSearchParams({ start, end, location, include_tasks: 'true' });
   return apiRequest<PerformanceResponse>(`/api/operations/performance?${params}`);
+}
+
+export function getTasksWeekly(start: string, end: string, location?: string) {
+  const params = new URLSearchParams({ start, end });
+  if (location && location !== 'All locations') params.set('location', location);
+  return apiRequest<TasksWeeklyResponse>(`/api/tasks/weekly?${params}`);
+}
+
+export async function getActions() {
+  const body = await apiRequest<{ actions?: ActionRecord[] }>('/api/workflows?resource=actions');
+  return body.actions ?? [];
+}
+
+export async function updateAction(id: string, patch: ActionPatch, reason: string) {
+  const body = await apiRequest<{ action?: ActionRecord }>('/api/workflows?resource=actions', {
+    method: 'PUT',
+    body: JSON.stringify({ id, ...patch, reason }),
+  });
+  if (!body.action) throw new ApiError('OpsVista no devolvió la acción actualizada.', 502);
+  return body.action;
 }
 
 export async function endServerSession() {

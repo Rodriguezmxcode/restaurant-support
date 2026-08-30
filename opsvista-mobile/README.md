@@ -10,7 +10,9 @@ Version `0.1.0` establishes the production architecture without changing the cur
 - A short-lived OpsVista API token stored in the device keychain.
 - Server-enforced roles and location scope shared with the web application.
 - Live Summary data from Toast and 7shifts.
-- Location comparison and Tasks compliance.
+- Location comparison and detailed Tasks compliance.
+- Complete 7shifts Logbook pagination with unique-day counts by location.
+- A persistent mobile Action Center with assignment, investigation and evidence-based verification.
 - Explicit unavailable-source states; no demo numbers or silent fallbacks.
 - iOS and Android identifiers reserved as `com.getopsvista.mobile`.
 
@@ -52,8 +54,8 @@ Official references:
 
 ## Next mobile modules
 
-1. Detailed 7shifts Tasks and Logbook.
-2. Action Center assignments and evidence.
-3. Push notifications for urgent maintenance, failed Tasks, approvals, and critical reviews.
-4. Projects, payments, transfers, and Ramp evidence capture.
-5. Offline-safe read cache with source timestamps and completeness indicators.
+1. Push notifications for urgent maintenance, failed Tasks, approvals, and critical reviews.
+2. Projects, payments and transfers.
+3. Ramp receipt and invoice evidence capture with the device camera.
+4. Offline-safe read cache with source timestamps and completeness indicators.
+5. TestFlight validation on real iPhones for Corporate and Location Manager access.
