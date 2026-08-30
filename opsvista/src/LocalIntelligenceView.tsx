@@ -31,12 +31,14 @@ const formatEventDate = (value?: string | null) => {
   return new Intl.DateTimeFormat('es-MX', { timeZone: 'America/New_York', month: 'short', day: 'numeric' }).format(date);
 };
 
-export default function LocalIntelligenceView({ allowedLocations }: { allowedLocations: string[] }) {
+export default function LocalIntelligenceView({ allowedLocations, initialLocation, initialHorizon }: { allowedLocations: string[]; initialLocation?: string; initialHorizon?: HorizonKey }) {
   const [location, setLocation] = useState(() => {
+    if (initialLocation && allowedLocations.includes(initialLocation)) return initialLocation;
     const saved = window.localStorage.getItem('opsvista-local-intelligence-location') || 'All locations';
     return saved === 'All locations' || allowedLocations.includes(saved) ? saved : 'All locations';
   });
   const [horizon, setHorizon] = useState<HorizonKey>(() => {
+    if (initialHorizon) return initialHorizon;
     const saved = window.localStorage.getItem('opsvista-local-intelligence-horizon') as HorizonKey | null;
     return saved && saved in horizonOptions ? saved : 'today';
   });
@@ -56,6 +58,11 @@ export default function LocalIntelligenceView({ allowedLocations }: { allowedLoc
       setPayload(null); setError(loadError instanceof Error ? loadError.message : 'No fue posible actualizar Local Intelligence.');
     } finally { setLoading(false); }
   };
+
+  useEffect(() => {
+    if (initialLocation && allowedLocations.includes(initialLocation)) setLocation(initialLocation);
+    if (initialHorizon) setHorizon(initialHorizon);
+  }, [initialLocation, initialHorizon, allowedLocations.join('|')]);
 
   useEffect(() => {
     window.localStorage.setItem('opsvista-local-intelligence-location', location);

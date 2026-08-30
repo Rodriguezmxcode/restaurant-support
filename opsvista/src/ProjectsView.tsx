@@ -8,7 +8,7 @@ type ProjectPriority='High'|'Medium'|'Low';
 type ProjectMilestone={id:string;title:string;owner?:string;dueDate?:string;status:'Pending'|'In Progress'|'Completed'};
 type ProjectRecord={id:string;name:string;description:string;objective:string;locations:string[];ownerName:string;collaborators:string[];status:ProjectStatus;priority:ProjectPriority;startDate:string;dueDate:string;completedAt?:string;budget:number;actualSpend:number;progress:number;milestones:ProjectMilestone[];attachments:Array<{name:string;url:string}>;createdAt:string;updatedAt:string};
 type AuditRow={id:string;at:string;actor_name:string;event:string;before_value?:string;after_value?:string;reason:string};
-type Props={currentUser:OpsVistaUser;allowedLocations:string[];canSeeFinancialImpact:boolean};
+type Props={currentUser:OpsVistaUser;allowedLocations:string[];canSeeFinancialImpact:boolean;initialSearch?:string;initialRecordId?:string};
 type ViewMode='Board'|'List'|'Timeline'|'Gantt';
 const api='/api/workflows?resource=projects';
 const statuses:ProjectStatus[]=['Planning','In Progress','Blocked','Completed','Cancelled'];
@@ -19,26 +19,27 @@ function addDays(value:string,days:number){const date=new Date(`${value}T00:00:0
 const date=(value:string)=>new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const dayNumber=(value:string)=>Math.floor(new Date(`${value}T00:00:00Z`).getTime()/86400000);
 
-export default function ProjectsView({currentUser,allowedLocations,canSeeFinancialImpact}:Props){
+export default function ProjectsView({currentUser,allowedLocations,canSeeFinancialImpact,initialSearch,initialRecordId}:Props){
   const today=useMemo(easternToday,[]);
   const [projects,setProjects]=useState<ProjectRecord[]>([]);
-  const [selectedId,setSelectedId]=useState('');
+  const [selectedId,setSelectedId]=useState(initialRecordId||'');
   const [audit,setAudit]=useState<AuditRow[]>([]);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState('');
   const [view,setView]=useState<ViewMode>('Board');
   const [location,setLocation]=useState('All locations');
-  const [status,setStatus]=useState('Active');
-  const [search,setSearch]=useState('');
+  const [status,setStatus]=useState(initialSearch||initialRecordId?'All':'Active');
+  const [search,setSearch]=useState(initialSearch||'');
   const [showCreate,setShowCreate]=useState(false);
   const [progress,setProgress]=useState(0);
   const [actualSpend,setActualSpend]=useState(0);
   const [newMilestone,setNewMilestone]=useState('');
   const [form,setForm]=useState({name:'',description:'',objective:'',locations:allowedLocations.slice(0,1),ownerName:currentUser.name,collaborators:'',status:'Planning' as ProjectStatus,priority:'Medium' as ProjectPriority,startDate:today,dueDate:addDays(today,30),budget:0});
   const locationScopeKey=allowedLocations.join('|');
-  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {projects?:ProjectRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Projects unavailable');const scope=new Set(allowedLocations);const scoped=(body.projects||[]).filter(item=>item.locations.every(projectLocation=>scope.has(projectLocation)));setProjects(scoped);setSelectedId(current=>scoped.some(item=>item.id===current)?current:(scoped[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Projects unavailable');}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {projects?:ProjectRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Projects unavailable');const scope=new Set(allowedLocations);const scoped=(body.projects||[]).filter(item=>item.locations.every(projectLocation=>scope.has(projectLocation)));setProjects(scoped);setSelectedId(current=>initialRecordId&&scoped.some(item=>item.id===initialRecordId)?initialRecordId:scoped.some(item=>item.id===current)?current:(scoped[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Projects unavailable');}finally{setLoading(false);}};
   useEffect(()=>{void load();},[locationScopeKey]);
+  useEffect(()=>{if(initialSearch||initialRecordId){setSearch(initialSearch||'');setStatus('All');if(initialRecordId)setSelectedId(initialRecordId);}},[initialSearch,initialRecordId]);
   const selected=projects.find(item=>item.id===selectedId)??projects[0];
   useEffect(()=>{if(!selected){setAudit([]);return;}setProgress(selected.progress);setActualSpend(selected.actualSpend);fetch(`${api}&id=${encodeURIComponent(selected.id)}`,{credentials:'include',cache:'no-store'}).then(r=>r.json()).then((body:{audit?:AuditRow[]})=>setAudit(body.audit||[])).catch(()=>setAudit([]));},[selected?.id]);
   const filtered=useMemo(()=>projects.filter(project=>{const locationMatch=location==='All locations'||project.locations.includes(location);const statusMatch=status==='All'||(status==='Active'?!['Completed','Cancelled'].includes(project.status):project.status===status);const q=search.trim().toLowerCase();const searchMatch=!q||[project.name,project.description,project.objective,project.ownerName,...project.locations].join(' ').toLowerCase().includes(q);return locationMatch&&statusMatch&&searchMatch;}),[projects,location,status,search]);

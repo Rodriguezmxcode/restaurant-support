@@ -6,7 +6,7 @@ import type { VerificationStatus } from './verificationLoop';
 import './actionCenter.css';
 
 type AuditRow={id:string;at:string;actor_name:string;event:string;before_value?:string;after_value?:string;reason:string};
-type Props={currentUser:OpsVistaUser;allowedLocations:string[]};
+type Props={currentUser:OpsVistaUser;allowedLocations:string[];initialSearch?:string;initialRecordId?:string;initialLocation?:string};
 const statuses:ActionStatus[]=['Open','Assigned','Investigating','Completed','Dismissed'];
 const severities:ActionSeverity[]=['High','Medium','Low'];
 const api='/api/workflows?resource=actions';
@@ -14,17 +14,17 @@ const dateTime=(value?:string)=>value?new Date(value).toLocaleString('en-US',{ti
 const easternDate=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const displayDate=(value?:string)=>value?new Date(`${value.slice(0,10)}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC'}):'—';
 
-export default function ActionCenterView({currentUser,allowedLocations}:Props){
+export default function ActionCenterView({currentUser,allowedLocations,initialSearch,initialRecordId,initialLocation}:Props){
   const permissions=permissionsFor(currentUser);
   const [actions,setActions]=useState<ActionRecord[]>([]);
-  const [selectedId,setSelectedId]=useState('');
+  const [selectedId,setSelectedId]=useState(initialRecordId||'');
   const [audit,setAudit]=useState<AuditRow[]>([]);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState('');
-  const [location,setLocation]=useState('All locations');
-  const [status,setStatus]=useState('Active');
-  const [search,setSearch]=useState('');
+  const [location,setLocation]=useState(initialLocation&&allowedLocations.includes(initialLocation)?initialLocation:'All locations');
+  const [status,setStatus]=useState(initialSearch||initialRecordId?'All':'Active');
+  const [search,setSearch]=useState(initialSearch||'');
   const [showCreate,setShowCreate]=useState(false);
   const [owner,setOwner]=useState('');
   const [dueAt,setDueAt]=useState('');
@@ -33,8 +33,9 @@ export default function ActionCenterView({currentUser,allowedLocations}:Props){
   const [form,setForm]=useState({title:'',location:allowedLocations[0]||'',category:'Operations',severity:'Medium' as ActionSeverity,signal:'',cause:'',recommendation:'',impact:''});
 
   const locationScopeKey=allowedLocations.join('|');
-  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {actions?:ActionRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Action Center unavailable');const scope=new Set(allowedLocations);const scoped=(body.actions||[]).filter(item=>scope.has(item.location));setActions(scoped);setSelectedId(current=>scoped.some(item=>item.id===current)?current:(scoped[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Action Center unavailable');}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {actions?:ActionRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Action Center unavailable');const scope=new Set(allowedLocations);const scoped=(body.actions||[]).filter(item=>scope.has(item.location));setActions(scoped);setSelectedId(current=>initialRecordId&&scoped.some(item=>item.id===initialRecordId)?initialRecordId:scoped.some(item=>item.id===current)?current:(scoped[0]?.id||''));}catch(e){setError(e instanceof Error?e.message:'Action Center unavailable');}finally{setLoading(false);}};
   useEffect(()=>{void load();},[locationScopeKey]);
+  useEffect(()=>{if(initialSearch||initialRecordId){setSearch(initialSearch||'');setStatus('All');setLocation(initialLocation&&allowedLocations.includes(initialLocation)?initialLocation:'All locations');if(initialRecordId)setSelectedId(initialRecordId);}},[initialSearch,initialRecordId,initialLocation,locationScopeKey]);
   const selected=actions.find(item=>item.id===selectedId)??actions[0];
   useEffect(()=>{if(!selected){setAudit([]);return;}setOwner(selected.ownerName||'');setDueAt(selected.dueAt?.slice(0,10)||'');setVerificationStatus(selected.verificationStatus==='Pending'?'Not enough evidence yet':selected.verificationStatus);setVerificationNote(selected.verificationNote||'');fetch(`${api}&id=${encodeURIComponent(selected.id)}`,{credentials:'include',cache:'no-store'}).then(response=>response.json()).then((body:{audit?:AuditRow[]})=>setAudit(body.audit||[])).catch(()=>setAudit([]));},[selected?.id]);
 

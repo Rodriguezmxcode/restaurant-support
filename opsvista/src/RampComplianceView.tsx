@@ -28,6 +28,8 @@ type Props = {
   onEscalate?: (item: Escalation) => void;
   allowedLocations: string[];
   managerMode?: boolean;
+  initialQuery?: string;
+  initialRecordId?: string;
 };
 type RampSourceState = 'loading' | 'live' | 'error';
 type RampPeriod = 'today' | 'yesterday' | 'this_week' | 'prior_week' | 'last_30' | 'custom';
@@ -108,13 +110,13 @@ function GroupTable({ title, subtitle, rows, type }: {
 
 const rampAppUrl = 'https://app.ramp.com/';
 
-export default function RampComplianceView({ onEscalate, allowedLocations, managerMode = false }: Props) {
+export default function RampComplianceView({ onEscalate, allowedLocations, managerMode = false, initialQuery, initialRecordId }: Props) {
   const today = useMemo(easternToday, []);
   const locationScopeKey = allowedLocations.join('|');
   const periodStorageKey = managerMode ? 'opsvista-ramp-manager-period' : 'opsvista-ramp-period';
   const [period, setPeriod] = useState<RampPeriod>(() => {
     const saved = stored(periodStorageKey) as RampPeriod;
-    return saved in periodLabels ? saved : managerMode ? 'last_30' : 'today';
+    return initialQuery || initialRecordId ? 'last_30' : saved in periodLabels ? saved : managerMode ? 'last_30' : 'today';
   });
   const [customStart, setCustomStart] = useState(() => stored('opsvista-ramp-custom-start') || today);
   const [customEnd, setCustomEnd] = useState(() => stored('opsvista-ramp-custom-end') || today);
@@ -132,7 +134,7 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   const [status, setStatus] = useState(managerMode ? 'Needs attention' : 'All');
   const [restaurantFilter, setRestaurantFilter] = useState('All');
   const [roleFilter, setRoleFilter] = useState('All');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery || '');
   const [selected, setSelected] = useState<RampComplianceResult | null>(null);
   const [escalated, setEscalated] = useState<string[]>([]);
 
@@ -162,8 +164,21 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   }, [period, customStart, customEnd, periodStorageKey]);
 
   useEffect(() => { void refresh(); }, [range.fromDate, range.toDate, rangeError, managerMode, locationScopeKey]);
+  useEffect(() => {
+    if (!initialQuery && !initialRecordId) return;
+    setPeriod('last_30');
+    setStatus('All');
+    setRestaurantFilter('All');
+    setRoleFilter('All');
+    setQuery(initialQuery || '');
+  }, [initialQuery, initialRecordId]);
 
   const results = useMemo(() => evaluateRampCompliance(transactions), [transactions]);
+  useEffect(() => {
+    if (!initialRecordId) return;
+    const match = results.find(transaction => transaction.id === initialRecordId);
+    if (match) setSelected(match);
+  }, [initialRecordId, results]);
   const summary = useMemo(() => rampComplianceSummary(results), [results]);
   const cardholderRows = useMemo(() => groupRampCompliance(results, 'cardholder'), [results]);
   const locationRows = useMemo(() => groupRampCompliance(results, 'department'), [results]);

@@ -23,6 +23,10 @@ type Props = {
   allowedLocations?: string[];
   canReview?: boolean;
   reviewerName?: string;
+  initialSearch?: string;
+  initialRecordId?: string;
+  initialLocation?: string;
+  initialDate?: string;
 };
 
 const dt = (value?: string) => value ? new Date(value).toLocaleString() : '—';
@@ -35,7 +39,7 @@ function EvidenceVisual({ label, variant }: { label: string; variant: 'reference
   </div>;
 }
 
-export default function EvidenceAuditView({ onEscalate, allowedLocations, canReview = true, reviewerName = 'Authorized Review' }: Props) {
+export default function EvidenceAuditView({ onEscalate, allowedLocations, canReview = true, reviewerName = 'Authorized Review', initialSearch, initialRecordId, initialLocation, initialDate }: Props) {
   const [items, setItems] = useState<EvidenceItem[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [status, setStatus] = useState('Needs review');
@@ -105,7 +109,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
   };
 
   if (!items.length) return <div className="evidence-page">
-    <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate}/>
     <section className="panel">
       <div className="panel-header"><div><h2>Evidence Audit</h2><p>La cola se activará cuando la fuente de fotos y evidencia real esté conectada.</p></div><span className="count-pill">FUENTE PENDIENTE</span></div>
       <div style={{padding:18}}><div className="detail-block"><label>ESTADO DE LA FUENTE</label><p>No hay evidencia recibida. OpsVista no mostrará envíos, fotos ni decisiones de prueba.</p></div></div>
@@ -113,7 +117,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
   </div>;
 
   return <div className="evidence-page">
-    <SevenShiftsTasksPanel allowedLocations={allowedLocations}/>
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate}/>
     <section className="evidence-summary-grid">
       <article className="evidence-summary-card hero"><span>EVIDENCE APPROVAL RATE</span><strong>{summary.approvalRate}%</strong><p>Approved across reviewed submissions</p></article>
       <article className="evidence-summary-card"><span>NEEDS REVIEW</span><strong>{summary.submitted}</strong><p>Submitted or resubmitted</p></article>

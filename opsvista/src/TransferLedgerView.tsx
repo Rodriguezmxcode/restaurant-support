@@ -26,8 +26,8 @@ const sentValue=(item:Item)=>(Number(item.unitPrice)||0)*Number(item.expectedQty
 const receivedValue=(item:Item)=>(Number(item.unitPrice)||0)*Number(item.receivedQty||0);
 const missingValue=(item:Item)=>(Number(item.unitPrice)||0)*Math.max(0,Number(item.expectedQty||0)-Number(item.receivedQty||0));
 
-export default function TransferLedgerView({allowedLocations=locations}:{allowedLocations?:string[]}){
-  const [transfers,setTransfers]=useState<Transfer[]>([]);const [selectedId,setSelectedId]=useState('');const [message,setMessage]=useState('');const [loading,setLoading]=useState(false);
+export default function TransferLedgerView({allowedLocations=locations,initialRecordId}:{allowedLocations?:string[];initialRecordId?:string}){
+  const [transfers,setTransfers]=useState<Transfer[]>([]);const [selectedId,setSelectedId]=useState(initialRecordId||'');const [message,setMessage]=useState('');const [loading,setLoading]=useState(false);
   const [source,setSource]=useState('Orange');const [destination,setDestination]=useState('Stamford');const [notes,setNotes]=useState('');const [items,setItems]=useState<Item[]>([{id:'item-1',name:'',unit:'ea',unitPrice:0,expectedQty:1}]);
   const selected=useMemo(()=>transfers.find(t=>t.id===selectedId)||transfers[0],[transfers,selectedId]);
   const [receiptStatus,setReceiptStatus]=useState<'Complete'|'Partial'|'Incomplete'>('Complete');const [receiverName,setReceiverName]=useState('');const [receivedAt,setReceivedAt]=useState('');const [receiveNotes,setReceiveNotes]=useState('');const [receiveItems,setReceiveItems]=useState<Item[]>([]);
@@ -36,8 +36,9 @@ export default function TransferLedgerView({allowedLocations=locations}:{allowed
   const selectedReceivedTotal=receiveItems.reduce((sum,item)=>sum+receivedValue(item),0);
   const selectedMissingTotal=receiveItems.reduce((sum,item)=>sum+missingValue(item),0);
   const locationScopeKey=allowedLocations.join('|');
-  const load=async()=>{const res=await fetch('/api/transfers',{credentials:'include',cache:'no-store'});const body=await res.json().catch(()=>({})) as {transfers?:Transfer[]};if(res.ok){const scope=new Set(allowedLocations);const scoped=(body.transfers||[]).filter(transfer=>scope.has(transfer.sourceLocation)||scope.has(transfer.destinationLocation));setTransfers(scoped);setSelectedId(id=>scoped.some(item=>item.id===id)?id:scoped[0]?.id||'');}};
+  const load=async()=>{const res=await fetch('/api/transfers',{credentials:'include',cache:'no-store'});const body=await res.json().catch(()=>({})) as {transfers?:Transfer[]};if(res.ok){const scope=new Set(allowedLocations);const scoped=(body.transfers||[]).filter(transfer=>scope.has(transfer.sourceLocation)||scope.has(transfer.destinationLocation));setTransfers(scoped);setSelectedId(id=>initialRecordId&&scoped.some(item=>item.id===initialRecordId)?initialRecordId:scoped.some(item=>item.id===id)?id:scoped[0]?.id||'');}};
   useEffect(()=>{void load()},[locationScopeKey]);
+  useEffect(()=>{if(initialRecordId)setSelectedId(initialRecordId)},[initialRecordId]);
   useEffect(()=>{if(selected){setReceiveItems(selected.items.map(i=>({...i,receivedQty:i.receivedQty??i.expectedQty,shortageQty:i.shortageQty??0})));setReceiverName(selected.receiverName||'');setReceivedAt(selected.receivedAt?new Date(selected.receivedAt).toISOString().slice(0,16):new Date().toISOString().slice(0,16));setReceiptStatus((selected.receiptStatus==='Partial'||selected.receiptStatus==='Incomplete'?selected.receiptStatus:'Complete') as 'Complete'|'Partial'|'Incomplete');setReceiveNotes(selected.notes||'');}},[selected?.id]);
   const addItem=()=>setItems(v=>[...v,{id:`item-${Date.now()}`,name:'',unit:'ea',unitPrice:0,expectedQty:1}]);
   const changeProduct=(index:number,name:string)=>setItems(v=>v.map((x,i)=>{if(i!==index)return x;const match=productCatalog.find(product=>product.name.toLowerCase()===name.trim().toLowerCase());return match?{...x,name:match.name,unit:match.unit,unitPrice:match.unitPrice}:{...x,name};}));
