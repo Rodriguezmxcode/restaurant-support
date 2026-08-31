@@ -7,19 +7,10 @@ import {
   type EvidenceItem,
 } from './evidence';
 import './evidenceAudit.css';
-
-type Escalation = {
-  location: string;
-  title: string;
-  signal: string;
-  cause: string;
-  recommendation: string;
-  impact: string;
-  severity: 'High' | 'Medium' | 'Low';
-};
+import type { ExternalEscalation } from './actionCenterTypes';
 
 type Props = {
-  onEscalate?: (item: Escalation) => void;
+  onEscalate?: (item: ExternalEscalation) => Promise<unknown> | void;
   allowedLocations?: string[];
   canReview?: boolean;
   reviewerName?: string;
@@ -92,9 +83,9 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
     setRejectionReason('');
   };
 
-  const escalate = () => {
-    if (!selected) return;
-    onEscalate?.({
+  const escalate = async() => {
+    if (!selected || !onEscalate) return;
+    try{await onEscalate({
       location: selected.location,
       title: `${selected.task} evidence requires follow-up`,
       signal: `${selected.location} · ${selected.area} · ${selected.status}${evidenceIsOverdue(selected) ? ' · overdue' : ''}.`,
@@ -104,12 +95,15 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
         : 'Review the submitted evidence and close the verification loop with an explicit approve or reject decision.',
       impact: `${selected.task} remains unverified`,
       severity: evidenceIsOverdue(selected) || selected.status === 'Rejected' ? 'High' : 'Medium',
+      accountableName: selected.employee,
+      accountableRole: `${selected.area} · ${selected.shift}`,
     });
-    setEscalated(ids => ids.includes(selected.id) ? ids : [...ids, selected.id]);
+    setEscalated(ids => ids.includes(selected.id) ? ids : [...ids, selected.id]);}
+    catch(error){if(error instanceof Error&&error.message==='Action assignment cancelled')return;}
   };
 
   if (!items.length) return <div className="evidence-page">
-    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate}/>
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate} onEscalate={onEscalate}/>
     <section className="panel">
       <div className="panel-header"><div><h2>Evidence Audit</h2><p>La cola se activará cuando la fuente de fotos y evidencia real esté conectada.</p></div><span className="count-pill">FUENTE PENDIENTE</span></div>
       <div style={{padding:18}}><div className="detail-block"><label>ESTADO DE LA FUENTE</label><p>No hay evidencia recibida. OpsVista no mostrará envíos, fotos ni decisiones de prueba.</p></div></div>
@@ -117,7 +111,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
   </div>;
 
   return <div className="evidence-page">
-    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate}/>
+    <SevenShiftsTasksPanel allowedLocations={allowedLocations} initialSearch={initialSearch} initialRecordId={initialRecordId} initialLocation={initialLocation} initialDate={initialDate} onEscalate={onEscalate}/>
     <section className="evidence-summary-grid">
       <article className="evidence-summary-card hero"><span>EVIDENCE APPROVAL RATE</span><strong>{summary.approvalRate}%</strong><p>Approved across reviewed submissions</p></article>
       <article className="evidence-summary-card"><span>NEEDS REVIEW</span><strong>{summary.submitted}</strong><p>Submitted or resubmitted</p></article>
@@ -172,7 +166,7 @@ export default function EvidenceAuditView({ onEscalate, allowedLocations, canRev
         {['Submitted', 'Resubmitted'].includes(selected.status) && !canReview && <div className="evidence-feedback"><label>READ ONLY</label><p>Your role can view this evidence but cannot approve or reject it.</p></div>}
         {selected.status === 'Rejected' && canReview && <div className="evidence-correction-box"><strong>Correction required</strong><p>The task remains open until a real resubmission is received from the originating evidence system and approved.</p></div>}
 
-        {selected.status !== 'Approved' && <button className="evidence-escalate" disabled={escalated.includes(selected.id)} onClick={escalate}>{escalated.includes(selected.id) ? 'Added to Action Center' : 'Send to Action Center'}</button>}
+        {selected.status !== 'Approved' && <button className="evidence-escalate" disabled={!onEscalate||escalated.includes(selected.id)} onClick={()=>void escalate()}>{escalated.includes(selected.id) ? 'Assigned in Action Center' : 'Assign to location manager'}</button>}
 
         <div className="evidence-history"><div className="evidence-history-head"><strong>Audit history</strong><span>{selected.auditTrail.length} events</span></div>{selected.auditTrail.slice().reverse().map(event => <div className="evidence-history-row" key={event.id}><div className="history-dot"></div><div><strong>{event.action}</strong><span>{event.actor} · {dt(event.at)}</span>{event.comment && <p>{event.comment}</p>}</div></div>)}</div>
       </section>}

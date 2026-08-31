@@ -4,8 +4,8 @@ export type ActionSeverity='High'|'Medium'|'Low';
 export type ActionStatus='Open'|'Assigned'|'Investigating'|'Completed'|'Dismissed';
 export type ActionRecord={
   id:string;location:string;category:string;title:string;severity:ActionSeverity;status:ActionStatus;signal:string;cause:string;
-  recommendation:string;impact:string;ownerId?:string;ownerName?:string;dueAt?:string;automationKey?:string;automated:boolean;
+  recommendation:string;impact:string;ownerId?:string;ownerName?:string;accountableName?:string;accountableRole?:string;dueAt?:string;automationKey?:string;automated:boolean;
   priorityScore:number;sources:string[];sourceIds:string[];sourceUrl?:string;detectedAt?:string;verificationStatus:VerificationStatus;
   verificationNote?:string;verifiedAt?:string;createdAt:string;updatedAt:string;
 };
-export type ExternalEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:ActionSeverity;ownerId?:string;ownerName?:string;dueAt?:string;automationKey?:string;priorityScore?:number;sources?:string[];sourceIds?:string[];sourceUrl?:string;detectedAt?:string};
+export type ExternalEscalation={location:string;category?:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:ActionSeverity;ownerId?:string;ownerName?:string;accountableName?:string;accountableRole?:string;dueAt?:string;automationKey?:string;priorityScore?:number;sources?:string[];sourceIds?:string[];sourceUrl?:string;detectedAt?:string};

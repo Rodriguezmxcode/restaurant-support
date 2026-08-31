@@ -98,7 +98,7 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const priorityScore=Math.max(0,Math.min(100,Number(req.body?.priorityScore)||0));const requestedOwnerId=text(req.body?.ownerId);const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,location):null;
   if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
   const sourceUrl=safeActionSourceUrl(text(req.body?.sourceUrl));
-  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
+  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
   return res.status(201).json({action});
  }
  if(req.method==='PUT'){

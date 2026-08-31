@@ -136,7 +136,7 @@ async function searchActions(query: string, allowedLocations: string[], section:
   return asArray(payload.actions)
     .filter(action => locationAllowed(action.location, allowedLocations))
     .filter(action => matches([
-      action.id, action.title, action.location, action.category, action.ownerName,
+      action.id, action.title, action.location, action.category, action.ownerName, action.accountableName, action.accountableRole,
       action.signal, action.cause, action.recommendation, action.status,
     ], query))
     .slice(0, 6)

@@ -4,9 +4,9 @@ import './laborFilters.css';
 import ScheduleOvertimeMonitor, { type ScheduleRisk } from './ScheduleOvertimeMonitor';
 import CustomDateRangePicker from './CustomDateRangePicker';
 import MaxDataInsights from './MaxDataInsights';
+import type { ExternalEscalation } from './actionCenterTypes';
 
-type LaborEscalation={location:string;title:string;signal:string;cause:string;recommendation:string;impact:string;severity:'High'|'Medium'|'Low'};
-type Props={onEscalate?:(item:LaborEscalation)=>void;allowedLocations?:string[]};
+type Props={onEscalate?:(item:ExternalEscalation)=>Promise<unknown>|void;allowedLocations?:string[]};
 type LiveRow={location:string;netSales:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
 type LiveResponse={start:string;end:string;scheduleStart:string;scheduleEnd:string;overtimeEnd:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
 type Insight=LiveRow&{targetLaborPct:number;gap:number;estimatedExcess:number;severity:'Healthy'|'Watch'|'Action'};
@@ -62,7 +62,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
     .sort((a,b)=>b.gap-a.gap)),[data,allowedLocations]);
   const totals=useMemo(()=>rows.reduce((a,r)=>({sales:a.sales+r.netSales,labor:a.labor+r.totalLaborCost,hours:a.hours+r.hourlyHours,ot:a.ot+r.overtimeHours,excess:a.excess+r.estimatedExcess}),{sales:0,labor:0,hours:0,ot:0,excess:0}),[rows]);
 
-  const sendToActionCenter=(row:Insight)=>{onEscalate?.({location:row.location,title:`${row.location} labor review`,signal:`Total labor is ${pct(row.totalLaborPct)} against a ${pct(row.targetLaborPct)} target for ${range.start}–${range.end}; overtime is ${row.overtimeHours.toFixed(1)} hours.`,cause:row.gap>0?'Labor cost is above the operating target for the selected period.':'Labor is within target, but management requested a documented review.',recommendation:'Review staffing, overtime, peak coverage, prep and closing requirements before making schedule changes.',impact:`${money(row.estimatedExcess)} labor cost above target in the selected period`,severity:row.severity==='Action'?'High':row.severity==='Watch'?'Medium':'Low'});setEscalated(items=>items.includes(row.location)?items:[...items,row.location]);};
+  const sendToActionCenter=async(row:Insight)=>{if(!onEscalate)return;try{await onEscalate({location:row.location,title:`${row.location} labor review`,signal:`Total labor is ${pct(row.totalLaborPct)} against a ${pct(row.targetLaborPct)} target for ${range.start}–${range.end}; overtime is ${row.overtimeHours.toFixed(1)} hours.`,cause:row.gap>0?'Labor cost is above the operating target for the selected period.':'Labor is within target, but management requested a documented review.',recommendation:'The location manager must review staffing, overtime, peak coverage, prep and closing requirements, document the adjustment, and verify the next labor result.',impact:`${money(row.estimatedExcess)} labor cost above target in the selected period`,severity:row.severity==='Action'?'High':row.severity==='Watch'?'Medium':'Low',accountableName:`${row.location} management team`,accountableRole:'Labor and schedule control',automationKey:`labor-variance::${row.location}::${range.start}::${range.end}`,sources:['Toast Labor','7shifts Schedule'],sourceIds:[`${row.location}:${range.start}:${range.end}`]});setEscalated(items=>items.includes(row.location)?items:[...items,row.location]);}catch(error){if(error instanceof Error&&error.message==='Action assignment cancelled')return;setError(error instanceof Error?error.message:'Action could not be assigned');}};
 
   const locationLabel=!selectedLocations.length?'All locations':selectedLocations.length===1?selectedLocations[0]:`${selectedLocations.length} locations`;
   const toggleLocation=(location:string)=>setSelectedLocations(current=>{const next=current.includes(location)?current.filter(item=>item!==location):[...current,location];return next.length===allowedLocations?.length?[]:next;});
@@ -96,7 +96,7 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
       <div className="labor-signal"><label>SIGNAL</label><p>{selected.location} is at {pct(selected.totalLaborPct)} total labor against a {pct(selected.targetLaborPct)} target.</p></div>
       <div className="labor-recommendation"><label>OPSVISTA RECOMMENDATION</label><p>Review staffing and overtime against actual demand. Protect rush coverage, prep, closing and required positions before changing the schedule.</p></div>
       <div className="labor-impact"><span>Actual period variance</span><strong>{money(selected.estimatedExcess)} above target</strong><small>{selected.overtimeHours.toFixed(1)} overtime hours</small></div>
-      <div className="labor-actions"><button className="labor-primary" disabled={escalated.includes(selected.location)} onClick={()=>sendToActionCenter(selected)}>{escalated.includes(selected.location)?'Added to Action Center':'Send to Action Center'}</button><button onClick={()=>setSelected(null)}>Close</button></div>
+      <div className="labor-actions"><button className="labor-primary" disabled={escalated.includes(selected.location)} onClick={()=>void sendToActionCenter(selected)}>{escalated.includes(selected.location)?'Assigned in Action Center':'Assign to location manager'}</button><button onClick={()=>setSelected(null)}>Close</button></div>
     </aside></div>}
   </div>;
 }
