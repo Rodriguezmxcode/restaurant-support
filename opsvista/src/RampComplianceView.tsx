@@ -11,6 +11,7 @@ import {
 import { loadRampTransactions } from './rampDataSource';
 import { scopeRampTransactionsForLocations } from '../shared/rampAccess';
 import CustomDateRangePicker from './CustomDateRangePicker';
+import OpsVistaDatePicker from './OpsVistaDatePicker';
 import './rampCompliance.css';
 import MaxDataInsights from './MaxDataInsights';
 
@@ -22,10 +23,19 @@ type Escalation = {
   recommendation: string;
   impact: string;
   severity: 'High' | 'Medium' | 'Low';
+  ownerId?: string;
+  ownerName?: string;
+  dueAt?: string;
+  automationKey?: string;
+  sources?: string[];
+  sourceIds?: string[];
+  sourceUrl?: string;
 };
 
+type Assignee = { id:string;name:string;title:string;role:string;locations:string[] };
+
 type Props = {
-  onEscalate?: (item: Escalation) => void;
+  onEscalate?: (item: Escalation) => Promise<unknown> | void;
   allowedLocations: string[];
   managerMode?: boolean;
   initialQuery?: string;
@@ -137,6 +147,10 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   const [query, setQuery] = useState(initialQuery || '');
   const [selected, setSelected] = useState<RampComplianceResult | null>(null);
   const [escalated, setEscalated] = useState<string[]>([]);
+  const [assignees, setAssignees] = useState<Assignee[]>([]);
+  const [assignment, setAssignment] = useState<{transaction:RampComplianceResult;ownerId:string;dueAt:string}|null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [assignmentError, setAssignmentError] = useState('');
 
   const refresh = async () => {
     if (rangeError) {
@@ -164,6 +178,7 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   }, [period, customStart, customEnd, periodStorageKey]);
 
   useEffect(() => { void refresh(); }, [range.fromDate, range.toDate, rangeError, managerMode, locationScopeKey]);
+  useEffect(()=>{if(!onEscalate)return;fetch('/api/workflows?resource=actions',{credentials:'include',cache:'no-store'}).then(response=>response.json()).then((body:{assignees?:Assignee[]})=>setAssignees(body.assignees||[])).catch(()=>setAssignees([]));},[Boolean(onEscalate)]);
   useEffect(() => {
     if (!initialQuery && !initialRecordId) return;
     setPeriod('last_30');
@@ -196,7 +211,7 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
     return statusMatch && restaurantMatch && roleMatch && queryMatch;
   });
 
-  const escalationFor = (tx: RampComplianceResult): Escalation => ({
+  const escalationFor = (tx: RampComplianceResult, assignee?:Assignee, dueAt?:string): Escalation => ({
     location: tx.restaurant?.trim() || tx.department?.trim() || 'Corporate',
     title: `${tx.merchant} requires Ramp compliance follow-up`,
     signal: `${tx.flags.length} compliance issue${tx.flags.length === 1 ? '' : 's'} detected on a ${money(tx.amount)} Ramp transaction${tx.overdue ? `; evidence is ${tx.ageHours}h old` : ''}.`,
@@ -204,17 +219,29 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
     recommendation: `Have ${tx.cardholder || 'the cardholder'} complete the missing Ramp requirements and verify the transaction before closing the action.`,
     impact: `${money(tx.amount)} spend requiring compliance review`,
     severity: tx.complianceStatus === 'Critical' ? 'High' : 'Medium',
+    ownerId: assignee?.id,
+    ownerName: assignee?.name,
+    dueAt,
+    automationKey: `ramp-compliance::${tx.id}`,
+    sources: ['Ramp Compliance'],
+    sourceIds: [tx.id],
+    sourceUrl: tx.rampUrl || rampAppUrl,
   });
 
-  const escalate = (tx: RampComplianceResult) => {
-    onEscalate?.(escalationFor(tx));
-    setEscalated(ids => ids.includes(tx.id) ? ids : [...ids, tx.id]);
+  const normalizeName=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const assigneesFor=(tx:RampComplianceResult)=>assignees.filter(user=>!user.locations.length||user.locations.includes(tx.verifiedRestaurant||tx.restaurant||tx.department||''));
+  const suggestedAssignee=(tx:RampComplianceResult)=>{const cardholder=normalizeName(tx.cardholder||'');return assigneesFor(tx).find(user=>normalizeName(user.name)===cardholder);};
+  const defaultDueDate=(tx:RampComplianceResult)=>{if(tx.overdue)return today;const base=tx.transactionTime||`${tx.date}T12:00:00Z`;const deadline=new Date(base);if(!Number.isFinite(deadline.getTime()))return addDays(today,2);deadline.setHours(deadline.getHours()+48);return deadline.toISOString().slice(0,10);};
+  const openAssignment=(tx:RampComplianceResult)=>{const suggested=suggestedAssignee(tx);setAssignment({transaction:tx,ownerId:suggested?.id||'',dueAt:defaultDueDate(tx)});setAssignmentError('');};
+  const sendAssignedAction=async()=>{
+    if(!assignment||!assignment.ownerId||!assignment.dueAt)return;
+    const assignee=assignees.find(user=>user.id===assignment.ownerId);if(!assignee)return;
+    setAssigning(true);setAssignmentError('');
+    try{await onEscalate?.(escalationFor(assignment.transaction,assignee,assignment.dueAt));setEscalated(ids=>ids.includes(assignment.transaction.id)?ids:[...ids,assignment.transaction.id]);setAssignment(null);setSelected(null);}catch(error){setAssignmentError(error instanceof Error?error.message:'Action could not be assigned');}finally{setAssigning(false);}
   };
 
   const escalateOverdue = () => {
-    const pending = overdueRows.filter(tx => !escalated.includes(tx.id));
-    pending.forEach(tx => onEscalate?.(escalationFor(tx)));
-    setEscalated(ids => [...new Set([...ids, ...pending.map(tx => tx.id)])]);
+    const next=overdueRows.find(tx=>!escalated.includes(tx.id));if(next)openAssignment(next);
   };
 
   const sourceLabel = dataSource === 'live' ? 'LIVE RAMP DATA' : dataSource === 'error' ? 'RAMP CONNECTION ERROR' : 'CONNECTING...';
@@ -254,7 +281,7 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
 
     <section className="ramp-policy-strip">
       <div><strong>OpsVista Compliance Policy</strong><span>Cardholder, restaurant/department, memo and receipt are required. Missing receipt or memo becomes overdue after 48 hours.</span></div>
-      <div className="ramp-policy-actions"><div className="ramp-policy-chips"><span>Cardholder</span><span>Department / Restaurant</span><span>Memo</span><span>Receipt</span><span>48h deadline</span></div>{!managerMode&&<button className="ramp-escalate-all" onClick={escalateOverdue} disabled={!overdueRows.some(tx => !escalated.includes(tx.id))}>⚡ Send overdue to Action Center</button>}</div>
+      <div className="ramp-policy-actions"><div className="ramp-policy-chips"><span>Cardholder</span><span>Department / Restaurant</span><span>Memo</span><span>Receipt</span><span>48h deadline</span></div>{!managerMode&&<button className="ramp-escalate-all" onClick={escalateOverdue} disabled={!overdueRows.some(tx => !escalated.includes(tx.id))}>⚡ Assign overdue action</button>}</div>
     </section>
 
     <section className={`ramp-accountability-grid ${managerMode?'manager-view':''}`}>
@@ -295,7 +322,8 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
       <div className="ramp-detail-grid"><div><label>Cardholder</label><strong>{selected.cardholder || 'Not identified'}</strong></div>{!managerMode&&<><div><label>Role / position</label><strong>{selected.role || 'Not assigned'}</strong></div><div><label>Card</label><strong>{selected.cardLastFour ? `•••• ${selected.cardLastFour}` : 'Not returned'}</strong></div></>}<div><label>Merchant place</label><strong>{selected.merchantLocation || 'Not returned'}</strong></div><div><label>Restaurant / location</label><strong>{selected.verifiedRestaurant || selected.restaurant || 'Unassigned'}</strong></div><div><label>Department</label><strong>{selected.department || 'Unassigned'}</strong></div>{!managerMode&&<><div><label>Business entity</label><strong>{selected.entity || 'Not returned'}</strong></div><div><label>Ramp category</label><strong>{selected.category || 'Not categorized'}</strong></div><div><label>Accounting category</label><strong>{selected.accountingCategory || 'Not returned'}</strong></div></>}<div><label>Memo</label><strong>{selected.memo || 'Missing'}</strong></div><div><label>Receipt</label><strong>{selected.receiptAttached ? 'Attached' : 'Missing'}</strong></div><div><label>Transaction state</label><strong>{selected.state}</strong></div><div><label>Deadline</label><strong>{selected.overdue ? 'Overdue' : 'Within 48h'}</strong></div></div>
       <div className="ramp-drawer-section"><label>DETECTED ISSUES</label><FlagPills transaction={selected}/></div>
       {selected.flags.length > 0 && <div className="ramp-recommendation"><label>OPSVISTA RECOMMENDATION</label><p>{managerMode?(selected.overdue?'Open Ramp now and complete the missing memo or receipt. This transaction is already past the 48-hour deadline.':'Open Ramp and complete every missing memo or receipt before the 48-hour deadline.'):(selected.overdue?'This transaction is past the 48-hour evidence deadline. Escalate it now and require the missing memo/receipt before the action can be closed.':'Complete all missing compliance fields, verify any duplicate or anomaly signal, and retain the receipt as supporting evidence before closing this transaction.')}</p></div>}
-      <div className="ramp-drawer-actions">{managerMode?<a className="ramp-primary ramp-open-link" href={selected.rampUrl||rampAppUrl} target="_blank" rel="noreferrer">Abrir Ramp ↗</a>:selected.flags.length > 0 ? <button className="ramp-primary" disabled={escalated.includes(selected.id)} onClick={() => escalate(selected)}>{escalated.includes(selected.id) ? 'Added to Action Center' : 'Send to Action Center'}</button> : <button className="ramp-primary" disabled>Transaction compliant</button>}<button onClick={() => setSelected(null)}>Close</button></div>
+      <div className="ramp-drawer-actions">{managerMode?<a className="ramp-primary ramp-open-link" href={selected.rampUrl||rampAppUrl} target="_blank" rel="noreferrer">Abrir Ramp ↗</a>:selected.flags.length > 0 ? <button className="ramp-primary" disabled={escalated.includes(selected.id)} onClick={() => openAssignment(selected)}>{escalated.includes(selected.id) ? 'Assigned in Action Center' : 'Assign in Action Center'}</button> : <button className="ramp-primary" disabled>Transaction compliant</button>}<button onClick={() => setSelected(null)}>Close</button></div>
     </aside></div>}
+    {assignment&&<div className="ramp-assignment-backdrop" onMouseDown={()=>!assigning&&setAssignment(null)}><section className="ramp-assignment-dialog" role="dialog" aria-modal="true" aria-label="Assign Ramp compliance action" onMouseDown={event=>event.stopPropagation()}><header><div><span>ACCOUNTABILITY ASSIGNMENT</span><h2>Send to Action Center</h2><p>{assignment.transaction.cardholder||'Cardholder'} · {assignment.transaction.merchant} · {money(assignment.transaction.amount)}</p></div><button type="button" onClick={()=>setAssignment(null)} disabled={assigning}>×</button></header><div className="ramp-assignment-signal"><strong>{assignment.transaction.flags.map(flag=>rampFlagLabels[flag]).join(' · ')}</strong><span>{assignment.transaction.overdue?`Overdue by policy · ${assignment.transaction.ageHours}h old`:'Within the 48-hour compliance window'}</span></div><label>RESPONSIBLE OPSVISTA USER<select value={assignment.ownerId} onChange={event=>setAssignment({...assignment,ownerId:event.target.value})}><option value="">Select responsible person</option>{assigneesFor(assignment.transaction).map(user=><option key={user.id} value={user.id}>{user.name} · {user.title}</option>)}</select></label>{suggestedAssignee(assignment.transaction)&&<p className="ramp-assignment-match">✓ Cardholder matched to {suggestedAssignee(assignment.transaction)?.name}'s OpsVista profile.</p>}<label>DUE DATE<OpsVistaDatePicker value={assignment.dueAt} onChange={dueAt=>setAssignment({...assignment,dueAt})} ariaLabel="Select compliance action due date"/></label><div className="ramp-assignment-result"><span>This will appear under</span><strong>{assignees.find(user=>user.id===assignment.ownerId)?.name||'the selected user'} → My Actions</strong></div>{assignmentError&&<div className="ramp-assignment-error">{assignmentError}</div>}<footer><button type="button" onClick={()=>setAssignment(null)} disabled={assigning}>Cancel</button><button type="button" className="primary" onClick={()=>void sendAssignedAction()} disabled={assigning||!assignment.ownerId||!assignment.dueAt}>{assigning?'Assigning…':'Assign action'}</button></footer></section></div>}
   </div>;
 }

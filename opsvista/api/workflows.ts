@@ -11,6 +11,7 @@ import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../se
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
 import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
+import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
@@ -30,6 +31,13 @@ const actionStatuses:ActionStatus[]=['Open','Assigned','Investigating','Complete
 const verificationStatuses:ActionVerificationStatus[]=['Pending','Worked','Did not work','Not enough evidence yet'];
 const projectStatuses:ProjectStatus[]=['Planning','In Progress','Blocked','Completed','Cancelled'];
 const projectPriorities:ProjectPriority[]=['High','Medium','Low'];
+const globalAssigneeRoles=['Founder','Corporate','HR','Administration','Maintenance'];
+
+function managedLocations(user:ManagedDirectoryUser){const now=Date.now();const grants=user.locationGrants?.length?user.locationGrants:user.locations.map((location,index)=>({location,type:index===0?'Primary' as const:'Additional' as const}));return Array.from(new Set(grants.filter(grant=>!grant.expiresAt||new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));}
+function canOwnLocation(user:ManagedDirectoryUser,location:string){return globalAssigneeRoles.includes(user.role)||managedLocations(user).includes(location);}
+async function actionAssignees(user:NonNullable<ReturnType<typeof readSession>>){const directory=await listManagedUsers();const globalRequester=globalAssigneeRoles.includes(user.role);return directory.filter(candidate=>candidate.active&&(globalRequester||candidate.id===user.id||managedLocations(candidate).some(location=>user.locations.includes(location)))).map(candidate=>({id:candidate.id,name:candidate.name,title:candidate.title,role:candidate.role,locations:managedLocations(candidate)}));}
+async function resolveActionAssignee(id:string,location:string){if(!id)return null;const assignee=await getManagedUser(id);return assignee&&assignee.active&&canOwnLocation(assignee,location)?assignee:null;}
+function safeActionSourceUrl(value:string){if(!value)return undefined;try{const url=new URL(value);return url.protocol==='https:'&&url.hostname==='app.ramp.com'?url.toString():undefined;}catch{return undefined;}}
 
 function operationalWeek(){const now=new Date();const day=now.getUTCDay();const since=(day-3+7)%7;const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-since));const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
 
@@ -76,7 +84,7 @@ async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTy
 async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  const access=authorize(user,'actions:read');if(!access.ok)return res.status(access.status).json({error:access.error});
  if(!req.method||req.method==='GET'){
-  const id=q(req,'id');if(!id)return res.status(200).json({actions:await listActions(user)});
+  const id=q(req,'id');if(!id)return res.status(200).json({actions:await listActions(user),assignees:await actionAssignees(user)});
   const action=await getAction(id);if(!action||action.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
   const scoped=authorize(user,'actions:read',action.location);if(!scoped.ok)return res.status(scoped.status).json({error:scoped.error});
   return res.status(200).json({action,audit:await listActionAudit(id)});
@@ -87,8 +95,10 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const signal=text(req.body?.signal),cause=text(req.body?.cause),recommendation=text(req.body?.recommendation),impact=text(req.body?.impact);
   if(!locations.includes(location)||!category||!title||!actionSeverities.includes(severity)||!signal||!cause||!recommendation)return res.status(400).json({error:'Location, category, title, severity, signal, cause and recommendation are required'});
   const dueAt=text(req.body?.dueAt);if(dueAt&&!validDate(dueAt))return res.status(400).json({error:'Due date must use YYYY-MM-DD'});
-  const priorityScore=Math.max(0,Math.min(100,Number(req.body?.priorityScore)||0));
-  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:text(req.body?.ownerId)||undefined,ownerName:text(req.body?.ownerName)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),detectedAt:text(req.body?.detectedAt)||undefined},user);
+  const priorityScore=Math.max(0,Math.min(100,Number(req.body?.priorityScore)||0));const requestedOwnerId=text(req.body?.ownerId);const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,location):null;
+  if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
+  const sourceUrl=safeActionSourceUrl(text(req.body?.sourceUrl));
+  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
   return res.status(201).json({action});
  }
  if(req.method==='PUT'){
@@ -102,7 +112,9 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
    const verify=authorize(user,'actions:verify',existing.location);if(!verify.ok)return res.status(verify.status).json({error:verify.error});
    if(!text(req.body?.verificationNote))return res.status(400).json({error:'A verification note describing the evidence is required'});
   }
-  const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:text(req.body?.ownerId)||undefined}:{}),...(has(req.body,'ownerName')?{ownerName:text(req.body?.ownerName)||undefined}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
+  const requestedOwnerId=has(req.body,'ownerId')?text(req.body?.ownerId):existing.ownerId||'';const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,existing.location):null;
+  if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
+  const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
   return res.status(200).json({action});
  }
  res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
