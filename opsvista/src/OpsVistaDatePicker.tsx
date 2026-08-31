@@ -22,18 +22,24 @@ const dateFromIso = (value: string) => {
   return new Date(year, month - 1, day, 12);
 };
 
+const validIsoDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T12:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
 const monthStart = (value: string) => {
   const date = dateFromIso(value);
   return new Date(date.getFullYear(), date.getMonth(), 1, 12);
 };
 
-const formatDate = (value: string) => new Intl.DateTimeFormat('en-US', {
+const formatDate = (value: string) => validIsoDate(value) ? new Intl.DateTimeFormat('en-US', {
   weekday: 'short',
   month: 'long',
   day: 'numeric',
   year: 'numeric',
   timeZone: 'UTC',
-}).format(new Date(`${value}T12:00:00Z`));
+}).format(new Date(`${value}T12:00:00Z`)) : 'Select date';
 
 export default function OpsVistaDatePicker({
   value,
@@ -44,20 +50,21 @@ export default function OpsVistaDatePicker({
   placeholder = 'Select date',
 }: Props) {
   const today = useMemo(() => isoDate(new Date()), []);
+  const normalizedValue = validIsoDate(value) ? value : '';
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(value || today));
+  const [draft, setDraft] = useState(normalizedValue);
+  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(normalizedValue || today));
 
   useEffect(() => {
     if (!open) return;
-    setDraft(value);
-    setVisibleMonth(monthStart(value || today));
+    setDraft(normalizedValue);
+    setVisibleMonth(monthStart(normalizedValue || today));
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
-  }, [open, today, value]);
+  }, [open, normalizedValue, today]);
 
   const first = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1, 12);
   const gridStart = new Date(first);
@@ -80,12 +87,12 @@ export default function OpsVistaDatePicker({
   return <div className="ops-date-picker">
     <button
       type="button"
-      className={`ops-date-trigger ${value ? 'has-value' : ''}`}
+      className={`ops-date-trigger ${normalizedValue ? 'has-value' : ''}`}
       onClick={() => setOpen(true)}
       aria-haspopup="dialog"
       aria-expanded={open}
     >
-      <span>{value ? formatDate(value) : placeholder}</span>
+      <span>{normalizedValue ? formatDate(normalizedValue) : placeholder}</span>
       <i aria-hidden="true">▣</i>
     </button>
     {open && <div className="ops-date-backdrop" onMouseDown={() => setOpen(false)}>
@@ -126,7 +133,7 @@ export default function OpsVistaDatePicker({
           <div className="ops-date-selection"><span>SELECTED DATE</span><strong>{draft ? formatDate(draft) : 'No date selected'}</strong></div>
           <div className="ops-date-actions">
             <button type="button" className="quiet" onClick={selectToday}>Today</button>
-            {value && <button type="button" className="quiet" onClick={() => { onChange(''); setOpen(false); }}>Clear</button>}
+            {normalizedValue && <button type="button" className="quiet" onClick={() => { onChange(''); setOpen(false); }}>Clear</button>}
             <button type="button" className="apply" disabled={!draft} onClick={() => { onChange(draft); setOpen(false); }}>Apply date</button>
           </div>
         </footer>
