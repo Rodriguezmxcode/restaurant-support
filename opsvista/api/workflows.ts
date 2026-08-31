@@ -12,6 +12,7 @@ import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewIm
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
 import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
 import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
+import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
@@ -129,6 +130,7 @@ async function projects(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTy
   return res.status(200).json({project,audit:await listProjectAudit(id)});
  }
  if(req.method==='POST'){
+  if(!canCreateProjectsForIdentity(user))return res.status(403).json({error:'Only Roberto Rodríguez or Jacob Rodríguez can create projects'});
   const name=text(req.body?.name),description=text(req.body?.description),objective=text(req.body?.objective),ownerName=text(req.body?.ownerName);
   const selectedLocations=stringList(req.body?.locations);const status=text(req.body?.status) as ProjectStatus;const priority=text(req.body?.priority) as ProjectPriority;
   const startDate=text(req.body?.startDate),dueDate=text(req.body?.dueDate),budget=Math.max(0,Number(req.body?.budget)||0);
