@@ -304,8 +304,16 @@ export async function getSevenShiftsScheduleRisk(start:string,end:string,locatio
 export type ToastEmployeeLaborForSchedule={employeeGuid:string;externalEmployeeId:string;employeeName:string;location:string;regularHours:number;overtimeHours:number;totalHours:number;hourlyWage:number|null;wageSource:'time_entry'|'employee_override'|'unavailable'};
 
 function normalizedIdentity(value:string){return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
-function aggregateToastLabor(rows:ToastEmployeeLaborForSchedule[]){
-  const totalHours=rows.reduce((sum,row)=>sum+row.totalHours,0),actualOvertimeHours=rows.reduce((sum,row)=>sum+row.overtimeHours,0);
+function aggregateToastLabor(rows:ToastEmployeeLaborForSchedule[],thresholdHours=40){
+  const totalHours=rows.reduce((sum,row)=>sum+row.totalHours,0);
+  // Toast can report overtime per restaurant/time-entry record. An employee
+  // working across locations may therefore have 0 reported OT in every row
+  // even though their consolidated weekly hours exceed the company threshold.
+  // Keep a larger source-reported value (when applicable), but never allow the
+  // consolidated weekly calculation to understate overtime.
+  const reportedOvertimeHours=rows.reduce((sum,row)=>sum+row.overtimeHours,0);
+  const consolidatedOvertimeHours=Math.max(0,totalHours-thresholdHours);
+  const actualOvertimeHours=Math.max(reportedOvertimeHours,consolidatedOvertimeHours);
   const known=rows.filter(row=>row.hourlyWage!==null);
   const weightedHours=known.reduce((sum,row)=>sum+Math.max(row.totalHours,0),0);
   const hourlyWage=known.length?(weightedHours?known.reduce((sum,row)=>sum+(row.hourlyWage??0)*Math.max(row.totalHours,0),0)/weightedHours:known.length===1?known[0].hourlyWage:null):null;
@@ -331,7 +339,7 @@ export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,toast
       if(candidates.length&&identities.size===1)toastMatchStatus='matched_name';else if(candidates.length>1){toastMatchStatus='ambiguous';candidates=[];}else if(candidates.length===1)toastMatchStatus='matched_name';
     }
     if(!candidates.length){const projectedHours=roundHours(employee.remainingScheduledHours),overtimeHours=employmentType==='salary'?0:roundHours(Math.max(0,projectedHours-risk.thresholdHours));return {...employee,role,primaryLocation,employmentType,workedHours:0,projectedHours,overtimeHours,actualOvertimeHours:0,hourlyWage:configuredWage,estimatedOvertimeCost:configuredWage===null?null:roundMoney(overtimeHours*configuredWage*1.5),wageSource:configuredWage===null?'unavailable' as const:'manual_override' as const,toastMatchStatus,status:employmentType==='salary'?'Salary' as const:projectedHours>risk.thresholdHours?'Overtime' as const:projectedHours>=38?'Risk' as const:'Safe' as const};}
-    const actual=aggregateToastLabor(candidates),projectedHours=actual.workedHours+employee.remainingScheduledHours,overtimeHours=Math.max(0,projectedHours-risk.thresholdHours);
+    const actual=aggregateToastLabor(candidates,risk.thresholdHours),projectedHours=actual.workedHours+employee.remainingScheduledHours,overtimeHours=Math.max(0,projectedHours-risk.thresholdHours);
     if(employmentType==='salary')return {...employee,role,primaryLocation,employmentType,workedHours:actual.workedHours,projectedHours:roundHours(projectedHours),overtimeHours:0,actualOvertimeHours:0,hourlyWage:null,estimatedOvertimeCost:null,wageSource:'unavailable' as const,toastMatchStatus,status:'Salary' as const};
     const hourlyWage=configuredWage??actual.hourlyWage;
     return {...employee,role,primaryLocation,employmentType,workedHours:actual.workedHours,projectedHours:roundHours(projectedHours),overtimeHours:roundHours(overtimeHours),actualOvertimeHours:actual.actualOvertimeHours,hourlyWage,estimatedOvertimeCost:hourlyWage===null?null:roundMoney(overtimeHours*hourlyWage*1.5),wageSource:configuredWage!==null?'manual_override' as const:actual.hourlyWage===null?'unavailable' as const:'shift_or_punch' as const,toastMatchStatus,status:overtimeHours>0?'Overtime' as const:projectedHours>=38?'Risk' as const:'Safe' as const};
