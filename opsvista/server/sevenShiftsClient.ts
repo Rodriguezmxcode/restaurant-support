@@ -167,6 +167,9 @@ export type SevenShiftsLocationScheduleRisk={
   actualOvertimeHours:number;
   additionalProjectedOvertimeHours:number;
   projectedOvertimeHours:number;
+  salaryOver40Hours:number;
+  unclassifiedToastOvertimeHours:number;
+  unclassifiedToastEmployees:number;
   estimatedOvertimeCost:number;
   employeesMissingHourlyWage:number;
 };
@@ -181,6 +184,9 @@ export type SevenShiftsScheduleRisk={
   actualOvertimeHours:number;
   additionalProjectedOvertimeHours:number;
   projectedOvertimeHours:number;
+  salaryOver40Hours:number;
+  unclassifiedToastOvertimeHours:number;
+  unclassifiedToastEmployees:number;
   estimatedOvertimeCost:number;
   employeesMissingHourlyWage:number;
   unmatchedToastEmployees:number;
@@ -301,10 +307,10 @@ export async function getSevenShiftsScheduleRisk(start:string,end:string,locatio
   const locations=Array.from(locationMap.values()).map<SevenShiftsLocationScheduleRisk>(location=>{
     const rows=employees.filter(employee=>employee.primaryLocation===location);
     const projectedOvertimeHours=roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0));
-    return {location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours:0,additionalProjectedOvertimeHours:projectedOvertimeHours,projectedOvertimeHours,estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:rows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length};
+    return {location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours:0,additionalProjectedOvertimeHours:projectedOvertimeHours,projectedOvertimeHours,salaryOver40Hours:0,unclassifiedToastOvertimeHours:0,unclassifiedToastEmployees:0,estimatedOvertimeCost:roundMoney(rows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:rows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length};
   }).sort((a,b)=>b.projectedOvertimeHours-a.projectedOvertimeHours||a.location.localeCompare(b.location));
   const projectedOvertimeHours=roundHours(employees.reduce((sum,employee)=>sum+employee.overtimeHours,0));
-  return {start,end,generatedAt:new Date().toISOString(),thresholdHours,scheduledHours:roundHours(employees.reduce((sum,employee)=>sum+employee.scheduledHours,0)),riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours:0,additionalProjectedOvertimeHours:projectedOvertimeHours,projectedOvertimeHours,estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:employees.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length,unmatchedToastEmployees:employees.length,employees,locations};
+  return {start,end,generatedAt:new Date().toISOString(),thresholdHours,scheduledHours:roundHours(employees.reduce((sum,employee)=>sum+employee.scheduledHours,0)),riskEmployees:employees.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours:0,additionalProjectedOvertimeHours:projectedOvertimeHours,projectedOvertimeHours,salaryOver40Hours:0,unclassifiedToastOvertimeHours:0,unclassifiedToastEmployees:0,estimatedOvertimeCost:roundMoney(employees.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:employees.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length,unmatchedToastEmployees:employees.length,employees,locations};
 }
 
 export type ToastEmployeeLaborForSchedule={employeeGuid:string;externalEmployeeId:string;employeeName:string;location:string;regularHours:number;overtimeHours:number;totalHours:number;hourlyWage:number|null;wageSource:'time_entry'|'employee_override'|'unavailable'};
@@ -328,6 +334,7 @@ function aggregateToastLabor(rows:ToastEmployeeLaborForSchedule[],thresholdHours
 
 export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,toastRows:ToastEmployeeLaborForSchedule[]):SevenShiftsScheduleRisk{
   const byExternal=new Map<string,ToastEmployeeLaborForSchedule[]>(),byName=new Map<string,ToastEmployeeLaborForSchedule[]>();
+  const classifiedToastRows=new Set<ToastEmployeeLaborForSchedule>();
   for(const row of toastRows){
     const external=normalizedIdentity(row.externalEmployeeId||'');if(external)byExternal.set(external,[...(byExternal.get(external)||[]),row]);
     const name=normalizedIdentity(row.employeeName);if(name)byName.set(name,[...(byName.get(name)||[]),row]);
@@ -345,6 +352,7 @@ export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,toast
       if(candidates.length&&identities.size===1)toastMatchStatus='matched_name';else if(candidates.length>1){toastMatchStatus='ambiguous';candidates=[];}else if(candidates.length===1)toastMatchStatus='matched_name';
     }
     if(!candidates.length){const projectedHours=roundHours(employee.remainingScheduledHours),overtimeHours=employmentType==='salary'?0:roundHours(Math.max(0,projectedHours-risk.thresholdHours));return {...employee,role,primaryLocation,employmentType,workedHours:0,projectedHours,overtimeHours,actualOvertimeHours:0,hourlyWage:configuredWage,estimatedOvertimeCost:configuredWage===null?null:roundMoney(overtimeHours*configuredWage*1.5),wageSource:configuredWage===null?'unavailable' as const:'manual_override' as const,toastMatchStatus,status:employmentType==='salary'?'Salary' as const:projectedHours>risk.thresholdHours?'Overtime' as const:projectedHours>=38?'Risk' as const:'Safe' as const};}
+    candidates.forEach(row=>classifiedToastRows.add(row));
     const actual=aggregateToastLabor(candidates,risk.thresholdHours),projectedHours=actual.workedHours+employee.remainingScheduledHours,overtimeHours=Math.max(0,projectedHours-risk.thresholdHours);
     if(employmentType==='salary')return {...employee,role,primaryLocation,employmentType,workedHours:actual.workedHours,projectedHours:roundHours(projectedHours),overtimeHours:0,actualOvertimeHours:0,hourlyWage:null,estimatedOvertimeCost:null,wageSource:'unavailable' as const,toastMatchStatus,status:'Salary' as const};
     const hourlyWage=configuredWage??actual.hourlyWage;
@@ -352,21 +360,20 @@ export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,toast
   }).sort((a,b)=>b.overtimeHours-a.overtimeHours||b.projectedHours-a.projectedHours||a.employeeName.localeCompare(b.employeeName));
   const locations=risk.locations.map(location=>{
     const rows=employees.filter(employee=>employee.primaryLocation===location.location);
-    const toastLocationRows=toastRows.filter(row=>normalizedIdentity(row.location)===normalizedIdentity(location.location));
-    const actualOvertimeHours=roundHours(toastLocationRows.reduce((sum,row)=>sum+Math.max(0,row.overtimeHours),0));
-    const employeeProjectedOvertime=roundHours(rows.reduce((sum,employee)=>sum+employee.overtimeHours,0));
-    // The forecast must include every OT hour already posted in Toast, even
-    // when that employee cannot be linked to a published 7shifts schedule.
+    const hourlyRows=rows.filter(employee=>employee.employmentType==='hourly');
+    const salaryRows=rows.filter(employee=>employee.employmentType==='salary');
+    const unclassifiedRows=toastRows.filter(row=>!classifiedToastRows.has(row)&&normalizedIdentity(row.location)===normalizedIdentity(location.location)&&row.overtimeHours>0);
+    const actualOvertimeHours=roundHours(hourlyRows.reduce((sum,employee)=>sum+employee.actualOvertimeHours,0));
+    const employeeProjectedOvertime=roundHours(hourlyRows.reduce((sum,employee)=>sum+employee.overtimeHours,0));
     const projectedOvertimeHours=roundHours(Math.max(actualOvertimeHours,employeeProjectedOvertime));
     const additionalProjectedOvertimeHours=roundHours(Math.max(0,projectedOvertimeHours-actualOvertimeHours));
-    const employeeProjectedCost=roundMoney(rows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0));
-    const actualKnownCost=roundMoney(toastLocationRows.reduce((sum,row)=>sum+(row.hourlyWage===null?0:Math.max(0,row.overtimeHours)*row.hourlyWage*1.5),0));
-    const actualMissingWages=toastLocationRows.filter(row=>row.overtimeHours>0&&row.hourlyWage===null).length;
-    return {...location,monitoredEmployees:rows.length,riskEmployees:rows.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours,additionalProjectedOvertimeHours,projectedOvertimeHours,estimatedOvertimeCost:Math.max(employeeProjectedCost,actualKnownCost),employeesMissingHourlyWage:Math.max(actualMissingWages,rows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length)};
+    const salaryOver40Hours=roundHours(salaryRows.reduce((sum,employee)=>sum+Math.max(0,employee.workedHours-risk.thresholdHours),0));
+    const unclassifiedToastOvertimeHours=roundHours(unclassifiedRows.reduce((sum,row)=>sum+Math.max(0,row.overtimeHours),0));
+    return {...location,monitoredEmployees:rows.length,riskEmployees:hourlyRows.filter(employee=>employee.overtimeHours>0).length,actualOvertimeHours,additionalProjectedOvertimeHours,projectedOvertimeHours,salaryOver40Hours,unclassifiedToastOvertimeHours,unclassifiedToastEmployees:unclassifiedRows.length,estimatedOvertimeCost:roundMoney(hourlyRows.reduce((sum,employee)=>sum+(employee.estimatedOvertimeCost??0),0)),employeesMissingHourlyWage:hourlyRows.filter(employee=>employee.overtimeHours>0&&employee.estimatedOvertimeCost===null).length};
   }).sort((a,b)=>b.projectedOvertimeHours-a.projectedOvertimeHours||a.location.localeCompare(b.location));
   const actualOvertimeHours=roundHours(locations.reduce((sum,location)=>sum+location.actualOvertimeHours,0));
   const projectedOvertimeHours=roundHours(locations.reduce((sum,location)=>sum+location.projectedOvertimeHours,0));
-  return {...risk,employees,locations,riskEmployees:employees.filter(employee=>employee.employmentType==='hourly'&&employee.overtimeHours>0).length,actualOvertimeHours,additionalProjectedOvertimeHours:roundHours(Math.max(0,projectedOvertimeHours-actualOvertimeHours)),projectedOvertimeHours,estimatedOvertimeCost:roundMoney(locations.reduce((sum,location)=>sum+location.estimatedOvertimeCost,0)),employeesMissingHourlyWage:locations.reduce((sum,location)=>sum+location.employeesMissingHourlyWage,0),unmatchedToastEmployees:employees.filter(employee=>employee.employmentType==='hourly'&&!employee.toastMatchStatus.startsWith('matched')).length};
+  return {...risk,employees,locations,riskEmployees:employees.filter(employee=>employee.employmentType==='hourly'&&employee.overtimeHours>0).length,actualOvertimeHours,additionalProjectedOvertimeHours:roundHours(Math.max(0,projectedOvertimeHours-actualOvertimeHours)),projectedOvertimeHours,salaryOver40Hours:roundHours(locations.reduce((sum,location)=>sum+location.salaryOver40Hours,0)),unclassifiedToastOvertimeHours:roundHours(locations.reduce((sum,location)=>sum+location.unclassifiedToastOvertimeHours,0)),unclassifiedToastEmployees:locations.reduce((sum,location)=>sum+location.unclassifiedToastEmployees,0),estimatedOvertimeCost:roundMoney(locations.reduce((sum,location)=>sum+location.estimatedOvertimeCost,0)),employeesMissingHourlyWage:locations.reduce((sum,location)=>sum+location.employeesMissingHourlyWage,0),unmatchedToastEmployees:employees.filter(employee=>employee.employmentType==='hourly'&&!employee.toastMatchStatus.startsWith('matched')).length};
 }
 
 function numberField(o:Json,names:string[]){for(const name of names){const v=Number(o[name]);if(Number.isFinite(v))return v;}return undefined;}
