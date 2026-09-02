@@ -10,10 +10,10 @@ export type ScheduleEmployee={
   overtimeHours:number;actualOvertimeHours:number;hourlyWage:number|null;estimatedOvertimeCost:number|null;wageSource:'shift_or_punch'|'user_hourly'|'manual_override'|'unavailable';toastMatchStatus:'matched_external_id'|'matched_name'|'ambiguous'|'unmatched';employmentType:'hourly'|'salary';nextShift?:ScheduleShift;
   status:'Overtime'|'Risk'|'Safe'|'Salary';
 };
-export type ScheduleLocation={location:string;monitoredEmployees:number;riskEmployees:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number};
+export type ScheduleLocation={location:string;monitoredEmployees:number;riskEmployees:number;actualOvertimeHours:number;additionalProjectedOvertimeHours:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number};
 export type ScheduleRisk={
   start:string;end:string;generatedAt:string;thresholdHours:number;scheduledHours:number;riskEmployees:number;
-  projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number;unmatchedToastEmployees:number;employees:ScheduleEmployee[];locations:ScheduleLocation[];
+  actualOvertimeHours:number;additionalProjectedOvertimeHours:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number;unmatchedToastEmployees:number;employees:ScheduleEmployee[];locations:ScheduleLocation[];
 };
 
 type Props={
@@ -53,7 +53,9 @@ export default function ScheduleOvertimeMonitor({data,error,loading,onEscalate}:
     <section className="schedule-kpis">
       <article><span className="schedule-kpi-icon blue">◷</span><div><label>HORAS PROGRAMADAS</label><strong>{data.scheduledHours.toFixed(1)}</strong><p>7shifts · semana completa publicada</p></div></article>
       <article><span className="schedule-kpi-icon red">!</span><div><label>EMPLEADOS EN RIESGO</label><strong>{data.riskEmployees}</strong><p>Proyectados sobre 40 horas</p></div></article>
-      <article><span className="schedule-kpi-icon amber">↗</span><div><label>OVERTIME PROYECTADO</label><strong>{data.projectedOvertimeHours.toFixed(1)} h</strong><p>Si no se ajustan los turnos</p></div></article>
+      <article><span className="schedule-kpi-icon red">✓</span><div><label>OVERTIME TRABAJADO</label><strong>{data.actualOvertimeHours.toFixed(1)} h</strong><p>Toast · ya ocurrió</p></div></article>
+      <article><span className="schedule-kpi-icon amber">↗</span><div><label>OT ADICIONAL PROGRAMADO</label><strong>{data.additionalProjectedOvertimeHours.toFixed(1)} h</strong><p>Exposición restante en 7shifts</p></div></article>
+      <article><span className="schedule-kpi-icon amber">Σ</span><div><label>OT TOTAL PROYECTADO</label><strong>{data.projectedOvertimeHours.toFixed(1)} h</strong><p>Trabajado + exposición adicional</p></div></article>
       <article><span className="schedule-kpi-icon green">$</span><div><label>COSTO OT ESTIMADO</label><strong>{money(data.estimatedOvertimeCost)}</strong><p>Toast Time Entries a 1.5×{data.employeesMissingHourlyWage?` · ${data.employeesMissingHourlyWage} sin tarifa`:''}</p></div></article>
     </section>
 
@@ -76,7 +78,7 @@ export default function ScheduleOvertimeMonitor({data,error,loading,onEscalate}:
         </tbody></table></div>
       </section>
 
-      <aside className="schedule-panel schedule-location-panel"><div className="schedule-panel-head"><div><h3>Riesgo por locación</h3><p>El overtime se asigna al próximo turno del empleado.</p></div></div><div className="schedule-location-list">{locationRows.map(row=><div key={row.location}><div><strong>{row.location}</strong><small>{row.riskEmployees?`${row.riskEmployees} en riesgo · `:''}{row.monitoredEmployees} monitoreados</small></div><div className={row.projectedOvertimeHours>0?'danger':'safe'}><strong>{row.projectedOvertimeHours.toFixed(1)} h</strong><small>{row.projectedOvertimeHours>0?`${money(row.estimatedOvertimeCost)}${row.employeesMissingHourlyWage?` · ${row.employeesMissingHourlyWage} sin tarifa`:''}`:'Sin costo OT'}</small></div></div>)}</div>
+      <aside className="schedule-panel schedule-location-panel"><div className="schedule-panel-head"><div><h3>Riesgo por locación</h3><p>El total proyectado nunca excluye overtime que ya aparece trabajado en Toast.</p></div></div><div className="schedule-location-list">{locationRows.map(row=><div key={row.location}><div><strong>{row.location}</strong><small>{row.riskEmployees?`${row.riskEmployees} en riesgo · `:''}{row.monitoredEmployees} monitoreados</small></div><div className={row.projectedOvertimeHours>0?'danger':'safe'}><strong>{row.projectedOvertimeHours.toFixed(1)} h total</strong><small>{row.projectedOvertimeHours>0?`${row.actualOvertimeHours.toFixed(1)} trabajadas · ${row.additionalProjectedOvertimeHours.toFixed(1)} adicionales · ${money(row.estimatedOvertimeCost)}${row.employeesMissingHourlyWage?` · ${row.employeesMissingHourlyWage} sin tarifa`:''}`:'Sin costo OT'}</small></div></div>)}</div>
         <div className="schedule-recommendation"><strong>💡 Acción recomendada</strong>{topRisk.length?<p>Revisa {topRisk.map(row=>row.employeeName).join(' y ')}. Sus próximos turnos concentran {topRisk.reduce((sum,row)=>sum+row.overtimeHours,0).toFixed(1)} h de overtime. Costo conocido: {money(topRisk.reduce((sum,row)=>sum+(row.estimatedOvertimeCost??0),0))}{topRisk.some(row=>row.estimatedOvertimeCost===null)?' más empleados sin tarifa horaria válida.':'.'}</p>:<p>No hay empleados proyectados sobre 40 horas con los filtros actuales.</p>}</div>
       </aside>
     </div>
