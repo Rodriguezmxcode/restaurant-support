@@ -14,13 +14,14 @@ type R365Status = {
   expectedLocations: string[];
   mappedLocationCount: number;
   probes: { locations: boolean; glAccounts: boolean; transactions: boolean };
+  probeErrors?: Partial<Record<'locations'|'glAccounts'|'transactions',string>>;
   pnlReady: boolean;
   error?: string;
 };
 
 const noticeStyle = { margin:'14px 0', padding:'12px 14px', borderRadius:10 } as const;
 
-export default function Restaurant365IntegrationPanel() {
+export default function Restaurant365IntegrationPanel({canManage}:{canManage:boolean}) {
   const [status,setStatus]=useState<R365Status>();
   const [domain,setDomain]=useState('');
   const [username,setUsername]=useState('');
@@ -35,7 +36,7 @@ export default function Restaurant365IntegrationPanel() {
     if(!response.ok)throw new Error(body.error||'No se pudo consultar Restaurant365.');
     setStatus(body);
     if(body.domain)setDomain(body.domain);
-    if(body.error)setError(body.error);
+    setError(body.error||'');
     return body;
   };
 
@@ -54,8 +55,8 @@ export default function Restaurant365IntegrationPanel() {
         setStatus(undefined);setDomain('');setUsername('');setPassword('');
         setNotice('La conexión guardada de Restaurant365 fue eliminada.');await load();return;
       }
-      setStatus(body);setPassword('');
-      setNotice(action==='save'?'Restaurant365 quedó conectado en modo de solo lectura.':'Conexión de Restaurant365 validada correctamente.');
+      setStatus(body);setPassword('');setError(body.error||'');
+      setNotice(body.error?'La cuenta fue autenticada; revisa el diagnóstico de recursos.':action==='save'?'Restaurant365 quedó conectado en modo de solo lectura.':'Conexión de Restaurant365 validada correctamente.');
     }catch(reason){setError(reason instanceof Error?reason.message:'Restaurant365 no pudo completar la operación.');}
     finally{setSaving(false);}
   };
@@ -92,7 +93,7 @@ export default function Restaurant365IntegrationPanel() {
         <p style={{margin:0,color:'#64748b',fontSize:12}}>Usuario: <strong>{status.usernameHint}</strong> · Dominio: <strong>{status.domain}</strong>{status.latestTransactionAt?` · Última transacción detectada: ${new Date(status.latestTransactionAt).toLocaleString()}`:''}</p>
       </>}
 
-      {!status?.connected&&<div style={{padding:16,border:'1px solid #dbe5ef',borderRadius:12}}>
+      {!status?.connected&&canManage&&<div style={{padding:16,border:'1px solid #dbe5ef',borderRadius:12}}>
         <strong>Conecta una identidad dedicada de Restaurant365</strong>
         <p style={{margin:'6px 0 12px',color:'#64748b',lineHeight:1.45}}>En R365 crea un usuario exclusivo para OpsVista con acceso OData y las seis locaciones. Usa el rol mínimo autorizado por R365 (Accounting Clerk) y no compartas esta cuenta con managers o usuarios que solo suben recibos.</p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:8}}>
@@ -103,13 +104,26 @@ export default function Restaurant365IntegrationPanel() {
         </div>
       </div>}
 
+      {!status?.connected&&!canManage&&<div style={{padding:16,border:'1px solid #dbe5ef',borderRadius:12,background:'#f8fafc'}}><strong>Conexión pendiente</strong><p style={{margin:'6px 0 0',color:'#64748b'}}>Solo Founder puede guardar o reemplazar las credenciales de Restaurant365.</p></div>}
+
+      {status?.configured&&<div style={{padding:14,border:'1px solid #dbe5ef',borderRadius:10}}>
+        <strong>Diagnóstico OData</strong>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8,marginTop:10}}>
+          {[
+            ['Locaciones','locations',status.probes.locations],
+            ['Plan de cuentas','glAccounts',status.probes.glAccounts],
+            ['Transacciones','transactions',status.probes.transactions],
+          ].map(([label,key,ok])=><div key={String(key)} style={{padding:'10px 12px',border:`1px solid ${ok?'#bbf7d0':'#fecaca'}`,borderRadius:8,background:ok?'#f0fdf4':'#fff1f2'}}><strong style={{color:ok?'#166534':'#991b1b'}}>{ok?'✓':'!'} {label}</strong>{!ok&&status.probeErrors?.[key as 'locations'|'glAccounts'|'transactions']&&<small style={{display:'block',marginTop:4,color:'#991b1b'}}>{status.probeErrors[key as 'locations'|'glAccounts'|'transactions']}</small>}</div>)}
+        </div>
+      </div>}
+
       <div style={{padding:14,border:'1px solid #fde68a',borderRadius:10,background:'#fffbeb',color:'#854d0e',fontSize:12,lineHeight:1.5}}>
         <strong>Control contable:</strong> Jonathan seguirá procesando facturas en Restaurant365. OpsVista leerá únicamente movimientos aprobados y su detalle de GL. El archivo del recibo y el estado exacto de pago se habilitarán solo si la cuenta de R365 expone esos campos en un reporte o API verificable.
       </div>
 
       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        {status?.connected&&<button onClick={()=>void submit('test')} disabled={saving}>{saving?'Probando…':'Probar conexión'}</button>}
-        {status?.configured&&status.credentialSource==='encrypted-store'&&<button onClick={()=>void submit('disconnect')} disabled={saving} style={{color:'#991b1b'}}>Desconectar</button>}
+        {status?.connected&&canManage&&<button onClick={()=>void submit('test')} disabled={saving}>{saving?'Probando…':'Probar conexión'}</button>}
+        {status?.configured&&status.credentialSource==='encrypted-store'&&canManage&&<button onClick={()=>void submit('disconnect')} disabled={saving} style={{color:'#991b1b'}}>Desconectar</button>}
         <a href="https://docs.restaurant365.com/docs/restaurant365-odata-connector" target="_blank" rel="noreferrer" style={{alignSelf:'center'}}>Guía oficial de R365 OData</a>
       </div>
     </div>

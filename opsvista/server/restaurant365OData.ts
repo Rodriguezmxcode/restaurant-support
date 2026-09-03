@@ -27,6 +27,7 @@ export type Restaurant365Status = {
   expectedLocations: string[];
   mappedLocationCount: number;
   probes: { locations: boolean; glAccounts: boolean; transactions: boolean };
+  probeErrors?: Partial<Record<'locations' | 'glAccounts' | 'transactions', string>>;
   pnlReady: boolean;
   error?: string;
 };
@@ -94,9 +95,14 @@ async function odata(credentials: Restaurant365Credentials, view: 'Location' | '
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new Error('Restaurant365 rechazó el usuario, la contraseña o el permiso OData.');
     if (response.status === 429) throw new Error('Restaurant365 limitó temporalmente las consultas. Intenta de nuevo en unos minutos.');
-    throw new Error(`Restaurant365 OData respondió con estado ${response.status}.`);
+    throw new Error(`${view}: Restaurant365 OData respondió con estado ${response.status}.`);
   }
   return responseRows(await response.json());
+}
+
+async function probe(credentials: Restaurant365Credentials, view: 'Location' | 'GlAccount' | 'Transaction', params: Record<string, string>) {
+  try { return { ok: true as const, rows: await odata(credentials, view, params) }; }
+  catch (error) { return { ok: false as const, rows: [] as ODataRow[], error: error instanceof Error ? error.message : `${view}: validación no disponible.` }; }
 }
 
 export async function getRestaurant365Status(organizationId: string): Promise<Restaurant365Status> {
@@ -110,30 +116,36 @@ export async function getRestaurant365Status(organizationId: string): Promise<Re
   };
   if (!resolved) return empty;
 
-  try {
-    const [locations, glAccounts, transactions] = await Promise.all([
-      odata(resolved.credentials, 'Location', { '$select': 'locationId,locationNumber,name', '$orderby': 'name', '$top': '250' }),
-      odata(resolved.credentials, 'GlAccount', { '$select': 'glAccountId,accountNumber,name,accountType,operationalCategory', '$top': '1' }),
-      odata(resolved.credentials, 'Transaction', { '$select': 'transactionId,date,type,modifiedOn', '$orderby': 'modifiedOn desc', '$top': '1' }),
-    ]);
-    const mapped = locations.map(row => {
-      const name = stringValue(row, ['name', 'locationName']);
-      return {
-        id: stringValue(row, ['locationId', 'id']),
-        number: stringValue(row, ['locationNumber', 'number']) || undefined,
-        name,
-        opsVistaLocation: mappedLocation(name),
-      };
-    }).filter(location => location.id || location.name);
-    const mappedLocationCount = new Set(mapped.map(location => location.opsVistaLocation).filter(Boolean)).size;
-    const latestTransactionAt = transactions[0] ? stringValue(transactions[0], ['modifiedOn', 'date']) || undefined : undefined;
+  const [locationProbe, glProbe, transactionProbe] = await Promise.all([
+    probe(resolved.credentials, 'Location', { '$select': 'locationId,locationNumber,name', '$orderby': 'name', '$top': '250' }),
+    probe(resolved.credentials, 'GlAccount', { '$select': 'glAccountId,glAccountNumber,name,glType,operationalCategory', '$top': '1' }),
+    probe(resolved.credentials, 'Transaction', { '$select': 'transactionId,date,type,modifiedOn', '$orderby': 'modifiedOn desc', '$top': '1' }),
+  ]);
+  const failures = {
+    locations: locationProbe.ok ? undefined : locationProbe.error,
+    glAccounts: glProbe.ok ? undefined : glProbe.error,
+    transactions: transactionProbe.ok ? undefined : transactionProbe.error,
+  };
+  const authenticationError = [locationProbe,glProbe,transactionProbe].find(result=>!result.ok&&/rechazó el usuario/i.test(result.error||''));
+  const connected = locationProbe.ok || glProbe.ok || transactionProbe.ok;
+  const mapped = locationProbe.rows.map(row => {
+    const name = stringValue(row, ['name', 'locationName']);
     return {
-      ...empty, connected: true, checkedAt: new Date().toISOString(), locations: mapped, mappedLocationCount,
-      probes: { locations: true, glAccounts: glAccounts.length > 0, transactions: transactions.length > 0 },
-      latestTransactionAt,
-      pnlReady: mappedLocationCount === opsVistaLocations.length && glAccounts.length > 0 && transactions.length > 0,
+      id: stringValue(row, ['locationId', 'id']),
+      number: stringValue(row, ['locationNumber', 'number']) || undefined,
+      name,
+      opsVistaLocation: mappedLocation(name),
     };
-  } catch (error) {
-    return { ...empty, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : 'No se pudo validar Restaurant365.' };
-  }
+  }).filter(location => location.id || location.name);
+  const mappedLocationCount = new Set(mapped.map(location => location.opsVistaLocation).filter(Boolean)).size;
+  const latestTransactionAt = transactionProbe.rows[0] ? stringValue(transactionProbe.rows[0], ['modifiedOn', 'date']) || undefined : undefined;
+  const failedNames = Object.entries(failures).filter(([,message])=>message).map(([name])=>name==='glAccounts'?'plan de cuentas':name==='transactions'?'transacciones':'locaciones');
+  return {
+    ...empty, connected, checkedAt: new Date().toISOString(), locations: mapped, mappedLocationCount,
+    probes: { locations: locationProbe.ok, glAccounts: glProbe.ok, transactions: transactionProbe.ok },
+    probeErrors: failures,
+    latestTransactionAt,
+    pnlReady: mappedLocationCount === opsVistaLocations.length && glProbe.ok && transactionProbe.ok,
+    error: authenticationError?.error || (failedNames.length ? `La autenticación funcionó, pero falta validar: ${failedNames.join(', ')}.` : undefined),
+  };
 }

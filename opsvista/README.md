@@ -20,7 +20,7 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Persistent OpsVista Assistant chat available from every authorized module
 - Bilingual Q&A routing for managers with role- and location-aware module links
 - Grounded operational answers using the user's current Action Center scope
-- Restaurant365 OData connector setup, encrypted credential storage and six-location validation
+- Dedicated Restaurant365 module with connection health, encrypted credential storage, six-location validation and source-gated P&L/AP areas
 
 ## Existing product areas represented in navigation
 
@@ -36,6 +36,7 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Prioridades
 - Pagos
 - Transferencias
+- Restaurant365
 - Configuración
 
 ## Important data status

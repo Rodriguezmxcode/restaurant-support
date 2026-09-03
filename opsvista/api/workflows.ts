@@ -257,10 +257,13 @@ async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNul
 }
 
 async function restaurant365Integration(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
- const permission=authorize(user,'integrations:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
  const organizationId=userOrganization(user);
- if(!req.method||req.method==='GET')return res.status(200).json(await getRestaurant365Status(organizationId));
+ if(!req.method||req.method==='GET'){
+  const permission=authorize(user,'restaurant365:read');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+  return res.status(200).json(await getRestaurant365Status(organizationId));
+ }
  if(req.method==='POST'){
+  const permission=authorize(user,'integrations:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
   const action=text(req.body?.action);
   if(action==='save'){
    const domain=text(req.body?.domain),username=text(req.body?.username),password=typeof req.body?.password==='string'?req.body.password:'';
