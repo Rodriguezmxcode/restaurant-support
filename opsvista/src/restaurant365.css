@@ -5,7 +5,7 @@
 
 .r365-ap-toolbar {
   display: grid;
-  grid-template-columns: 175px 145px 190px minmax(240px, 1fr) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
   padding: 16px 18px;
@@ -97,6 +97,17 @@
   font-weight: 700;
 }
 
+.r365-ap-actions > strong {
+  margin-left: auto;
+  color: #173a64;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.r365-ap-actions > strong + span {
+  margin-left: 0;
+}
+
 .r365-check {
   width: 42px;
   text-align: center !important;
@@ -113,7 +124,32 @@
 }
 
 .r365-ap-table {
-  min-width: 1220px !important;
+  min-width: 1420px !important;
+}
+
+.r365-sort-header {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 900;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.r365-sort-header span {
+  color: #8aa0b9;
+  font-size: 12px;
+}
+
+.r365-sort-header.active,
+.r365-sort-header.active span {
+  color: #2368cf;
 }
 
 .r365-age {
@@ -125,6 +161,27 @@
   font-size: 11px;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.r365-amount-warning {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #f0c66f;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #fff8e8;
+  color: #86520a;
+}
+
+.r365-amount-warning strong {
+  font-size: 13px;
+}
+
+.r365-amount-warning span {
+  font-size: 12px;
+  text-align: right;
 }
 
 @media(max-width:1200px) {
@@ -153,5 +210,18 @@
 
   .r365-ap-actions span {
     margin-left: 0;
+  }
+
+  .r365-ap-actions > strong {
+    margin-left: 0;
+  }
+
+  .r365-amount-warning {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .r365-amount-warning span {
+    text-align: left;
   }
 }
