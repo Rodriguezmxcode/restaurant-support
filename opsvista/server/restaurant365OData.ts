@@ -396,20 +396,20 @@ function odataIdentifier(value:string) {
 async function companiesForTransactions(credentials:Restaurant365Credentials,rows:ODataRow[]) {
   const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['companyId']))).filter(Boolean)));
   if(!ids.length)return new Map<string,string>();
-  const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'Company',{
+  const pages=await parallelMap(chunks(ids,20),1,batch=>odataAll(credentials,'Company',{
     '$select':'companyId,name',
     '$filter':batch.map(id=>`companyId eq ${id}`).join(' or '),
-  },500,100));
+  },200,50));
   return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
 }
 
 async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:ODataRow[]) {
   const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean)));
   if(!ids.length)return [] as Restaurant365AccountRow[];
-  const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'GlAccount',{
+  const pages=await parallelMap(chunks(ids,20),1,batch=>odataAll(credentials,'GlAccount',{
     '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory',
     '$filter':batch.map(id=>/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`).join(' or '),
-  },500,100));
+  },200,50));
   return uniqueRows(pages.flat(),['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
 }
 
@@ -439,17 +439,17 @@ async function monthTransactionRows(credentials: Restaurant365Credentials, month
   const rows = await odataAll(credentials,'Transaction',{
     '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
-  },10_000,100);
+  },10_000,50);
   return {period,...uniqueRows(rows,['transactionId','id'])};
 }
 
 async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[]) {
   const ids=transactionIds.map(odataIdentifier).filter(Boolean);
-  const batches = chunks(ids,40);
-  const pages = await parallelMap(batches,6,batch=>odataAll(credentials,'TransactionDetail',{
+  const batches = chunks(ids,20);
+  const pages = await parallelMap(batches,1,batch=>odataAll(credentials,'TransactionDetail',{
     '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,comment',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
-  },5_000,250));
+  },2_000,100));
   return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
 }
 
@@ -531,7 +531,7 @@ export async function getRestaurant365Ap(organizationId:string,month:string):Pro
   const credentials = await requiredCredentials(organizationId);
   const locations=await locationCatalog(credentials);
   const mappedLocations=locations.filter(location=>location.opsVistaLocation&&location.id);
-  const locationResults=await parallelMap(mappedLocations,3,location=>monthTransactionRows(credentials,month,location.id));
+  const locationResults=await parallelMap(mappedLocations,1,location=>monthTransactionRows(credentials,month,location.id));
   const combined=uniqueRows(locationResults.flatMap(result=>result.rows),['transactionId','id']);
   const transactionResult={period:monthPeriod(month),...combined};
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
@@ -549,7 +549,7 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
     return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),vendors:rows.map(row=>({id:stringValue(row,['companyId','id']),number:stringValue(row,['companyNumber','number'])||undefined,name:stringValue(row,['name'])||'Vendor sin nombre',comment:stringValue(row,['comment'])||undefined})).filter(vendor=>vendor.id&&vendor.name)};
   }
   const locations = await locationCatalog(credentials);
-  const accountPages = await parallelMap(locations.filter(location=>location.id),3,location=>glAccountCatalog(credentials,location.id));
+  const accountPages = await parallelMap(locations.filter(location=>location.id),1,location=>glAccountCatalog(credentials,location.id));
   const accounts = uniqueRows(accountPages.flat().map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
     .sort((left,right)=>(left.number||'').localeCompare(right.number||'')||left.name.localeCompare(right.name));
   return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts};

@@ -4,13 +4,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "functions": {
-    "api/restaurant365.ts": { "maxDuration": 120 }
-  },
   "rewrites": [
     { "source": "/api/integrations/google-business/callback", "destination": "/api/workflows?resource=google_business_callback" },
     { "source": "/api/integrations/google-business", "destination": "/api/workflows?resource=google_business_integration" },
-    { "source": "/api/integrations/restaurant365", "destination": "/api/restaurant365" },
+    { "source": "/api/integrations/restaurant365", "destination": "/api/workflows?resource=restaurant365_integration" },
     { "source": "/api/payments", "destination": "/api/workflows?resource=payments" },
     { "source": "/api/tasks/weekly", "destination": "/api/workflows?resource=tasks" },
     { "source": "/api/google-business/reviews", "destination": "/api/workflows?resource=google_reviews" },
