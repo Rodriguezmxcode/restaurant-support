@@ -200,7 +200,7 @@ function datePeriod(start: string, end: string):Restaurant365Period {
   if (!validIsoDate(start)||!validIsoDate(end)||start>end) throw new Error('Selecciona un rango contable válido.');
   const days=Math.floor((Date.parse(`${end}T00:00:00Z`)-Date.parse(`${start}T00:00:00Z`))/86_400_000)+1;
   if (days>31) throw new Error('Restaurant365 permite consultar hasta 31 días por rango.');
-  if (start>new Date().toISOString().slice(0,10)) throw new Error('Restaurant365 no puede consultar fechas futuras.');
+  if (end>new Date().toISOString().slice(0,10)) throw new Error('Restaurant365 no puede consultar fechas futuras.');
   return {month:start.slice(0,7),start,endExclusive:addIsoDays(end,1)};
 }
 
