@@ -20,6 +20,7 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Persistent OpsVista Assistant chat available from every authorized module
 - Bilingual Q&A routing for managers with role- and location-aware module links
 - Grounded operational answers using the user's current Action Center scope
+- Restaurant365 OData connector setup, encrypted credential storage and six-location validation
 
 ## Existing product areas represented in navigation
 
@@ -46,7 +47,7 @@ The Action Center metrics and alerts in this branch are representative demo valu
 1. Toast — sales, orders, discounts, voids, employees, labor
 2. 7shifts — scheduling, tasks, logbook
 3. Ramp — transactions, cardholders, departments/locations, memos, receipts
-4. Restaurant365 — invoices, accounts payable, vendors, payment status
+4. Restaurant365 — read-only accounting transactions, AP invoices, GL detail, vendors and locations. Receipt attachments and exact paid status require a separately verified R365 source.
 5. Local intelligence — weather, traffic and event demand signals
 
 ## Next implementation sequence

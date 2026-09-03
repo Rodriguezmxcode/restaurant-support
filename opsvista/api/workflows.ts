@@ -10,7 +10,8 @@ import { createProject, getProject, listProjectAudit, listProjects, updateProjec
 import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../server/googleBusinessProfile.js';
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
-import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
+import { disconnectGoogleBusiness, disconnectRestaurant365, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient, saveRestaurant365Credentials } from '../server/integrationStore.js';
+import { getRestaurant365Status } from '../server/restaurant365OData.js';
 import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
 import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
 
@@ -255,6 +256,27 @@ async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNul
  }catch(error){redirect('error',error instanceof Error?error.message:'Google authorization failed');return;}
 }
 
+async function restaurant365Integration(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const permission=authorize(user,'integrations:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+ const organizationId=userOrganization(user);
+ if(!req.method||req.method==='GET')return res.status(200).json(await getRestaurant365Status(organizationId));
+ if(req.method==='POST'){
+  const action=text(req.body?.action);
+  if(action==='save'){
+   const domain=text(req.body?.domain),username=text(req.body?.username),password=typeof req.body?.password==='string'?req.body.password:'';
+   if(!/^[a-zA-Z0-9._-]{2,100}$/.test(domain))return res.status(400).json({error:'Escribe el dominio de Restaurant365 sin https://, barras ni espacios.'});
+   if(!username||username.length>160||password.length<8)return res.status(400).json({error:'Dominio, usuario y contraseña válida son obligatorios.'});
+   await saveRestaurant365Credentials(organizationId,domain,username,password);
+   const status=await getRestaurant365Status(organizationId);
+   return res.status(status.connected?200:422).json(status.connected?status:{...status,error:status.error||'Las credenciales se guardaron, pero Restaurant365 no aceptó la conexión.'});
+  }
+  if(action==='test')return res.status(200).json(await getRestaurant365Status(organizationId));
+  if(action==='disconnect'){await disconnectRestaurant365(organizationId);return res.status(200).json({disconnected:true});}
+  return res.status(400).json({error:'Unknown integration action'});
+ }
+ res.setHeader?.('Allow','GET, POST');return res.status(405).json({error:'Method not allowed'});
+}
+
 async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const requested=q(req,'location');
@@ -273,5 +295,5 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='restaurant365_integration')return await restaurant365Integration(req,res,user);if(resource==='local_intelligence')return await localIntelligence(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource==='restaurant365_integration'?'restaurant365-odata':resource==='local_intelligence'?'local-intelligence':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):resource==='local_intelligence'?502:503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }

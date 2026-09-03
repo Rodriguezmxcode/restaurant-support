@@ -9,6 +9,13 @@ export type GoogleBusinessCredentials = {
   connectedAt?: string;
 };
 
+export type Restaurant365Credentials = {
+  domain: string;
+  username: string;
+  password: string;
+  savedAt?: string;
+};
+
 let client: ReturnType<typeof postgres> | undefined;
 let initialized = false;
 
@@ -114,5 +121,49 @@ export async function disconnectGoogleBusiness(organizationId: string) {
     update opsvista_integration_credentials
     set refresh_token_encrypted=null,connected_email=null,connected_at=null,updated_at=now()
     where organization_id=${organizationId} and provider='google-business-profile'
+  `;
+}
+
+export async function getRestaurant365Credentials(organizationId: string): Promise<Restaurant365Credentials | null> {
+  if (!databaseUrl()) return null;
+  await ensureSchema();
+  const rows = await sql()`
+    select client_id,client_secret_encrypted,connected_email,updated_at
+    from opsvista_integration_credentials
+    where organization_id=${organizationId} and provider='restaurant365-odata'
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    domain: String(row.client_id),
+    username: String(row.connected_email || ''),
+    password: open(String(row.client_secret_encrypted)) || '',
+    savedAt: row.updated_at ? new Date(row.updated_at as string | number | Date).toISOString() : undefined,
+  };
+}
+
+export async function saveRestaurant365Credentials(organizationId: string, domain: string, username: string, password: string) {
+  await ensureSchema();
+  await sql()`
+    insert into opsvista_integration_credentials
+      (organization_id,provider,client_id,client_secret_encrypted,connected_email,connected_at,updated_at)
+    values
+      (${organizationId},'restaurant365-odata',${domain},${seal(password)},${username},now(),now())
+    on conflict (organization_id,provider) do update set
+      client_id=excluded.client_id,
+      client_secret_encrypted=excluded.client_secret_encrypted,
+      connected_email=excluded.connected_email,
+      connected_at=now(),
+      updated_at=now()
+  `;
+}
+
+export async function disconnectRestaurant365(organizationId: string) {
+  if (!databaseUrl()) return;
+  await ensureSchema();
+  await sql()`
+    delete from opsvista_integration_credentials
+    where organization_id=${organizationId} and provider='restaurant365-odata'
   `;
 }
