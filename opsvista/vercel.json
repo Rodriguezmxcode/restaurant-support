@@ -5,6 +5,8 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "rewrites": [
+    { "source": "/api/auth/logout", "destination": "/api/workflows?resource=auth_logout" },
+    { "source": "/api/management/audit", "destination": "/api/workflows?resource=management_audit" },
     { "source": "/api/integrations/google-business/callback", "destination": "/api/workflows?resource=google_business_callback" },
     { "source": "/api/integrations/google-business", "destination": "/api/workflows?resource=google_business_integration" },
     { "source": "/api/integrations/restaurant365", "destination": "/api/restaurant365" },

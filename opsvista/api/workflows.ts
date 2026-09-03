@@ -1,4 +1,4 @@
-import { readSession } from '../server/authSession.js';
+import { clearSessionCookie, readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getWeeklyGoogleReviews } from '../server/googleBusinessReviews.js';
@@ -10,7 +10,7 @@ import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../se
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
 import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
-import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
+import { getManagedUser, listManagedUsers, listManagementAudit, type ManagedDirectoryUser } from '../server/managementStore.js';
 import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
 
 export const config={maxDuration:120};
@@ -256,9 +256,20 @@ async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNul
  }catch(error){redirect('error',error instanceof Error?error.message:'Google authorization failed');return;}
 }
 
+async function authLogout(req:ApiRequest,res:ApiResponse){
+ if(req.method!=='POST'){res.setHeader?.('Allow','POST');return res.status(405).json({error:'Method not allowed'});}
+ res.setHeader?.('Set-Cookie',clearSessionCookie());res.setHeader?.('Cache-Control','no-store');return res.status(200).json({ok:true});
+}
+
+async function managementAudit(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const permission=authorize(user,'users:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+ if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
+ const requestedLimit=Number(q(req,'limit')||'500');const limit=Number.isFinite(requestedLimit)?requestedLimit:500;
+ res.setHeader?.('Cache-Control','private, no-store');return res.status(200).json({events:await listManagementAudit(limit)});
+}
+
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
- const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');
  const resource=q(req,'resource');
- try{if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }
