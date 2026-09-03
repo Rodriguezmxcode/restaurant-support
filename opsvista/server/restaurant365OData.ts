@@ -1,7 +1,9 @@
 import { getRestaurant365Credentials, type Restaurant365Credentials } from './integrationStore.js';
 
 const DEFAULT_BASE_URL = 'https://odata.restaurant365.net/api/v2/views';
-const opsVistaLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
+const restaurantLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
+const corporateLocation = 'Corporate Office';
+const opsVistaLocations = [...restaurantLocations, corporateLocation];
 
 type ODataRow = Record<string, unknown>;
 
@@ -10,6 +12,7 @@ export type Restaurant365Location = {
   number?: string;
   name: string;
   opsVistaLocation?: string;
+  entityType?: 'restaurant' | 'corporate-office';
 };
 
 export type Restaurant365Status = {
@@ -26,6 +29,8 @@ export type Restaurant365Status = {
   locations: Restaurant365Location[];
   expectedLocations: string[];
   mappedLocationCount: number;
+  mappedRestaurantCount: number;
+  corporateMapped: boolean;
   probes: { locations: boolean; glAccounts: boolean; transactions: boolean };
   probeErrors?: Partial<Record<'locations' | 'glAccounts' | 'transactions', string>>;
   pnlReady: boolean;
@@ -112,7 +117,8 @@ export async function getRestaurant365Status(organizationId: string): Promise<Re
     credentialSource: resolved?.source, domain: resolved?.credentials.domain,
     usernameHint: resolved ? usernameHint(resolved.credentials.username) : undefined,
     savedAt: resolved?.credentials.savedAt, locations: [], expectedLocations: opsVistaLocations,
-    mappedLocationCount: 0, probes: { locations: false, glAccounts: false, transactions: false }, pnlReady: false,
+    mappedLocationCount: 0, mappedRestaurantCount: 0, corporateMapped: false,
+    probes: { locations: false, glAccounts: false, transactions: false }, pnlReady: false,
   };
   if (!resolved) return empty;
 
@@ -130,18 +136,22 @@ export async function getRestaurant365Status(organizationId: string): Promise<Re
   const connected = locationProbe.ok || glProbe.ok || transactionProbe.ok;
   const mapped = locationProbe.rows.map(row => {
     const name = stringValue(row, ['name', 'locationName']);
+    const opsVistaLocation = mappedLocation(name);
     return {
       id: stringValue(row, ['locationId', 'id']),
       number: stringValue(row, ['locationNumber', 'number']) || undefined,
       name,
-      opsVistaLocation: mappedLocation(name),
+      opsVistaLocation,
+      entityType: opsVistaLocation === corporateLocation ? 'corporate-office' as const : opsVistaLocation ? 'restaurant' as const : undefined,
     };
   }).filter(location => location.id || location.name);
   const mappedLocationCount = new Set(mapped.map(location => location.opsVistaLocation).filter(Boolean)).size;
+  const mappedRestaurantCount = new Set(mapped.filter(location=>location.entityType==='restaurant').map(location=>location.opsVistaLocation)).size;
+  const corporateMapped = mapped.some(location=>location.entityType==='corporate-office');
   const latestTransactionAt = transactionProbe.rows[0] ? stringValue(transactionProbe.rows[0], ['modifiedOn', 'date']) || undefined : undefined;
   const failedNames = Object.entries(failures).filter(([,message])=>message).map(([name])=>name==='glAccounts'?'plan de cuentas':name==='transactions'?'transacciones':'locaciones');
   return {
-    ...empty, connected, checkedAt: new Date().toISOString(), locations: mapped, mappedLocationCount,
+    ...empty, connected, checkedAt: new Date().toISOString(), locations: mapped, mappedLocationCount, mappedRestaurantCount, corporateMapped,
     probes: { locations: locationProbe.ok, glAccounts: glProbe.ok, transactions: transactionProbe.ok },
     probeErrors: failures,
     latestTransactionAt,

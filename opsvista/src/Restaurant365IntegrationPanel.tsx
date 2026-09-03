@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-type R365Location = { id: string; number?: string; name: string; opsVistaLocation?: string };
+type R365Location = { id: string; number?: string; name: string; opsVistaLocation?: string; entityType?: 'restaurant'|'corporate-office' };
 type R365Status = {
   configured: boolean;
   connected: boolean;
@@ -13,6 +13,8 @@ type R365Status = {
   locations: R365Location[];
   expectedLocations: string[];
   mappedLocationCount: number;
+  mappedRestaurantCount: number;
+  corporateMapped: boolean;
   probes: { locations: boolean; glAccounts: boolean; transactions: boolean };
   probeErrors?: Partial<Record<'locations'|'glAccounts'|'transactions',string>>;
   pnlReady: boolean;
@@ -62,6 +64,8 @@ export default function Restaurant365IntegrationPanel({canManage}:{canManage:boo
   };
 
   const mapped=new Map((status?.locations||[]).filter(location=>location.opsVistaLocation).map(location=>[location.opsVistaLocation,location]));
+  const expectedCount=status?.expectedLocations.length||7;
+  const corporateMapped=status?.corporateMapped||Boolean(mapped.get('Corporate Office'));
   const badge=status?.connected?'CONECTADO':status?.configured?'REQUIERE ATENCIÓN':'PENDIENTE';
 
   return <section className="panel" style={{marginBottom:18}}>
@@ -77,7 +81,8 @@ export default function Restaurant365IntegrationPanel({canManage}:{canManage:boo
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
         {[
           ['Acceso','Solo lectura',status?.connected],
-          ['Locaciones',`${status?.mappedLocationCount||0} de 6 mapeadas`,status?.mappedLocationCount===6],
+          ['Entidades',`${status?.mappedLocationCount||0} de ${expectedCount} mapeadas`,status?.mappedLocationCount===expectedCount],
+          ['Corporate Office',corporateMapped?'Mapeada':'Sin validar',corporateMapped],
           ['Plan de cuentas',status?.probes.glAccounts?'Detectado':'Sin validar',status?.probes.glAccounts],
           ['P&L',status?.pnlReady?'Listo para clasificación':'Pendiente de clasificación',status?.pnlReady],
         ].map(([label,value,ok])=><div key={String(label)} style={{padding:'13px 14px',border:`1px solid ${ok?'#bbf7d0':'#dbe5ef'}`,borderRadius:10,background:ok?'#f0fdf4':'#f8fafc'}}><span style={{display:'block',fontSize:10,fontWeight:850,letterSpacing:'.07em',color:'#64748b'}}>{label}</span><strong style={{display:'block',marginTop:5,color:ok?'#166534':'#334155'}}>{value}</strong></div>)}
@@ -85,9 +90,9 @@ export default function Restaurant365IntegrationPanel({canManage}:{canManage:boo
 
       {status?.connected&&<>
         <div>
-          <strong>Mapeo de restaurantes</strong>
+          <strong>Mapeo de entidades contables</strong>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8,marginTop:10}}>
-            {status.expectedLocations.map(location=>{const source=mapped.get(location);return <div key={location} style={{padding:'11px 12px',border:`1px solid ${source?'#bbf7d0':'#fed7aa'}`,borderRadius:9,background:source?'#f0fdf4':'#fff7ed'}}><strong style={{color:source?'#166534':'#9a3412'}}>{source?'✓':'!'} {location}</strong><small style={{display:'block',marginTop:3,color:'#64748b'}}>{source?source.name:'Sin coincidencia en R365'}</small></div>})}
+            {status.expectedLocations.map(location=>{const source=mapped.get(location);const corporate=location==='Corporate Office';return <div key={location} style={{padding:'11px 12px',border:`1px solid ${source?'#bbf7d0':'#fed7aa'}`,borderRadius:9,background:source?'#f0fdf4':'#fff7ed'}}><strong style={{color:source?'#166534':'#9a3412'}}>{source?'✓':'!'} {location}</strong><small style={{display:'block',marginTop:3,color:'#64748b'}}>{source?`${source.name} · ${corporate?'Centro de costos':'Restaurante'}`:'Sin coincidencia en R365'}</small></div>})}
           </div>
         </div>
         <p style={{margin:0,color:'#64748b',fontSize:12}}>Usuario: <strong>{status.usernameHint}</strong> · Dominio: <strong>{status.domain}</strong>{status.latestTransactionAt?` · Última transacción detectada: ${new Date(status.latestTransactionAt).toLocaleString()}`:''}</p>
@@ -95,7 +100,7 @@ export default function Restaurant365IntegrationPanel({canManage}:{canManage:boo
 
       {!status?.connected&&canManage&&<div style={{padding:16,border:'1px solid #dbe5ef',borderRadius:12}}>
         <strong>Conecta una identidad dedicada de Restaurant365</strong>
-        <p style={{margin:'6px 0 12px',color:'#64748b',lineHeight:1.45}}>En R365 crea un usuario exclusivo para OpsVista con acceso OData y las seis locaciones. Usa el rol mínimo autorizado por R365 (Accounting Clerk) y no compartas esta cuenta con managers o usuarios que solo suben recibos.</p>
+        <p style={{margin:'6px 0 12px',color:'#64748b',lineHeight:1.45}}>En R365 crea un usuario exclusivo para OpsVista con acceso OData a los seis restaurantes y Puerto Vallarta Corporate. Usa el rol mínimo autorizado por R365 (Accounting Clerk) y no compartas esta cuenta con managers o usuarios que solo suben recibos.</p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:8}}>
           <input aria-label="Dominio Restaurant365" value={domain} onChange={event=>setDomain(event.target.value)} placeholder="Dominio R365 (sin https://)" autoComplete="organization" style={{padding:10,border:'1px solid #cbd5e1',borderRadius:8}}/>
           <input aria-label="Usuario Restaurant365" value={username} onChange={event=>setUsername(event.target.value)} placeholder="Usuario del conector" autoComplete="username" style={{padding:10,border:'1px solid #cbd5e1',borderRadius:8}}/>
