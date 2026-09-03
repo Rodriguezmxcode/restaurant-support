@@ -5,13 +5,14 @@ import './restaurant365.css';
 
 type Tab='Resumen'|'P&L'|'Facturas y AP'|'Corporate Office'|'Vendors'|'Cuentas GL'|'Conexión';
 type PeriodKey='today'|'yesterday'|'this-week'|'prior-week'|'this-month'|'prior-month'|'last-30'|'custom';
+type InvoiceStatusFilter='all'|'approved'|'pending';
 type Classification='Revenue'|'COGS'|'Labor'|'Operating Expense'|'Other Income'|'Other Expense'|'Balance Sheet'|'Unclassified';
 type Status={
   configured:boolean;connected:boolean;mappedLocationCount:number;mappedRestaurantCount:number;corporateMapped:boolean;pnlReady:boolean;
   checkedAt?:string;latestTransactionAt?:string;error?:string;
   probes:{locations:boolean;glAccounts:boolean;transactions:boolean};
 };
-type Transaction={id:string;date:string;number?:string;name:string;type:string;approved:boolean;location:string;entity?:string;vendor?:string;createdBy?:string};
+type Transaction={id:string;date:string;number?:string;name:string;type:string;approved:boolean;location:string;entity?:string;vendor?:string;createdBy?:string;amount:number|null};
 type Account={id:string;number?:string;name:string;glType?:string;operationalCategory?:string;locationName?:string};
 type LedgerRow={id:string;transactionId:string;date:string;transactionNumber?:string;transactionName:string;transactionType:string;vendor?:string;accountId:string;accountNumber?:string;accountName:string;glType?:string;operationalCategory?:string;classification:Classification;comment?:string;debit:number;credit:number;balance:number};
 type Ledger={
@@ -23,7 +24,7 @@ type Ledger={
   quality:{status:'ready-for-reconciliation'|'incomplete';transactionDetailCoveragePct:number|null;transactionsWithoutDetails:number;detailsWithoutGlAccount:number;unclassifiedDetailRows:number;duplicateTransactionIds:number;duplicateDetailIds:number};
   caveats:string[];
 };
-type ApSnapshot={period:{month:string;start:string;endExclusive:string};fetchedAt:string;transactions:Transaction[];totals:{invoices:number;approved:number;pending:number;vendors:number;locations:number};caveats:string[]};
+type ApSnapshot={period:{month:string;start:string;endExclusive:string};fetchedAt:string;transactions:Transaction[];totals:{invoices:number;approved:number;pending:number;vendors:number;locations:number;amount:number;approvedAmount:number;pendingAmount:number;invoicesWithoutAmount:number};caveats:string[]};
 type Catalog={fetchedAt:string;vendors?:Array<{id:string;number?:string;name:string;comment?:string}>;accounts?:Account[]};
 
 const tabs:Tab[]=['Resumen','P&L','Facturas y AP','Corporate Office','Vendors','Cuentas GL','Conexión'];
@@ -75,7 +76,7 @@ function mergeLedgers(snapshots:Ledger[],start:string,end:string):Ledger {
 function mergeApSnapshots(snapshots:ApSnapshot[],start:string,end:string):ApSnapshot {
   if(!snapshots.length)throw new Error('Restaurant365 no devolvió segmentos de facturas para este periodo.');
   const transactions=Array.from(new Map(snapshots.flatMap(snapshot=>snapshot.transactions).map(row=>[row.id,row])).values()).sort((left,right)=>right.date.localeCompare(left.date));
-  return {...snapshots[0],period:{month:start.slice(0,7),start,endExclusive:addDays(end,1)},fetchedAt:snapshots.map(snapshot=>snapshot.fetchedAt).sort().at(-1)||new Date().toISOString(),transactions,totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size},caveats:Array.from(new Set(snapshots.flatMap(snapshot=>snapshot.caveats)))};
+  return {...snapshots[0],period:{month:start.slice(0,7),start,endExclusive:addDays(end,1)},fetchedAt:snapshots.map(snapshot=>snapshot.fetchedAt).sort().at(-1)||new Date().toISOString(),transactions,totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size,amount:rounded(transactions.reduce((sum,row)=>sum+(row.amount||0),0)),approvedAmount:rounded(transactions.filter(row=>row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),pendingAmount:rounded(transactions.filter(row=>!row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),invoicesWithoutAmount:transactions.filter(row=>row.amount===null).length},caveats:Array.from(new Set(snapshots.flatMap(snapshot=>snapshot.caveats)))};
 }
 
 function Loading({detail}:{detail?:string}){return <section className="panel r365-state"><span className="r365-spinner"/><strong>Consultando Restaurant365…</strong><p>{detail||'Uniendo transacciones, detalles y cuentas GL del periodo seleccionado.'}</p></section>}
@@ -112,6 +113,10 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   const [ap,setAp]=useState<ApSnapshot>();
   const [catalog,setCatalog]=useState<Catalog>();
   const [search,setSearch]=useState('');
+  const [invoiceEntity,setInvoiceEntity]=useState('All entities');
+  const [invoiceStatus,setInvoiceStatus]=useState<InvoiceStatusFilter>('all');
+  const [selectedInvoiceIds,setSelectedInvoiceIds]=useState<string[]>([]);
+  const [copyNotice,setCopyNotice]=useState('');
   const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);
   const [loadingDetail,setLoadingDetail]=useState('');
@@ -121,7 +126,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   useEffect(()=>{void requestJson<Status>('/api/integrations/restaurant365').then(body=>{setStatus(body);setError(body.error||'');}).catch(reason=>setError(reason instanceof Error?reason.message:'Restaurant365 no está disponible.'));},[reload]);
   useEffect(()=>{
     if(['Resumen','Conexión'].includes(tab))return;
-    const controller=new AbortController();setLoading(true);setError('');setSearch('');
+    const controller=new AbortController();setLoading(true);setError('');setSearch('');setSelectedInvoiceIds([]);setCopyNotice('');
     const queryEntity=tab==='Corporate Office'?'Corporate Office':entity;
     const fetchWithDailyFallback=async<T,>(view:'ledger'|'ap',chunk:{start:string;end:string},index:number,total:number)=>{
       const query=(part:{start:string;end:string})=>`/api/integrations/restaurant365?view=${view}&start=${part.start}&end=${part.end}${view==='ledger'?`&entity=${encodeURIComponent(queryEntity)}`:''}`;
@@ -156,10 +161,25 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   const normalizedSearch=search.trim().toLowerCase();
   const vendors=useMemo(()=>catalog?.vendors?.filter(vendor=>!normalizedSearch||`${vendor.number||''} ${vendor.name} ${vendor.comment||''}`.toLowerCase().includes(normalizedSearch))||[],[catalog?.vendors,normalizedSearch]);
   const accounts=useMemo(()=>catalog?.accounts?.filter(account=>!normalizedSearch||`${account.number||''} ${account.name} ${account.glType||''} ${account.operationalCategory||''}`.toLowerCase().includes(normalizedSearch))||[],[catalog?.accounts,normalizedSearch]);
+  const visibleInvoices=useMemo(()=>ap?.transactions.filter(row=>(invoiceEntity==='All entities'||row.entity===invoiceEntity)&&(invoiceStatus==='all'||(invoiceStatus==='approved'&&row.approved)||(invoiceStatus==='pending'&&!row.approved))&&(!normalizedSearch||`${row.number||''} ${row.name} ${row.vendor||''} ${row.entity||''} ${row.createdBy||''}`.toLowerCase().includes(normalizedSearch)))||[],[ap?.transactions,invoiceEntity,invoiceStatus,normalizedSearch]);
+  const selectedInvoiceSet=useMemo(()=>new Set(selectedInvoiceIds),[selectedInvoiceIds]);
+  const visibleInvoiceAmount=rounded(visibleInvoices.reduce((sum,row)=>sum+(Number(row.amount)||0),0));
+  const allVisibleSelected=visibleInvoices.length>0&&visibleInvoices.every(row=>selectedInvoiceSet.has(row.id));
   const activeLedger=ledger&&ledger.period.start===range.start&&ledger.period.endExclusive===addDays(range.end,1)&&(tab==='Corporate Office'?ledger.entity==='Corporate Office':ledger.entity===entity)?ledger:undefined;
   const retry=()=>setReload(value=>value+1);
   const showPeriod=['P&L','Facturas y AP','Corporate Office'].includes(tab);
   const corporateSpend=activeLedger?activeLedger.totals.cogs+activeLedger.totals.labor+activeLedger.totals.operatingExpense+activeLedger.totals.otherExpense:0;
+  const toggleVisibleInvoices=()=>setSelectedInvoiceIds(current=>{const next=new Set(current);if(allVisibleSelected)visibleInvoices.forEach(row=>next.delete(row.id));else visibleInvoices.forEach(row=>next.add(row.id));return Array.from(next);});
+  const toggleInvoice=(id:string)=>setSelectedInvoiceIds(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
+  const copyInvoiceFollowUp=async()=>{
+    if(!ap)return;
+    const rows=selectedInvoiceIds.length?ap.transactions.filter(row=>selectedInvoiceSet.has(row.id)):visibleInvoices;
+    if(!rows.length){setCopyNotice('No hay facturas para copiar con estos filtros.');return;}
+    const amount=rounded(rows.reduce((sum,row)=>sum+(Number(row.amount)||0),0));
+    const heading=invoiceStatus==='pending'?'Facturas pendientes de aprobación/procesamiento':invoiceStatus==='approved'?'Facturas aprobadas en R365':'Seguimiento de facturas AP';
+    const lines=[`Jonathan — ${heading}`,`${rangeLabel(ap.period.start,addDays(ap.period.endExclusive,-1))} · ${rows.length} facturas · ${preciseMoney.format(amount)}`,...rows.map(row=>`• ${dateLabel(row.date)} · ${row.entity||row.location} · ${row.vendor||'Sin vendor'} · #${row.number||row.name} · ${row.amount===null?'Monto no disponible':preciseMoney.format(row.amount)} · ${row.approved?'Aprobada':'Pendiente'}`),'Nota: “Aprobada” en R365 no confirma que la factura esté pagada.'];
+    try{await navigator.clipboard.writeText(lines.join('\n'));setCopyNotice(`Lista copiada: ${rows.length} facturas para Jonathan.`);}catch{setCopyNotice('No se pudo copiar automáticamente. Selecciona y copia la lista desde la tabla.');}
+  };
 
   return <div className="r365-page">
     <section className="panel r365-tabs" role="tablist" aria-label="Secciones de Restaurant365">{tabs.map(item=><button key={item} type="button" role="tab" aria-selected={tab===item} className={tab===item?'active':''} onClick={()=>setTab(item)}>{item}</button>)}</section>
@@ -173,7 +193,18 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
     </>:tab==='Corporate Office'&&activeLedger?<>
       <div className="r365-metrics-grid"><Metric label="Gasto corporativo identificado" value={money.format(corporateSpend)} note="Sin distribución automática"/><Metric label="Facturas AP" value={String(activeLedger.totals.apInvoices)} note="Aprobadas en el periodo"/><Metric label="Transacciones aprobadas" value={String(activeLedger.totals.approvedTransactions)} note={`${activeLedger.totals.transactions} encabezados totales`}/><Metric label="Líneas contables" value={String(activeLedger.totals.detailRows)} note="Detalle GL recuperado"/><Metric label="Cobertura" value={activeLedger.quality.transactionDetailCoveragePct===null?'—':`${activeLedger.quality.transactionDetailCoveragePct}%`} note="Encabezados con detalle" tone={activeLedger.quality.status==='ready-for-reconciliation'?'good':'warn'}/></div><QualityBanner ledger={activeLedger}/><GroupBars ledger={activeLedger} corporate/><AccountTable ledger={activeLedger} corporate/><LedgerTable ledger={activeLedger} expensesOnly/><SourceNote fetchedAt={activeLedger.fetchedAt} caveats={activeLedger.caveats}/>
     </>:tab==='Facturas y AP'&&ap?<>
-      <div className="r365-metrics-grid"><Metric label="Facturas AP" value={String(ap.totals.invoices)} note={rangeLabel(ap.period.start,addDays(ap.period.endExclusive,-1))}/><Metric label="Aprobadas" value={String(ap.totals.approved)} note="Disponibles para el ledger" tone="good"/><Metric label="Pendientes" value={String(ap.totals.pending)} note="Requieren revisión en R365" tone={ap.totals.pending?'warn':'good'}/><Metric label="Vendors" value={String(ap.totals.vendors)} note="Con factura en el periodo"/><Metric label="Entidades" value={String(ap.totals.locations)} note="Restaurantes + Corporate"/></div><section className="panel r365-card"><header><div><h2>Facturas AP</h2><p>Aprobación contable, vendor y locación. “Aprobada” no equivale a “pagada”.</p></div><span className="count-pill">{ap.transactions.length} FACTURAS</span></header><div className="r365-table-wrap"><table><thead><tr><th>Fecha / factura</th><th>Vendor</th><th>Entidad</th><th>Creada por</th><th>Estado R365</th></tr></thead><tbody>{ap.transactions.slice(0,500).map(row=><tr key={row.id}><td><strong>{dateLabel(row.date)}</strong><small>{row.number||row.name}</small></td><td>{row.vendor||'Sin vendor enlazado'}</td><td><strong>{row.entity||row.location}</strong><small>{row.location}</small></td><td>{row.createdBy||'—'}</td><td><span className={`r365-status ${row.approved?'approved':'pending'}`}>{row.approved?'Aprobada':'Pendiente'}</span></td></tr>)}</tbody></table>{!ap.transactions.length&&<div className="r365-empty">No se encontraron facturas AP en el periodo seleccionado.</div>}</div></section><SourceNote fetchedAt={ap.fetchedAt} caveats={ap.caveats}/>
+      <div className="r365-metrics-grid"><Metric label="Facturas AP" value={String(ap.totals.invoices)} note={`${preciseMoney.format(ap.totals.amount)} en el periodo`}/><Metric label="Aprobadas" value={String(ap.totals.approved)} note={preciseMoney.format(ap.totals.approvedAmount)} tone="good"/><Metric label="Pendientes" value={String(ap.totals.pending)} note={preciseMoney.format(ap.totals.pendingAmount)} tone={ap.totals.pending?'warn':'good'}/><Metric label="Vendors" value={String(ap.totals.vendors)} note="Con factura en el periodo"/><Metric label="Entidades" value={String(ap.totals.locations)} note="Restaurantes + Corporate"/></div>
+      <section className="panel r365-card r365-ap-card">
+        <header><div><h2>Facturas AP</h2><p>Filtra, selecciona y prepara el seguimiento para Jonathan. “Aprobada” no equivale a “pagada”.</p></div><span className="count-pill">{visibleInvoices.length} DE {ap.transactions.length} FACTURAS</span></header>
+        <div className="r365-ap-toolbar">
+          <label><span>ENTIDAD / LOCACIÓN</span><select value={invoiceEntity} onChange={event=>{setInvoiceEntity(event.target.value);setSelectedInvoiceIds([]);setCopyNotice('');}}><option value="All entities">Todas las entidades</option>{entities.map(item=><option key={item}>{item}</option>)}</select></label>
+          <label><span>ESTADO R365</span><select value={invoiceStatus} onChange={event=>{setInvoiceStatus(event.target.value as InvoiceStatusFilter);setSelectedInvoiceIds([]);setCopyNotice('');}}><option value="all">Todas</option><option value="pending">Pendientes</option><option value="approved">Aprobadas</option></select></label>
+          <label className="r365-ap-search"><span>BUSCAR INVOICE O VENDOR</span><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedInvoiceIds([]);setCopyNotice('');}} placeholder="Número, vendor, entidad o usuario…"/></label>
+          <div className="r365-ap-visible"><span>RESULTADO VISIBLE</span><strong>{visibleInvoices.length} · {preciseMoney.format(visibleInvoiceAmount)}</strong></div>
+        </div>
+        <div className="r365-ap-actions"><button type="button" onClick={toggleVisibleInvoices} disabled={!visibleInvoices.length}>{allVisibleSelected?'Quitar selección visible':'Seleccionar todas las visibles'}</button><button type="button" className="primary" onClick={()=>void copyInvoiceFollowUp()} disabled={!visibleInvoices.length}>{selectedInvoiceIds.length?`Copiar ${selectedInvoiceIds.length} para Jonathan`:'Copiar visibles para Jonathan'}</button>{copyNotice&&<span role="status">{copyNotice}</span>}</div>
+        <div className="r365-table-wrap"><table className="r365-ap-table"><thead><tr><th className="r365-check"><input type="checkbox" aria-label="Seleccionar todas las facturas visibles" checked={allVisibleSelected} onChange={toggleVisibleInvoices}/></th><th>Fecha / factura</th><th>Vendor</th><th>Entidad</th><th>Creada por</th><th>Monto</th><th>Estado R365</th></tr></thead><tbody>{visibleInvoices.slice(0,500).map(row=><tr key={row.id} className={selectedInvoiceSet.has(row.id)?'selected':''}><td className="r365-check"><input type="checkbox" aria-label={`Seleccionar factura ${row.number||row.name}`} checked={selectedInvoiceSet.has(row.id)} onChange={()=>toggleInvoice(row.id)}/></td><td><strong>{dateLabel(row.date)}</strong><small>{row.number||row.name}</small></td><td>{row.vendor||'Sin vendor enlazado'}</td><td><strong>{row.entity||row.location}</strong><small>{row.location}</small></td><td>{row.createdBy||'—'}</td><td className="amount">{row.amount===null?'No disponible':preciseMoney.format(row.amount)}</td><td><span className={`r365-status ${row.approved?'approved':'pending'}`}>{row.approved?'Aprobada':'Pendiente'}</span></td></tr>)}</tbody></table>{visibleInvoices.length>500&&<div className="r365-table-limit">Mostrando 500 de {visibleInvoices.length} facturas filtradas.</div>}{!visibleInvoices.length&&<div className="r365-empty">No se encontraron facturas con estos filtros.</div>}</div>
+      </section><SourceNote fetchedAt={ap.fetchedAt} caveats={ap.caveats}/>
     </>:tab==='Vendors'&&catalog?<section className="panel r365-card"><header><div><h2>Directorio de vendors</h2><p>Catálogo leído directamente desde Company en Restaurant365.</p></div><input className="r365-search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar vendor…"/></header><div className="r365-table-wrap"><table><thead><tr><th>Número</th><th>Vendor</th><th>Comentario</th></tr></thead><tbody>{vendors.slice(0,500).map(row=><tr key={row.id}><td>{row.number||'—'}</td><td><strong>{row.name}</strong></td><td>{row.comment||'—'}</td></tr>)}</tbody></table>{!vendors.length&&<div className="r365-empty">No hay vendors que coincidan con la búsqueda.</div>}</div></section>
     :tab==='Cuentas GL'&&catalog?<section className="panel r365-card"><header><div><h2>Plan de cuentas GL</h2><p>Número, tipo y categoría operacional utilizados para construir la clasificación.</p></div><input className="r365-search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar cuenta…"/></header><div className="r365-table-wrap"><table><thead><tr><th>Número</th><th>Cuenta</th><th>Tipo GL</th><th>Categoría operacional</th><th>Locación R365</th></tr></thead><tbody>{accounts.slice(0,750).map(row=><tr key={row.id}><td>{row.number||'—'}</td><td><strong>{row.name}</strong></td><td>{row.glType||'—'}</td><td>{row.operationalCategory||'—'}</td><td>{row.locationName||'Global'}</td></tr>)}</tbody></table>{!accounts.length&&<div className="r365-empty">No hay cuentas que coincidan con la búsqueda.</div>}</div></section>:<Loading detail={loadingDetail}/>}
   </div>;

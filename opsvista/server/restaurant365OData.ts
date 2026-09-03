@@ -20,6 +20,7 @@ export type Restaurant365TransactionRow = {
   entity?: string;
   vendor?: string;
   createdBy?: string;
+  amount: number | null;
 };
 
 export type Restaurant365AccountRow = {
@@ -93,7 +94,7 @@ export type Restaurant365ApSnapshot = {
   period: { month: string; start: string; endExclusive: string };
   fetchedAt: string;
   transactions: Restaurant365TransactionRow[];
-  totals: { invoices: number; approved: number; pending: number; vendors: number; locations: number };
+  totals: { invoices: number; approved: number; pending: number; vendors: number; locations: number; amount: number; approvedAmount: number; pendingAmount: number; invoicesWithoutAmount: number };
   caveats: string[];
 };
 
@@ -359,6 +360,7 @@ function transactionFromRow(row: ODataRow, companies: Map<string,string>): Resta
     entity: mappedLocation(locationName),
     vendor: companies.get(companyId),
     createdBy: stringValue(row,['createdBy']) || undefined,
+    amount: null,
   };
 }
 
@@ -471,10 +473,23 @@ async function transactionDetails(credentials: Restaurant365Credentials, transac
   const ids=transactionIds.map(odataIdentifier).filter(Boolean);
   const batches = chunks(ids,20);
   const pages = await parallelMap(batches,1,batch=>odataAll(credentials,'TransactionDetail',{
-    '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,comment',
+    '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,amount,comment',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
   },2_000,100));
   return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
+}
+
+function invoiceAmounts(rows:ODataRow[]) {
+  const totals=new Map<string,{debit:number;credit:number}>();
+  for(const row of rows){
+    const transactionId=stringValue(row,['transactionId']).toLowerCase();
+    if(!transactionId)continue;
+    const current=totals.get(transactionId)||{debit:0,credit:0};
+    current.debit+=numberValue(row,['debit']);
+    current.credit+=numberValue(row,['credit']);
+    totals.set(transactionId,current);
+  }
+  return new Map(Array.from(totals.entries()).map(([id,total])=>[id,money(Math.max(Math.abs(total.debit),Math.abs(total.credit)))||null]));
 }
 
 export async function getRestaurant365Ledger(organizationId:string, startOrMonth:string, entity:string, end?:string):Promise<Restaurant365LedgerSnapshot> {
@@ -555,11 +570,12 @@ export async function getRestaurant365Ap(organizationId:string,startOrMonth:stri
   const credentials = await requiredCredentials(organizationId);
   const transactionResult=await periodTransactionRows(credentials,requestedPeriod(startOrMonth,end));
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
-  const companies=await companiesForTransactions(credentials,apSourceRows);
-  const transactions = apSourceRows.map(row=>transactionFromRow(row,companies)).filter(row=>Boolean(row.entity)).sort((left,right)=>right.date.localeCompare(left.date));
+  const [companies,detailResult]=await Promise.all([companiesForTransactions(credentials,apSourceRows),transactionDetails(credentials,apSourceRows.map(row=>stringValue(row,['transactionId','id'])))]);
+  const amounts=invoiceAmounts(detailResult.rows);
+  const transactions = apSourceRows.map(row=>{const transaction=transactionFromRow(row,companies);return{...transaction,amount:amounts.get(transaction.id.toLowerCase())??null};}).filter(row=>Boolean(row.entity)).sort((left,right)=>right.date.localeCompare(left.date));
   return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
-    totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size},
-    caveats:['Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};
+    totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size,amount:money(transactions.reduce((sum,row)=>sum+(row.amount||0),0)),approvedAmount:money(transactions.filter(row=>row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),pendingAmount:money(transactions.filter(row=>!row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),invoicesWithoutAmount:transactions.filter(row=>row.amount===null).length},
+    caveats:['El monto se calcula desde los débitos y créditos del detalle contable de cada factura.','Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};
 }
 
 export async function getRestaurant365Catalog(organizationId:string,kind:'vendors'|'accounts'):Promise<Restaurant365CatalogSnapshot> {

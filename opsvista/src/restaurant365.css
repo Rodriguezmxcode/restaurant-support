@@ -2,3 +2,135 @@
 @media(max-width:1200px){.r365-metrics-grid{grid-template-columns:repeat(3,1fr)}.r365-quality{align-items:flex-start;flex-direction:column}.r365-roadmap{grid-template-columns:repeat(2,1fr)}.r365-roadmap button:nth-child(2){border-right:0}.r365-roadmap button:nth-child(-n+2){border-bottom:1px solid #e0e7ef}}
 @media(max-width:760px){.r365-metrics-grid{grid-template-columns:repeat(2,1fr)}.r365-controls{align-items:stretch;flex-direction:column}.r365-controls label,.r365-controls input,.r365-controls select{width:100%}.r365-controls>div{margin-left:0;text-align:left}.r365-card>header{align-items:flex-start;flex-direction:column}.r365-search{width:100%;min-width:0}.r365-bar-row{grid-template-columns:1fr 90px}.r365-bar-track{grid-column:1/-1;grid-row:2}.r365-roadmap{grid-template-columns:1fr}.r365-roadmap button{border-right:0;border-bottom:1px solid #e0e7ef}.r365-roadmap button:last-child{border-bottom:0}}
 @media(max-width:480px){.r365-metrics-grid{grid-template-columns:1fr}.r365-quality>div:last-child{display:grid;grid-template-columns:1fr 1fr;width:100%}.r365-tabs{margin-left:-2px;margin-right:-2px}}
+
+.r365-ap-toolbar {
+  display: grid;
+  grid-template-columns: 190px 160px minmax(240px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px 18px;
+  background: #f8fbff;
+  border-bottom: 1px solid #e0e8f1;
+}
+
+.r365-ap-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.r365-ap-toolbar label span,
+.r365-ap-visible > span {
+  color: #607894;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.r365-ap-toolbar select,
+.r365-ap-toolbar input {
+  width: 100%;
+  border: 1px solid #c9d7e7;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #183052;
+}
+
+.r365-ap-search {
+  min-width: 240px;
+}
+
+.r365-ap-visible {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: right;
+}
+
+.r365-ap-visible strong {
+  color: #173a64;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.r365-ap-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e0e8f1;
+}
+
+.r365-ap-actions button {
+  border: 1px solid #b9cce1;
+  border-radius: 9px;
+  padding: 9px 12px;
+  background: #fff;
+  color: #23496f;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.r365-ap-actions button.primary {
+  border-color: #2368cf;
+  background: #2368cf;
+  color: #fff;
+}
+
+.r365-ap-actions button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.r365-ap-actions span {
+  margin-left: auto;
+  color: #176c46;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.r365-check {
+  width: 42px;
+  text-align: center !important;
+}
+
+.r365-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2368cf;
+}
+
+.r365-ap-table tr.selected td {
+  background: #eef5ff;
+}
+
+@media(max-width:1000px) {
+  .r365-ap-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .r365-ap-visible {
+    text-align: left;
+  }
+}
+
+@media(max-width:760px) {
+  .r365-ap-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .r365-ap-search {
+    min-width: 0;
+  }
+
+  .r365-ap-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .r365-ap-actions span {
+    margin-left: 0;
+  }
+}
