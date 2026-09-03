@@ -21,6 +21,8 @@ type ChatMessage = {
   createdAt:number;
 };
 
+type CopilotSide='left'|'right';
+
 const api='/api/workflows?resource=actions';
 const makeId=()=>`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
 const greeting=(name:string,locations:string[]):ChatMessage=>({
@@ -39,9 +41,17 @@ function readHistory(key:string,name:string,locations:string[]) {
   return [greeting(name,locations)];
 }
 
+function readSide(key:string):CopilotSide {
+  try{return window.localStorage.getItem(key)==='left'?'left':'right';}
+  catch{return 'right';}
+}
+
 export default function OpsVistaCopilot({currentUserId,currentUserName,role,allowedLocations,modules,currentSection,onNavigate}:Props) {
   const storageKey=`opsvista-assistant:${currentUserId}`;
+  const sideKey=`opsvista-assistant-side:${currentUserId}`;
   const [open,setOpen]=useState(false);
+  const [visible,setVisible]=useState(true);
+  const [side,setSide]=useState<CopilotSide>(()=>readSide(sideKey));
   const [question,setQuestion]=useState('');
   const [actions,setActions]=useState<CopilotAction[]>([]);
   const [actionsLoading,setActionsLoading]=useState(false);
@@ -51,6 +61,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
   const locationKey=allowedLocations.join('|');
 
   useEffect(()=>{try{window.localStorage.setItem(storageKey,JSON.stringify(messages.slice(-30)));}catch{/* Storage can be unavailable. */}},[messages,storageKey]);
+  useEffect(()=>{try{window.localStorage.setItem(sideKey,side);}catch{/* Storage can be unavailable. */}},[side,sideKey]);
   useEffect(()=>{if(open){window.setTimeout(()=>inputRef.current?.focus(),80);endRef.current?.scrollIntoView({behavior:'smooth'});}},[open,messages.length]);
   useEffect(()=>{
     if(!open)return;
@@ -88,15 +99,25 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
   const keyDown=(event:KeyboardEvent<HTMLTextAreaElement>)=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ask();}};
   const reset=()=>{setMessages([greeting(currentUserName,allowedLocations)]);setQuestion('');};
   const navigate=(module:OpsVistaModule)=>{onNavigate(module);setOpen(false);};
+  const move=()=>setSide(current=>current==='right'?'left':'right');
+  const hide=()=>{setOpen(false);setVisible(false);};
+
+  if(!visible)return null;
 
   return <>
-    <button type="button" className={`copilot-launcher ${open?'is-open':''}`} aria-label="Abrir OpsVista Assistant" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>
-      <span className="copilot-launcher-icon">✦</span>
-      <span className="copilot-launcher-copy"><strong>Ask OpsVista</strong><small>Q&amp;A · Go to the right module</small></span>
-      <span className="copilot-launcher-state">{open?'×':'›'}</span>
-    </button>
+    <div className={`copilot-launcher-shell side-${side}`}>
+      <div className="copilot-launcher-controls" aria-label="Controles de Ask OpsVista">
+        <button type="button" onClick={move} aria-label={`Mover Ask OpsVista a la ${side==='right'?'izquierda':'derecha'}`} title={`Mover a la ${side==='right'?'izquierda':'derecha'}`}>↔</button>
+        <button type="button" onClick={hide} aria-label="Ocultar Ask OpsVista durante esta visita" title="Ocultar por ahora">×</button>
+      </div>
+      <button type="button" className={`copilot-launcher ${open?'is-open':''}`} aria-label="Abrir OpsVista Assistant" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>
+        <span className="copilot-launcher-icon">✦</span>
+        <span className="copilot-launcher-copy"><strong>Ask OpsVista</strong><small>Q&amp;A · Go to the right module</small></span>
+        <span className="copilot-launcher-state">{open?'×':'›'}</span>
+      </button>
+    </div>
 
-    {open&&<div className="copilot-backdrop" onMouseDown={()=>setOpen(false)}>
+    {open&&<div className={`copilot-backdrop side-${side}`} onMouseDown={()=>setOpen(false)}>
       <aside className="copilot-drawer" role="dialog" aria-modal="true" aria-label="OpsVista Assistant" onMouseDown={event=>event.stopPropagation()}>
         <header className="copilot-drawer-head">
           <div className="copilot-avatar">OV</div>
