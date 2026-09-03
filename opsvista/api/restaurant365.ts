@@ -6,12 +6,14 @@ import { getRestaurant365Ap, getRestaurant365Catalog, getRestaurant365Ledger, ge
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 
+export const config={maxDuration:120};
+
 const text=(value:unknown)=>typeof value==='string'?value.trim():'';
 const query=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query[key] as string).trim():'';
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
   const requestId=`r365-${Date.now().toString(36)}`;
-  res.setHeader?.('X-OpsVista-R365-Version','r365-api-v4');
+  res.setHeader?.('X-OpsVista-R365-Version','r365-api-v5');
   res.setHeader?.('X-OpsVista-Request-Id',requestId);
   res.setHeader?.('Cache-Control','private, no-store');
   try{

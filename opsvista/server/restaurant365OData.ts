@@ -163,8 +163,11 @@ function mappedLocation(name: string) {
 }
 
 function value(row: ODataRow, candidates: string[]) {
-  const entry = Object.entries(row).find(([key]) => candidates.some(candidate => key.toLowerCase() === candidate.toLowerCase()));
-  return entry?.[1];
+  for (const candidate of candidates) {
+    const entry = Object.entries(row).find(([key]) => key.toLowerCase() === candidate.toLowerCase());
+    if (entry && entry[1] !== undefined && entry[1] !== null && String(entry[1]).trim() !== '') return entry[1];
+  }
+  return undefined;
 }
 
 function stringValue(row: ODataRow, candidates: string[]) {
@@ -362,7 +365,7 @@ function transactionFromRow(row: ODataRow, companies: Map<string,string>): Resta
   const companyId = stringValue(row,['companyId']).toLowerCase();
   const locationName = stringValue(row,['locationName']);
   return {
-    id: stringValue(row,['transactionId','id']),
+    id: odataIdentifier(stringValue(row,['transactionId','id'])) || stringValue(row,['transactionId','id']),
     date: stringValue(row,['date']),
     createdOn: stringValue(row,['createdOn']) || undefined,
     number: stringValue(row,['transactionNumber','number']) || undefined,
@@ -429,8 +432,13 @@ async function parallelMap<T,R>(items:T[], concurrency:number, callback:(item:T)
 }
 
 function odataIdentifier(value:string) {
-  const candidate=value.trim();
+  const candidate=value.trim().replace(/^guid'/i,'').replace(/'$/,'').replace(/[{}]/g,'');
   return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(candidate)||/^\d+$/.test(candidate)?candidate:'';
+}
+
+function transactionIdentifier(row:ODataRow) {
+  const raw=stringValue(row,['transactionId','id']);
+  return (odataIdentifier(raw)||raw.trim()).toLowerCase();
 }
 
 async function companiesForTransactions(credentials:Restaurant365Credentials,rows:ODataRow[]) {
@@ -483,19 +491,29 @@ async function periodTransactionRows(credentials: Restaurant365Credentials, peri
 }
 
 async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[]) {
-  const ids=transactionIds.map(odataIdentifier).filter(Boolean);
-  const batches = chunks(ids,20);
+  const ids=Array.from(new Set(transactionIds.map(odataIdentifier).filter(Boolean)));
+  const batches = chunks(ids,10);
   const pages = await parallelMap(batches,1,batch=>odataAll(credentials,'TransactionDetail',{
     '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,amount,comment',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
   },2_000,100));
-  return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
+  const batchRows=pages.flat();
+  const recoveredIds=new Set(batchRows.map(transactionIdentifier).filter(Boolean));
+  const missingIds=ids.filter(id=>!recoveredIds.has(id.toLowerCase()));
+
+  // R365 documents the detail lookup one transactionId at a time. Some tenants
+  // accept OR filters but return an empty collection, so retry only the missing
+  // invoices with the documented single-ID request and the full response schema.
+  const fallbackPages=await parallelMap(missingIds,6,id=>odataAll(credentials,'TransactionDetail',{
+    '$filter':`transactionId eq ${id}`,
+  },1_000,250));
+  return uniqueRows([...batchRows,...fallbackPages.flat()],['transactionDetailAutoId','transactionDetailId']);
 }
 
 function invoiceAmounts(rows:ODataRow[]) {
   const totals=new Map<string,{debit:number;credit:number;largestLine:number;detailCount:number}>();
   for(const row of rows){
-    const transactionId=stringValue(row,['transactionId']).toLowerCase();
+    const transactionId=transactionIdentifier(row);
     if(!transactionId)continue;
     const current=totals.get(transactionId)||{debit:0,credit:0,largestLine:0,detailCount:0};
     current.debit+=accountingNumber(row,['debit']);
@@ -532,7 +550,7 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
     if (account.autoId) accountMap.set(account.autoId.toLowerCase(),account);
   }
   const rows: Restaurant365LedgerRow[] = detailResult.rows.map(row=>{
-    const transactionId = stringValue(row,['transactionId']).toLowerCase();
+    const transactionId = transactionIdentifier(row);
     const transaction = transactionMap.get(transactionId);
     const accountId = stringValue(row,['glAccountId']).toLowerCase();
     const account = accountMap.get(accountId);
