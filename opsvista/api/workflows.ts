@@ -11,7 +11,7 @@ import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../se
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../server/googleBusinessOAuth.js';
 import { disconnectGoogleBusiness, disconnectRestaurant365, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient, saveRestaurant365Credentials } from '../server/integrationStore.js';
-import { getRestaurant365Status } from '../server/restaurant365OData.js';
+import { getRestaurant365Ap, getRestaurant365Catalog, getRestaurant365Ledger, getRestaurant365Status } from '../server/restaurant365OData.js';
 import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
 import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
 
@@ -260,6 +260,15 @@ async function restaurant365Integration(req:ApiRequest,res:ApiResponse,user:NonN
  const organizationId=userOrganization(user);
  if(!req.method||req.method==='GET'){
   const permission=authorize(user,'restaurant365:read');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+  const view=q(req,'view');
+  if(view){
+   res.setHeader?.('Cache-Control','private, max-age=300, stale-while-revalidate=300');
+   const month=q(req,'month')||'2026-08';
+   if(view==='ledger')return res.status(200).json(await getRestaurant365Ledger(organizationId,month,q(req,'entity')||'Corporate Office'));
+   if(view==='ap')return res.status(200).json(await getRestaurant365Ap(organizationId,month));
+   if(view==='vendors'||view==='accounts')return res.status(200).json(await getRestaurant365Catalog(organizationId,view));
+   return res.status(400).json({error:'Vista de Restaurant365 desconocida.'});
+  }
   return res.status(200).json(await getRestaurant365Status(organizationId));
  }
  if(req.method==='POST'){

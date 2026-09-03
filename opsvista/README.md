@@ -21,6 +21,7 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Bilingual Q&A routing for managers with role- and location-aware module links
 - Grounded operational answers using the user's current Action Center scope
 - Dedicated Restaurant365 module with connection health, encrypted credential storage, six-restaurant plus Corporate Office validation and source-gated P&L/AP areas
+- Restaurant365 monthly ledger explorer with approved-transaction detail, AP invoice index, vendor catalog, GL account catalog and reconciliation quality checks
 
 ## Existing product areas represented in navigation
 

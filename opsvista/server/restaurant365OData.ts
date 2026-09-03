@@ -6,6 +6,102 @@ const corporateLocation = 'Corporate Office';
 const opsVistaLocations = [...restaurantLocations, corporateLocation];
 
 type ODataRow = Record<string, unknown>;
+type ODataView = 'Location' | 'GlAccount' | 'Transaction' | 'TransactionDetail' | 'Company';
+
+export type Restaurant365TransactionRow = {
+  id: string;
+  date: string;
+  number?: string;
+  name: string;
+  type: string;
+  approved: boolean;
+  location: string;
+  entity?: string;
+  vendor?: string;
+  createdBy?: string;
+};
+
+export type Restaurant365AccountRow = {
+  id: string;
+  autoId?: string;
+  number?: string;
+  name: string;
+  glType?: string;
+  operationalCategory?: string;
+  locationName?: string;
+};
+
+export type Restaurant365LedgerRow = {
+  id: string;
+  transactionId: string;
+  date: string;
+  transactionNumber?: string;
+  transactionName: string;
+  transactionType: string;
+  vendor?: string;
+  accountId: string;
+  accountNumber?: string;
+  accountName: string;
+  glType?: string;
+  operationalCategory?: string;
+  classification: 'Revenue' | 'COGS' | 'Labor' | 'Operating Expense' | 'Other Income' | 'Other Expense' | 'Balance Sheet' | 'Unclassified';
+  comment?: string;
+  debit: number;
+  credit: number;
+  balance: number;
+};
+
+export type Restaurant365LedgerSnapshot = {
+  provider: 'restaurant365-odata';
+  period: { month: string; start: string; endExclusive: string };
+  entity: string;
+  sourceLocation: { id: string; name: string };
+  fetchedAt: string;
+  totals: {
+    transactions: number;
+    approvedTransactions: number;
+    apInvoices: number;
+    detailRows: number;
+    debits: number;
+    credits: number;
+    revenue: number;
+    cogs: number;
+    labor: number;
+    operatingExpense: number;
+    otherIncome: number;
+    otherExpense: number;
+    classifiedResult: number;
+  };
+  groups: Array<{ classification: Restaurant365LedgerRow['classification']; amount: number; accountCount: number }>;
+  accounts: Array<Restaurant365AccountRow & { classification: Restaurant365LedgerRow['classification']; debit: number; credit: number; balance: number; pnlAmount: number; lineCount: number }>;
+  rows: Restaurant365LedgerRow[];
+  quality: {
+    status: 'ready-for-reconciliation' | 'incomplete';
+    transactionDetailCoveragePct: number | null;
+    transactionsWithoutDetails: number;
+    detailsWithoutGlAccount: number;
+    unclassifiedDetailRows: number;
+    duplicateTransactionIds: number;
+    duplicateDetailIds: number;
+  };
+  caveats: string[];
+};
+
+export type Restaurant365ApSnapshot = {
+  provider: 'restaurant365-odata';
+  period: { month: string; start: string; endExclusive: string };
+  fetchedAt: string;
+  transactions: Restaurant365TransactionRow[];
+  totals: { invoices: number; approved: number; pending: number; vendors: number; locations: number };
+  caveats: string[];
+};
+
+export type Restaurant365CatalogSnapshot = {
+  provider: 'restaurant365-odata';
+  fetchedAt: string;
+  vendors?: Array<{ id: string; number?: string; name: string; comment?: string }>;
+  accounts?: Restaurant365AccountRow[];
+};
 
 export type Restaurant365Location = {
   id: string;
@@ -73,6 +169,29 @@ function stringValue(row: ODataRow, candidates: string[]) {
   return result === undefined || result === null ? '' : String(result);
 }
 
+function numberValue(row: ODataRow, candidates: string[]) {
+  const result = Number(value(row, candidates));
+  return Number.isFinite(result) ? result : 0;
+}
+
+function booleanValue(row: ODataRow, candidates: string[]) {
+  const result = value(row, candidates);
+  return result === true || result === 1 || ['true','1','yes'].includes(String(result).toLowerCase());
+}
+
+function money(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function monthPeriod(month: string) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El periodo de Restaurant365 debe usar el formato YYYY-MM.');
+  const [year, monthNumber] = month.split('-').map(Number);
+  const start = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const end = new Date(Date.UTC(year, monthNumber, 1));
+  if (start.getTime() > Date.now()) throw new Error('Restaurant365 no puede consultar un mes futuro.');
+  return { month, start: start.toISOString().slice(0,10), endExclusive: end.toISOString().slice(0,10) };
+}
+
 function responseRows(payload: unknown): ODataRow[] {
   if (Array.isArray(payload)) return payload.filter(item => item && typeof item === 'object') as ODataRow[];
   if (!payload || typeof payload !== 'object') return [];
@@ -88,7 +207,7 @@ function usernameHint(username: string) {
   return username.length <= 3 ? '***' : `${username.slice(0, 2)}***${username.slice(-1)}`;
 }
 
-async function odata(credentials: Restaurant365Credentials, view: 'Location' | 'GlAccount' | 'Transaction', params: Record<string, string>) {
+async function odata(credentials: Restaurant365Credentials, view: ODataView, params: Record<string, string>) {
   const base = (process.env.RESTAURANT365_ODATA_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/$/, '');
   const url = new URL(`${base}/${view}`);
   Object.entries(params).forEach(([key, parameter]) => url.searchParams.set(key, parameter));
@@ -103,6 +222,17 @@ async function odata(credentials: Restaurant365Credentials, view: 'Location' | '
     throw new Error(`${view}: Restaurant365 OData respondió con estado ${response.status}.`);
   }
   return responseRows(await response.json());
+}
+
+async function odataAll(credentials: Restaurant365Credentials, view: ODataView, params: Record<string, string>, maxRows = 10_000) {
+  const pageSize = 500;
+  const rows: ODataRow[] = [];
+  for (let skip = 0; skip < maxRows; skip += pageSize) {
+    const page = await odata(credentials, view, { ...params, '$top': String(Math.min(pageSize,maxRows-skip)), '$skip': String(skip) });
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
 }
 
 async function probe(credentials: Restaurant365Credentials, view: 'Location' | 'GlAccount' | 'Transaction', params: Record<string, string>) {
@@ -158,4 +288,223 @@ export async function getRestaurant365Status(organizationId: string): Promise<Re
     pnlReady: mappedLocationCount === opsVistaLocations.length && glProbe.ok && transactionProbe.ok,
     error: authenticationError?.error || (failedNames.length ? `La autenticación funcionó, pero falta validar: ${failedNames.join(', ')}.` : undefined),
   };
+}
+
+async function requiredCredentials(organizationId: string) {
+  const resolved = await credentialsFor(organizationId);
+  if (!resolved) throw new Error('Restaurant365 no está configurado para esta organización.');
+  return resolved.credentials;
+}
+
+function locationFromRow(row: ODataRow): Restaurant365Location {
+  const name = stringValue(row,['name','locationName']);
+  const opsVistaLocation = mappedLocation(name);
+  return {
+    id: stringValue(row,['locationId','id']),
+    number: stringValue(row,['locationNumber','number']) || undefined,
+    name,
+    opsVistaLocation,
+    entityType: opsVistaLocation === corporateLocation ? 'corporate-office' : opsVistaLocation ? 'restaurant' : undefined,
+  };
+}
+
+function accountFromRow(row: ODataRow): Restaurant365AccountRow {
+  return {
+    id: stringValue(row,['glAccountId','id']),
+    autoId: stringValue(row,['glAccountAutoId']) || undefined,
+    number: stringValue(row,['glAccountNumber','number']) || undefined,
+    name: stringValue(row,['name','glAccountName']) || 'Cuenta GL sin nombre',
+    glType: stringValue(row,['glType']) || undefined,
+    operationalCategory: stringValue(row,['operationalCategory']) || undefined,
+    locationName: stringValue(row,['locationName']) || undefined,
+  };
+}
+
+function transactionFromRow(row: ODataRow, companies: Map<string,string>): Restaurant365TransactionRow {
+  const companyId = stringValue(row,['companyId']).toLowerCase();
+  const locationName = stringValue(row,['locationName']);
+  return {
+    id: stringValue(row,['transactionId','id']),
+    date: stringValue(row,['date']),
+    number: stringValue(row,['transactionNumber','number']) || undefined,
+    name: stringValue(row,['name']) || 'Transacción sin nombre',
+    type: stringValue(row,['type']) || 'Sin tipo',
+    approved: booleanValue(row,['isApproved']),
+    location: locationName,
+    entity: mappedLocation(locationName),
+    vendor: companies.get(companyId),
+    createdBy: stringValue(row,['createdBy']) || undefined,
+  };
+}
+
+function classifyAccount(account?: Restaurant365AccountRow): Restaurant365LedgerRow['classification'] {
+  if (!account) return 'Unclassified';
+  const type = normalized(account.glType||'');
+  const category = normalized(account.operationalCategory||'');
+  const name = normalized(account.name);
+  if (/asset|liability|equity/.test(type)) return 'Balance Sheet';
+  if (/costofgoods|cogs|foodcost|beveragecost/.test(`${type}${category}`)) return 'COGS';
+  if (/labor|payroll|wage/.test(`${category}${name}`)) return 'Labor';
+  if (/otherincome/.test(`${type}${category}`)) return 'Other Income';
+  if (/income|revenue|sales/.test(`${type}${category}`)) return 'Revenue';
+  if (/otherexpense/.test(`${type}${category}`)) return 'Other Expense';
+  if (/expense/.test(`${type}${category}`)) return 'Operating Expense';
+  return 'Unclassified';
+}
+
+function pnlAmount(classification: Restaurant365LedgerRow['classification'], debit: number, credit: number) {
+  if (classification === 'Revenue' || classification === 'Other Income') return money(credit-debit);
+  if (['COGS','Labor','Operating Expense','Other Expense'].includes(classification)) return money(debit-credit);
+  return 0;
+}
+
+function uniqueRows(rows: ODataRow[], candidates: string[]) {
+  const found = new Map<string,ODataRow>();
+  let duplicates = 0;
+  for (const row of rows) {
+    const id = stringValue(row,candidates).toLowerCase();
+    if (!id) continue;
+    if (found.has(id)) duplicates += 1;
+    else found.set(id,row);
+  }
+  return { rows: Array.from(found.values()), duplicates };
+}
+
+function chunks<T>(rows: T[], size: number) {
+  const result: T[][] = [];
+  for (let index=0; index<rows.length; index+=size) result.push(rows.slice(index,index+size));
+  return result;
+}
+
+async function parallelMap<T,R>(items:T[], concurrency:number, callback:(item:T)=>Promise<R>) {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({length:Math.min(concurrency,items.length)},async()=>{
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await callback(items[index]);
+    }
+  }));
+  return results;
+}
+
+async function baseCatalogs(credentials: Restaurant365Credentials) {
+  const [locationRows,accountRows,companyRows] = await Promise.all([
+    odataAll(credentials,'Location',{'$select':'locationId,locationNumber,name','$orderby':'name,locationId'},1_000),
+    odataAll(credentials,'GlAccount',{'$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName','$orderby':'glAccountNumber,glAccountId'},10_000),
+    odataAll(credentials,'Company',{'$select':'companyId,companyNumber,name,comment','$orderby':'name,companyId'},10_000),
+  ]);
+  const locations = locationRows.map(locationFromRow).filter(location=>location.id&&location.name);
+  const accounts = uniqueRows(accountRows,['glAccountId','id']).rows.map(accountFromRow);
+  const companies = new Map(companyRows.map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
+  return {locations,accounts,companyRows,companies};
+}
+
+async function monthTransactionRows(credentials: Restaurant365Credentials, month:string, locationId?:string) {
+  const period = monthPeriod(month);
+  const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
+  const rows = await odataAll(credentials,'Transaction',{
+    '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy,createdOn,modifiedOn',
+    '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
+    '$orderby':'date,transactionNumber,transactionId',
+  },10_000);
+  return {period,...uniqueRows(rows,['transactionId','id'])};
+}
+
+async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[]) {
+  const batches = chunks(transactionIds.filter(Boolean),12);
+  const pages = await parallelMap(batches,4,batch=>odataAll(credentials,'TransactionDetail',{
+    '$select':'transactionDetailAutoId,transactionDetailId,transactionId,locationId,glAccountId,item,credit,debit,amount,quantity,adjustment,unitOfMeasureName,comment,createdOn,modifiedOn',
+    '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
+    '$orderby':'transactionId,transactionDetailAutoId',
+  },10_000));
+  return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
+}
+
+export async function getRestaurant365Ledger(organizationId:string, month:string, entity:string):Promise<Restaurant365LedgerSnapshot> {
+  if (!opsVistaLocations.includes(entity)) throw new Error('La entidad solicitada no está mapeada en OpsVista.');
+  const credentials = await requiredCredentials(organizationId);
+  const catalogs = await baseCatalogs(credentials);
+  const sourceLocation = catalogs.locations.find(location=>location.opsVistaLocation===entity);
+  if (!sourceLocation) throw new Error(`${entity} no tiene una locación correspondiente en Restaurant365.`);
+  const transactionResult = await monthTransactionRows(credentials,month,sourceLocation.id);
+  const transactions = transactionResult.rows.map(row=>transactionFromRow(row,catalogs.companies));
+  const approved = transactions.filter(transaction=>transaction.approved);
+  const detailResult = await transactionDetails(credentials,approved.map(transaction=>transaction.id));
+  const transactionMap = new Map(approved.map(transaction=>[transaction.id.toLowerCase(),transaction]));
+  const accountMap = new Map<string,Restaurant365AccountRow>();
+  for (const account of catalogs.accounts) {
+    accountMap.set(account.id.toLowerCase(),account);
+    if (account.autoId) accountMap.set(account.autoId.toLowerCase(),account);
+  }
+  const rows: Restaurant365LedgerRow[] = detailResult.rows.map(row=>{
+    const transactionId = stringValue(row,['transactionId']).toLowerCase();
+    const transaction = transactionMap.get(transactionId);
+    const accountId = stringValue(row,['glAccountId']).toLowerCase();
+    const account = accountMap.get(accountId);
+    const classification = classifyAccount(account);
+    const debit = money(numberValue(row,['debit']));
+    const credit = money(numberValue(row,['credit']));
+    return {
+      id:stringValue(row,['transactionDetailAutoId','transactionDetailId']),transactionId,
+      date:transaction?.date||'',transactionNumber:transaction?.number,transactionName:transaction?.name||'Transacción sin encabezado',
+      transactionType:transaction?.type||'Sin tipo',vendor:transaction?.vendor,accountId,
+      accountNumber:account?.number,accountName:account?.name||'Cuenta GL sin correspondencia',glType:account?.glType,
+      operationalCategory:account?.operationalCategory,classification,comment:stringValue(row,['comment'])||undefined,
+      debit,credit,balance:money(debit-credit),
+    };
+  }).filter(row=>transactionMap.has(row.transactionId));
+
+  const accountTotals = new Map<string,Restaurant365LedgerSnapshot['accounts'][number]>();
+  for (const row of rows) {
+    const current = accountTotals.get(row.accountId) || {
+      id:row.accountId,number:row.accountNumber,name:row.accountName,glType:row.glType,operationalCategory:row.operationalCategory,
+      classification:row.classification,debit:0,credit:0,balance:0,pnlAmount:0,lineCount:0,
+    };
+    current.debit = money(current.debit+row.debit);
+    current.credit = money(current.credit+row.credit);
+    current.balance = money(current.debit-current.credit);
+    current.pnlAmount = pnlAmount(current.classification,current.debit,current.credit);
+    current.lineCount += 1;
+    accountTotals.set(row.accountId,current);
+  }
+  const accounts = Array.from(accountTotals.values()).sort((left,right)=>Math.abs(right.pnlAmount)-Math.abs(left.pnlAmount)||left.name.localeCompare(right.name));
+  const classifications:Restaurant365LedgerRow['classification'][]=['Revenue','COGS','Labor','Operating Expense','Other Income','Other Expense','Balance Sheet','Unclassified'];
+  const groups = classifications.map(classification=>({classification,amount:money(accounts.filter(account=>account.classification===classification).reduce((sum,account)=>sum+account.pnlAmount,0)),accountCount:accounts.filter(account=>account.classification===classification).length}));
+  const groupAmount = (classification:Restaurant365LedgerRow['classification'])=>groups.find(group=>group.classification===classification)?.amount||0;
+  const transactionIdsWithDetails = new Set(rows.map(row=>row.transactionId));
+  const transactionsWithoutDetails = approved.filter(transaction=>!transactionIdsWithDetails.has(transaction.id.toLowerCase())).length;
+  const detailsWithoutGlAccount = rows.filter(row=>!accountMap.has(row.accountId)).length;
+  const unclassifiedDetailRows = rows.filter(row=>row.classification==='Unclassified').length;
+  const qualityReady = approved.length>0 && transactionsWithoutDetails===0 && detailsWithoutGlAccount===0 && unclassifiedDetailRows===0;
+  const revenue=groupAmount('Revenue'),cogs=groupAmount('COGS'),labor=groupAmount('Labor'),operatingExpense=groupAmount('Operating Expense'),otherIncome=groupAmount('Other Income'),otherExpense=groupAmount('Other Expense');
+  return {
+    provider:'restaurant365-odata',period:transactionResult.period,entity,sourceLocation:{id:sourceLocation.id,name:sourceLocation.name},fetchedAt:new Date().toISOString(),
+    totals:{transactions:transactions.length,approvedTransactions:approved.length,apInvoices:approved.filter(transaction=>/ap\s*invoice/i.test(transaction.type)).length,detailRows:rows.length,
+      debits:money(rows.reduce((sum,row)=>sum+row.debit,0)),credits:money(rows.reduce((sum,row)=>sum+row.credit,0)),revenue,cogs,labor,operatingExpense,otherIncome,otherExpense,
+      classifiedResult:money(revenue+otherIncome-cogs-labor-operatingExpense-otherExpense)},
+    groups,accounts,rows:rows.sort((left,right)=>right.date.localeCompare(left.date)||left.accountName.localeCompare(right.accountName)),
+    quality:{status:qualityReady?'ready-for-reconciliation':'incomplete',transactionDetailCoveragePct:approved.length?money((approved.length-transactionsWithoutDetails)/approved.length*100):null,
+      transactionsWithoutDetails,detailsWithoutGlAccount,unclassifiedDetailRows,duplicateTransactionIds:transactionResult.duplicates,duplicateDetailIds:detailResult.duplicates},
+    caveats:['Solo se incluyen transacciones aprobadas en los cálculos del ledger.','El resultado clasificado es preliminar hasta compararlo con el P&L oficial de Restaurant365.','El estado exacto de pago y los archivos de recibos no forman parte de estas vistas OData verificadas.'],
+  };
+}
+
+export async function getRestaurant365Ap(organizationId:string,month:string):Promise<Restaurant365ApSnapshot> {
+  const credentials = await requiredCredentials(organizationId);
+  const [catalogs,transactionResult] = await Promise.all([baseCatalogs(credentials),monthTransactionRows(credentials,month)]);
+  const transactions = transactionResult.rows.map(row=>transactionFromRow(row,catalogs.companies)).filter(transaction=>/ap\s*invoice/i.test(transaction.type)).sort((left,right)=>right.date.localeCompare(left.date));
+  return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
+    totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size},
+    caveats:['Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};
+}
+
+export async function getRestaurant365Catalog(organizationId:string,kind:'vendors'|'accounts'):Promise<Restaurant365CatalogSnapshot> {
+  const credentials = await requiredCredentials(organizationId);
+  if (kind==='vendors') {
+    const rows = await odataAll(credentials,'Company',{'$select':'companyId,companyNumber,name,comment','$orderby':'name,companyId'},10_000);
+    return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),vendors:rows.map(row=>({id:stringValue(row,['companyId','id']),number:stringValue(row,['companyNumber','number'])||undefined,name:stringValue(row,['name'])||'Vendor sin nombre',comment:stringValue(row,['comment'])||undefined})).filter(vendor=>vendor.id&&vendor.name)};
+  }
+  const rows = await odataAll(credentials,'GlAccount',{'$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName','$orderby':'glAccountNumber,glAccountId'},10_000);
+  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts:uniqueRows(rows,['glAccountId','id']).rows.map(accountFromRow)};
 }
