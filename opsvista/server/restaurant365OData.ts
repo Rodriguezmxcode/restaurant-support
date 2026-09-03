@@ -7,6 +7,7 @@ const opsVistaLocations = [...restaurantLocations, corporateLocation];
 
 type ODataRow = Record<string, unknown>;
 type ODataView = 'Location' | 'GlAccount' | 'Transaction' | 'TransactionDetail' | 'Company';
+type Restaurant365Period = { month: string; start: string; endExclusive: string };
 
 export type Restaurant365TransactionRow = {
   id: string;
@@ -183,13 +184,37 @@ function money(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function monthPeriod(month: string) {
+function validIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === value;
+}
+
+function addIsoDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate()+days);
+  return date.toISOString().slice(0,10);
+}
+
+function datePeriod(start: string, end: string):Restaurant365Period {
+  if (!validIsoDate(start)||!validIsoDate(end)||start>end) throw new Error('Selecciona un rango contable válido.');
+  const days=Math.floor((Date.parse(`${end}T00:00:00Z`)-Date.parse(`${start}T00:00:00Z`))/86_400_000)+1;
+  if (days>31) throw new Error('Restaurant365 permite consultar hasta 31 días por rango.');
+  if (start>new Date().toISOString().slice(0,10)) throw new Error('Restaurant365 no puede consultar fechas futuras.');
+  return {month:start.slice(0,7),start,endExclusive:addIsoDays(end,1)};
+}
+
+function monthPeriod(month: string):Restaurant365Period {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('El periodo de Restaurant365 debe usar el formato YYYY-MM.');
   const [year, monthNumber] = month.split('-').map(Number);
   const start = new Date(Date.UTC(year, monthNumber - 1, 1));
   const end = new Date(Date.UTC(year, monthNumber, 1));
   if (start.getTime() > Date.now()) throw new Error('Restaurant365 no puede consultar un mes futuro.');
   return { month, start: start.toISOString().slice(0,10), endExclusive: end.toISOString().slice(0,10) };
+}
+
+function requestedPeriod(startOrMonth:string,end?:string) {
+  return end?datePeriod(startOrMonth,end):monthPeriod(startOrMonth);
 }
 
 function responseRows(payload: unknown): ODataRow[] {
@@ -433,8 +458,7 @@ async function glAccountCatalog(credentials: Restaurant365Credentials, locationI
   return uniqueRows(rows,['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
 }
 
-async function monthTransactionRows(credentials: Restaurant365Credentials, month:string, locationId?:string) {
-  const period = monthPeriod(month);
+async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string) {
   const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
   const rows = await odataAll(credentials,'Transaction',{
     '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy',
@@ -453,13 +477,13 @@ async function transactionDetails(credentials: Restaurant365Credentials, transac
   return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
 }
 
-export async function getRestaurant365Ledger(organizationId:string, month:string, entity:string):Promise<Restaurant365LedgerSnapshot> {
+export async function getRestaurant365Ledger(organizationId:string, startOrMonth:string, entity:string, end?:string):Promise<Restaurant365LedgerSnapshot> {
   if (!opsVistaLocations.includes(entity)) throw new Error('La entidad solicitada no está mapeada en OpsVista.');
   const credentials = await requiredCredentials(organizationId);
   const locations = await locationCatalog(credentials);
   const sourceLocation = locations.find(location=>location.opsVistaLocation===entity);
   if (!sourceLocation) throw new Error(`${entity} no tiene una locación correspondiente en Restaurant365.`);
-  const transactionResult = await monthTransactionRows(credentials,month,sourceLocation.id);
+  const transactionResult = await periodTransactionRows(credentials,requestedPeriod(startOrMonth,end),sourceLocation.id);
   const approvedSourceRows=transactionResult.rows.filter(row=>booleanValue(row,['isApproved']));
   const [detailResult,companies] = await Promise.all([
     transactionDetails(credentials,approvedSourceRows.map(row=>stringValue(row,['transactionId','id']))),
@@ -527,16 +551,12 @@ export async function getRestaurant365Ledger(organizationId:string, month:string
   };
 }
 
-export async function getRestaurant365Ap(organizationId:string,month:string):Promise<Restaurant365ApSnapshot> {
+export async function getRestaurant365Ap(organizationId:string,startOrMonth:string,end?:string):Promise<Restaurant365ApSnapshot> {
   const credentials = await requiredCredentials(organizationId);
-  const locations=await locationCatalog(credentials);
-  const mappedLocations=locations.filter(location=>location.opsVistaLocation&&location.id);
-  const locationResults=await parallelMap(mappedLocations,1,location=>monthTransactionRows(credentials,month,location.id));
-  const combined=uniqueRows(locationResults.flatMap(result=>result.rows),['transactionId','id']);
-  const transactionResult={period:monthPeriod(month),...combined};
+  const transactionResult=await periodTransactionRows(credentials,requestedPeriod(startOrMonth,end));
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
   const companies=await companiesForTransactions(credentials,apSourceRows);
-  const transactions = apSourceRows.map(row=>transactionFromRow(row,companies)).sort((left,right)=>right.date.localeCompare(left.date));
+  const transactions = apSourceRows.map(row=>transactionFromRow(row,companies)).filter(row=>Boolean(row.entity)).sort((left,right)=>right.date.localeCompare(left.date));
   return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
     totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size},
     caveats:['Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};

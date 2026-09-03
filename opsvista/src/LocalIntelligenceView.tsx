@@ -13,7 +13,8 @@ type LocalRow = {
   assessment: { level: 'high' | 'watch' | 'normal'; summary: string; recommendations: string[] };
 };
 type HorizonKey = 'today' | 'tomorrow' | 'next_7' | 'next_14' | 'next_30';
-type Payload = { source?: string; sharedSource?: boolean; fetchedAt: string; horizonDays: number; horizonKey?: HorizonKey; rangeStart?: string; rangeEnd?: string; providers: Provider[]; locations: LocalRow[] };
+type RadiusMiles = 5 | 10 | 15 | 20;
+type Payload = { source?: string; sharedSource?: boolean; fetchedAt: string; horizonDays: number; horizonKey?: HorizonKey; radiusMiles?:RadiusMiles; rangeStart?: string; rangeEnd?: string; providers: Provider[]; locations: LocalRow[] };
 
 const horizonOptions: Record<HorizonKey, { label: string; detail: string }> = {
   today: { label: 'Hoy', detail: 'Señales actuales y eventos publicados de hoy' },
@@ -21,6 +22,12 @@ const horizonOptions: Record<HorizonKey, { label: string; detail: string }> = {
   next_7: { label: 'Próximos 7 días', detail: 'Eventos publicados en el horizonte operativo de una semana' },
   next_14: { label: 'Próximos 14 días', detail: 'Eventos publicados para apoyar staffing y prep' },
   next_30: { label: 'Próximos 30 días', detail: 'Eventos y riesgos publicados del próximo mes' },
+};
+const radiusOptions:Record<RadiusMiles,{label:string;impact:string}>={
+  5:{label:'1–5 millas',impact:'Impacto directo: prepara inventario, staffing y promociones'},
+  10:{label:'10 millas',impact:'Impacto alto: vigila demanda, reservas y rutas'},
+  15:{label:'15 millas',impact:'Impacto regional: úsalo para planificación y marketing'},
+  20:{label:'20 millas',impact:'Panorama amplio: descubre eventos y oportunidades de mercado'},
 };
 
 const stateLabel: Record<Provider['state'], string> = { live: 'En vivo', fallback: 'Fallback en vivo', error: 'Error', not_configured: 'No configurada' };
@@ -42,6 +49,10 @@ export default function LocalIntelligenceView({ allowedLocations, initialLocatio
     const saved = window.localStorage.getItem('opsvista-local-intelligence-horizon') as HorizonKey | null;
     return saved && saved in horizonOptions ? saved : 'today';
   });
+  const [radius,setRadius]=useState<RadiusMiles>(()=>{
+    const saved=Number(window.localStorage.getItem('opsvista-local-intelligence-radius')) as RadiusMiles;
+    return saved in radiusOptions?saved:5;
+  });
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -49,7 +60,7 @@ export default function LocalIntelligenceView({ allowedLocations, initialLocatio
   const load = async () => {
     setLoading(true); setError('');
     try {
-      const query = new URLSearchParams({ location, horizon });
+      const query = new URLSearchParams({ location, horizon, radius:String(radius) });
       const response = await fetch(`/api/local-intelligence?${query}`, { credentials: 'include', cache: 'no-store' });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `Local Intelligence ${response.status}`);
@@ -67,8 +78,9 @@ export default function LocalIntelligenceView({ allowedLocations, initialLocatio
   useEffect(() => {
     window.localStorage.setItem('opsvista-local-intelligence-location', location);
     window.localStorage.setItem('opsvista-local-intelligence-horizon', horizon);
+    window.localStorage.setItem('opsvista-local-intelligence-radius',String(radius));
     void load();
-  }, [location, horizon]);
+  }, [location, horizon, radius]);
   const highRisk = useMemo(() => payload?.locations.filter(row => row.assessment.level === 'high').length ?? 0, [payload]);
   const events = useMemo(() => payload?.locations.reduce((sum, row) => sum + (row.events?.eventCount ?? 0), 0) ?? 0, [payload]);
 
@@ -76,7 +88,8 @@ export default function LocalIntelligenceView({ allowedLocations, initialLocatio
     <section className="local-control-bar">
       <label><span>LOCATION</span><select value={location} onChange={event => setLocation(event.target.value)}><option>All locations</option>{allowedLocations.map(item => <option key={item}>{item}</option>)}</select></label>
       <div className="local-horizon-control"><span>PERIODO</span><div className="local-horizon-tabs" role="group" aria-label="Periodo de Local Intelligence">{Object.entries(horizonOptions).map(([value, option]) => <button key={value} type="button" className={horizon === value ? 'active' : ''} aria-pressed={horizon === value} onClick={() => setHorizon(value as HorizonKey)}>{option.label}</button>)}</div></div>
-      <div><span>RESULTADOS MOSTRADOS</span><strong>{horizonOptions[horizon].label}{payload?.rangeStart && payload?.rangeEnd ? ` · ${payload.rangeStart} → ${payload.rangeEnd}` : ''}</strong><small>{horizonOptions[horizon].detail}. El pronóstico muestra la cobertura disponible, los eventos respetan todo el horizonte y el tráfico se identifica como señal actual.</small></div>
+      <div className="local-radius-control"><span>RANGO DE DISTANCIA</span><div className="local-radius-tabs" role="group" aria-label="Radio de Local Intelligence">{(Object.keys(radiusOptions).map(Number) as RadiusMiles[]).map(value=><button key={value} type="button" className={radius===value?'active':''} aria-pressed={radius===value} onClick={()=>setRadius(value)}>{radiusOptions[value].label}</button>)}</div></div>
+      <div><span>RESULTADOS MOSTRADOS</span><strong>{horizonOptions[horizon].label} · {radiusOptions[radius].label}{payload?.rangeStart && payload?.rangeEnd ? ` · ${payload.rangeStart} → ${payload.rangeEnd}` : ''}</strong><small>{radiusOptions[radius].impact}. {horizonOptions[horizon].detail}; eventos e incidentes respetan el radio seleccionado.</small></div>
       <button onClick={() => void load()} disabled={loading}>↻ {loading ? 'Actualizando…' : 'Actualizar señales'}</button>
     </section>
 
@@ -99,7 +112,7 @@ export default function LocalIntelligenceView({ allowedLocations, initialLocatio
         <div className="local-signal-grid">
           <section><span>{showForecast ? 'PRONÓSTICO' : 'CLIMA ACTUAL'}</span>{row.weather ? showForecast ? <><strong>{Math.round(forecast?.lowF ?? 0)}°–{Math.round(forecast?.highF ?? 0)}°F</strong><small>{Math.round(forecast?.maxPrecipProbability ?? 0)}% lluvia · viento máximo {Math.round(forecast?.maxWindMph ?? 0)} mph</small><p>{forecast?.daysAvailable} de {forecast?.requestedDays} día{forecast?.requestedDays === 1 ? '' : 's'} con pronóstico disponible{forecast?.rangeStart && forecast?.rangeEnd ? ` · ${forecast.rangeStart} → ${forecast.rangeEnd}` : ''}</p></> : <><strong>{Math.round(row.weather.temperature)}°F</strong><small>Sensación {Math.round(row.weather.feelsLike)}° · viento {Math.round(row.weather.windMph)} mph</small><p>{row.weather.phrase}{row.weather.precipitation > 0 ? ` · ${row.weather.precipitation} in` : ''}</p></> : <p className="source-failure">{row.errors.weather || 'Sin datos'}</p>}</section>
           <section><span>TRÁFICO</span>{row.traffic ? <><strong>{Math.round(row.traffic.currentSpeed)} mph</strong><small>Flujo libre {Math.round(row.traffic.freeFlowSpeed)} mph · congestión {row.traffic.congestionPct}%</small><p>{row.traffic.roadClosure ? 'Cierre vial detectado' : row.traffic.topIncident || `${row.traffic.incidentCount} incidentes cercanos`}</p></> : <p className="source-failure">{row.errors.traffic || 'TomTom no configurado'}</p>}</section>
-          <section><span>EVENTOS CERCANOS</span>{row.events ? <><strong>{row.events.eventCount}</strong><small>{horizonOptions[horizon].label} · radio de 25 millas</small><div className="local-events">{row.events.events.slice(0, 3).map(event => <p key={event.id}><b>{event.name}</b><em>{formatEventDate(event.date)} · {event.venue}</em>{event.url && <a href={event.url} target="_blank" rel="noreferrer">Ver ↗</a>}</p>)}{!row.events.events.length && <p>Sin eventos publicados.</p>}</div></> : <p className="source-failure">{row.errors.events || 'Ticketmaster no configurado'}</p>}</section>
+          <section><span>EVENTOS CERCANOS</span>{row.events ? <><strong>{row.events.eventCount}</strong><small>{horizonOptions[horizon].label} · radio de {radiusOptions[radius].label}</small><div className="local-events">{row.events.events.slice(0, 3).map(event => <p key={event.id}><b>{event.name}</b><em>{formatEventDate(event.date)} · {event.venue}</em>{event.url && <a href={event.url} target="_blank" rel="noreferrer">Ver ↗</a>}</p>)}{!row.events.events.length && <p>Sin eventos publicados.</p>}</div></> : <p className="source-failure">{row.errors.events || 'Ticketmaster no configurado'}</p>}</section>
         </div>
         <div className="local-recommendation"><span>ACCIÓN RECOMENDADA</span>{row.assessment.recommendations.map(item => <p key={item}>• {item}</p>)}</div>
         <footer>Actualizado {formatUpdated(row.weather?.updatedAt || row.traffic?.updatedAt || payload?.fetchedAt)}</footer>

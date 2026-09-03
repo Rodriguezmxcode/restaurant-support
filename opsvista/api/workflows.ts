@@ -3,7 +3,7 @@ import { createPayment, decidePayment, getPayment, issuePayment, listPayments, p
 import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getWeeklyGoogleReviews } from '../server/googleBusinessReviews.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
-import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, type LocalIntelligenceHorizonKey } from '../server/localIntelligence.js';
+import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, localIntelligenceRadii, type LocalIntelligenceHorizonKey, type LocalIntelligenceRadiusMiles } from '../server/localIntelligence.js';
 import { authorize } from '../server/authorization.js';
 import { createAction, getAction, listActionAudit, listActions, updateActionRecord, type ActionSeverity, type ActionStatus, type ActionVerificationStatus } from '../server/actionStore.js';
 import { createProject, getProject, listProjectAudit, listProjects, updateProjectRecord, type ProjectMilestone, type ProjectPriority, type ProjectStatus } from '../server/projectStore.js';
@@ -266,8 +266,10 @@ async function restaurant365Integration(req:ApiRequest,res:ApiResponse,user:NonN
   if(view){
    res.setHeader?.('Cache-Control','private, max-age=300, stale-while-revalidate=300');
    const month=q(req,'month')||'2026-08';
-   if(view==='ledger')return res.status(200).json(await getRestaurant365Ledger(organizationId,month,q(req,'entity')||'Corporate Office'));
-   if(view==='ap')return res.status(200).json(await getRestaurant365Ap(organizationId,month));
+   const start=q(req,'start'),end=q(req,'end');
+   if(Boolean(start)!==Boolean(end))return res.status(400).json({error:'Selecciona una fecha inicial y final para Restaurant365.'});
+   if(view==='ledger')return res.status(200).json(await getRestaurant365Ledger(organizationId,start||month,q(req,'entity')||'Corporate Office',start?end:undefined));
+   if(view==='ap')return res.status(200).json(await getRestaurant365Ap(organizationId,start||month,start?end:undefined));
    if(view==='vendors'||view==='accounts')return res.status(200).json(await getRestaurant365Catalog(organizationId,view));
    return res.status(400).json({error:'Vista de Restaurant365 desconocida.'});
   }
@@ -296,11 +298,13 @@ async function localIntelligence(req:ApiRequest,res:ApiResponse,user:NonNullable
  const requested=q(req,'location');
  const horizonKey=(q(req,'horizon')||'next_14') as LocalIntelligenceHorizonKey;
  if(!(horizonKey in localIntelligenceHorizons))return res.status(400).json({error:'Unknown Local Intelligence period'});
+ const radiusMiles=Number(q(req,'radius')||'5') as LocalIntelligenceRadiusMiles;
+ if(!localIntelligenceRadii.includes(radiusMiles))return res.status(400).json({error:'Local Intelligence radius must be 5, 10, 15 or 20 miles'});
  const unrestricted=['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role);
  const selected=requested&&requested!=='All locations'?[requested]:unrestricted?undefined:user.locations;
  if(selected?.some(location=>!localIntelligenceLocationNames.includes(location)))return res.status(400).json({error:'Unknown location'});
  if(!unrestricted&&selected?.some(location=>!user.locations.includes(location)))return res.status(403).json({error:'Location outside your access scope'});
- const payload=await getLocalIntelligence(selected,localIntelligenceHorizons[horizonKey]);
+ const payload=await getLocalIntelligence(selected,localIntelligenceHorizons[horizonKey],radiusMiles);
  res.setHeader?.('Cache-Control','private, max-age=60, stale-while-revalidate=120');
  return res.status(200).json(payload);
 }
