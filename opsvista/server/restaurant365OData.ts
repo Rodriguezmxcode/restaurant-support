@@ -12,6 +12,7 @@ type Restaurant365Period = { month: string; start: string; endExclusive: string 
 export type Restaurant365TransactionRow = {
   id: string;
   date: string;
+  createdOn?: string;
   number?: string;
   name: string;
   type: string;
@@ -174,6 +175,17 @@ function stringValue(row: ODataRow, candidates: string[]) {
 function numberValue(row: ODataRow, candidates: string[]) {
   const result = Number(value(row, candidates));
   return Number.isFinite(result) ? result : 0;
+}
+
+function accountingNumber(row: ODataRow, candidates: string[]) {
+  const raw = value(row,candidates);
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  if (raw === undefined || raw === null) return 0;
+  const text = String(raw).trim();
+  const negative = /^\(.*\)$/.test(text);
+  const parsed = Number(text.replace(/[,$()\s]/g,''));
+  if (!Number.isFinite(parsed)) return 0;
+  return negative ? -Math.abs(parsed) : parsed;
 }
 
 function booleanValue(row: ODataRow, candidates: string[]) {
@@ -352,6 +364,7 @@ function transactionFromRow(row: ODataRow, companies: Map<string,string>): Resta
   return {
     id: stringValue(row,['transactionId','id']),
     date: stringValue(row,['date']),
+    createdOn: stringValue(row,['createdOn']) || undefined,
     number: stringValue(row,['transactionNumber','number']) || undefined,
     name: stringValue(row,['name']) || 'Transacción sin nombre',
     type: stringValue(row,['type']) || 'Sin tipo',
@@ -463,7 +476,7 @@ async function glAccountCatalog(credentials: Restaurant365Credentials, locationI
 async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string) {
   const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
   const rows = await odataAll(credentials,'Transaction',{
-    '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy',
+    '$select':'transactionId,locationId,locationName,date,createdOn,transactionNumber,name,type,isApproved,companyId,createdBy',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
   },10_000,50);
   return {period,...uniqueRows(rows,['transactionId','id'])};
@@ -480,20 +493,25 @@ async function transactionDetails(credentials: Restaurant365Credentials, transac
 }
 
 function invoiceAmounts(rows:ODataRow[]) {
-  const totals=new Map<string,{debit:number;credit:number}>();
+  const totals=new Map<string,{debit:number;credit:number;largestLine:number;detailCount:number}>();
   for(const row of rows){
     const transactionId=stringValue(row,['transactionId']).toLowerCase();
     if(!transactionId)continue;
-    const current=totals.get(transactionId)||{debit:0,credit:0};
-    current.debit+=numberValue(row,['debit']);
-    current.credit+=numberValue(row,['credit']);
+    const current=totals.get(transactionId)||{debit:0,credit:0,largestLine:0,detailCount:0};
+    current.debit+=accountingNumber(row,['debit']);
+    current.credit+=accountingNumber(row,['credit']);
+    current.largestLine=Math.max(current.largestLine,Math.abs(accountingNumber(row,['amount'])));
+    current.detailCount+=1;
     totals.set(transactionId,current);
   }
-  return new Map(Array.from(totals.entries()).map(([id,total])=>[id,money(Math.max(Math.abs(total.debit),Math.abs(total.credit)))||null]));
+  return new Map(Array.from(totals.entries()).map(([id,total])=>{
+    const amount=money(Math.max(Math.abs(total.debit),Math.abs(total.credit),total.largestLine));
+    return [id,total.detailCount && amount>0 ? amount : null] as const;
+  }));
 }
 
 export async function getRestaurant365Ledger(organizationId:string, startOrMonth:string, entity:string, end?:string):Promise<Restaurant365LedgerSnapshot> {
-  if (!opsVistaLocations.includes(entity)) throw new Error('La entidad solicitada no está mapeada en OpsVista.');
+  if (!opsVistaLocations.includes(entity)) throw new Error('La locación solicitada no está mapeada en OpsVista.');
   const credentials = await requiredCredentials(organizationId);
   const locations = await locationCatalog(credentials);
   const sourceLocation = locations.find(location=>location.opsVistaLocation===entity);
@@ -572,7 +590,7 @@ export async function getRestaurant365Ap(organizationId:string,startOrMonth:stri
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
   const [companies,detailResult]=await Promise.all([companiesForTransactions(credentials,apSourceRows),transactionDetails(credentials,apSourceRows.map(row=>stringValue(row,['transactionId','id'])))]);
   const amounts=invoiceAmounts(detailResult.rows);
-  const transactions = apSourceRows.map(row=>{const transaction=transactionFromRow(row,companies);return{...transaction,amount:amounts.get(transaction.id.toLowerCase())??null};}).filter(row=>Boolean(row.entity)).sort((left,right)=>right.date.localeCompare(left.date));
+  const transactions = apSourceRows.map(row=>{const transaction=transactionFromRow(row,companies);return{...transaction,amount:amounts.get(transaction.id.toLowerCase())??null};}).filter(row=>Boolean(row.entity)).sort((left,right)=>left.date.localeCompare(right.date)||left.createdOn?.localeCompare(right.createdOn||'')||0);
   return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
     totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size,amount:money(transactions.reduce((sum,row)=>sum+(row.amount||0),0)),approvedAmount:money(transactions.filter(row=>row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),pendingAmount:money(transactions.filter(row=>!row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),invoicesWithoutAmount:transactions.filter(row=>row.amount===null).length},
     caveats:['El monto se calcula desde los débitos y créditos del detalle contable de cada factura.','Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};
