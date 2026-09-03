@@ -17,7 +17,9 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Location filters and search
 - Assign / Create Task / Investigate / Dismiss demo interactions
 - Verification loop concept
-- Roadmap placeholders for Evidence Audit, Ramp Compliance, Labor Intelligence, and OpsVista AI Copilot
+- Persistent OpsVista Assistant chat available from every authorized module
+- Bilingual Q&A routing for managers with role- and location-aware module links
+- Grounded operational answers using the user's current Action Center scope
 
 ## Existing product areas represented in navigation
 
@@ -53,7 +55,7 @@ The Action Center metrics and alerts in this branch are representative demo valu
 2. Add Evidence Audit (photo requirement, approve/reject, resubmit, before/after)
 3. Add Ramp memo/receipt compliance signals
 4. Add projected labor and overtime rules
-5. Add OpsVista AI explanation layer
+5. Connect the OpsVista Assistant to additional verified live module adapters
 6. Add mobile API contracts for native iOS/Android clients
 
 ## Safety
