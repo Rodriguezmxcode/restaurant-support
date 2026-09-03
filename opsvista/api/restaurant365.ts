@@ -3,8 +3,6 @@ import { authorize } from '../server/authorization.js';
 import { disconnectRestaurant365, saveRestaurant365Credentials } from '../server/integrationStore.js';
 import { getRestaurant365Ap, getRestaurant365Catalog, getRestaurant365Ledger, getRestaurant365Status } from '../server/restaurant365OData.js';
 
-export const config={maxDuration:120};
-
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 
