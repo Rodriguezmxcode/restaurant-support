@@ -489,12 +489,12 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
     transactionDetails(credentials,approvedSourceRows.map(row=>stringValue(row,['transactionId','id']))),
     companiesForTransactions(credentials,approvedSourceRows),
   ]);
-  const accounts=await glAccountsForDetails(credentials,detailResult.rows);
+  const accountCatalog=await glAccountsForDetails(credentials,detailResult.rows);
   const transactions = transactionResult.rows.map(row=>transactionFromRow(row,companies));
   const approved = transactions.filter(transaction=>transaction.approved);
   const transactionMap = new Map(approved.map(transaction=>[transaction.id.toLowerCase(),transaction]));
   const accountMap = new Map<string,Restaurant365AccountRow>();
-  for (const account of accounts) {
+  for (const account of accountCatalog) {
     accountMap.set(account.id.toLowerCase(),account);
     if (account.autoId) accountMap.set(account.autoId.toLowerCase(),account);
   }
