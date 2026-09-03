@@ -33,7 +33,14 @@ const preciseMoney=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD
 function lastCompleteMonth(){const now=new Date();return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-1,1)).toISOString().slice(0,7);}
 function monthLabel(month:string){const [year,value]=month.split('-').map(Number);return new Intl.DateTimeFormat('es-MX',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(Date.UTC(year,value-1,1)));}
 function dateLabel(value:string){if(!value)return '—';const date=new Date(value);return Number.isNaN(date.getTime())?value:new Intl.DateTimeFormat('es-MX',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(date);}
-async function requestJson<T>(url:string,signal?:AbortSignal){const response=await fetch(url,{credentials:'include',cache:'no-store',signal});const body=await response.json().catch(()=>({})) as T&{error?:string};if(!response.ok)throw new Error(body.error||'Restaurant365 no pudo entregar la información.');return body;}
+async function requestJson<T>(url:string,signal?:AbortSignal){
+  const response=await fetch(url,{credentials:'include',cache:'no-store',signal});
+  const raw=await response.text();
+  let body={} as T&{error?:string};
+  try{body=raw?JSON.parse(raw) as T&{error?:string}:body;}catch{/* A platform error can return HTML or plain text. */}
+  if(!response.ok){const platform=response.headers.get('x-vercel-error');throw new Error(body.error||`Restaurant365 no pudo entregar la información · HTTP ${response.status}${platform?` · ${platform}`:''}.`);}
+  return body;
+}
 
 function Loading(){return <section className="panel r365-state"><span className="r365-spinner"/><strong>Consultando Restaurant365…</strong><p>La primera lectura del mes puede tardar mientras se unen transacciones, detalles y cuentas GL.</p></section>}
 function ErrorState({message,onRetry}:{message:string;onRetry:()=>void}){return <section className="panel r365-state error"><strong>No se pudo completar esta vista</strong><p>{message}</p><button type="button" onClick={onRetry}>Intentar nuevamente</button></section>}

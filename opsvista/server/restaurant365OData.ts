@@ -399,7 +399,6 @@ async function companiesForTransactions(credentials:Restaurant365Credentials,row
   const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'Company',{
     '$select':'companyId,name',
     '$filter':batch.map(id=>`companyId eq ${id}`).join(' or '),
-    '$orderby':'companyId',
   },500,100));
   return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
 }
@@ -408,9 +407,8 @@ async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:OD
   const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean)));
   if(!ids.length)return [] as Restaurant365AccountRow[];
   const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'GlAccount',{
-    '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName',
+    '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory',
     '$filter':batch.map(id=>/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`).join(' or '),
-    '$orderby':'glAccountAutoId',
   },500,100));
   return uniqueRows(pages.flat(),['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
 }
@@ -439,10 +437,9 @@ async function monthTransactionRows(credentials: Restaurant365Credentials, month
   const period = monthPeriod(month);
   const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
   const rows = await odataAll(credentials,'Transaction',{
-    '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy,createdOn,modifiedOn',
+    '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
-    '$orderby':'date,transactionNumber,transactionId',
-  },10_000,250);
+  },10_000,100);
   return {period,...uniqueRows(rows,['transactionId','id'])};
 }
 
@@ -450,10 +447,9 @@ async function transactionDetails(credentials: Restaurant365Credentials, transac
   const ids=transactionIds.map(odataIdentifier).filter(Boolean);
   const batches = chunks(ids,40);
   const pages = await parallelMap(batches,6,batch=>odataAll(credentials,'TransactionDetail',{
-    '$select':'transactionDetailAutoId,transactionDetailId,transactionId,locationId,glAccountId,item,credit,debit,amount,quantity,adjustment,unitOfMeasureName,comment,createdOn,modifiedOn',
+    '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,comment',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
-    '$orderby':'transactionId,transactionDetailAutoId',
-  },10_000));
+  },5_000,250));
   return uniqueRows(pages.flat(),['transactionDetailAutoId','transactionDetailId']);
 }
 
@@ -533,7 +529,11 @@ export async function getRestaurant365Ledger(organizationId:string, month:string
 
 export async function getRestaurant365Ap(organizationId:string,month:string):Promise<Restaurant365ApSnapshot> {
   const credentials = await requiredCredentials(organizationId);
-  const transactionResult=await monthTransactionRows(credentials,month);
+  const locations=await locationCatalog(credentials);
+  const mappedLocations=locations.filter(location=>location.opsVistaLocation&&location.id);
+  const locationResults=await parallelMap(mappedLocations,3,location=>monthTransactionRows(credentials,month,location.id));
+  const combined=uniqueRows(locationResults.flatMap(result=>result.rows),['transactionId','id']);
+  const transactionResult={period:monthPeriod(month),...combined};
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
   const companies=await companiesForTransactions(credentials,apSourceRows);
   const transactions = apSourceRows.map(row=>transactionFromRow(row,companies)).sort((left,right)=>right.date.localeCompare(left.date));
