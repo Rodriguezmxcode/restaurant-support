@@ -388,6 +388,33 @@ async function parallelMap<T,R>(items:T[], concurrency:number, callback:(item:T)
   return results;
 }
 
+function odataIdentifier(value:string) {
+  const candidate=value.trim();
+  return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(candidate)||/^\d+$/.test(candidate)?candidate:'';
+}
+
+async function companiesForTransactions(credentials:Restaurant365Credentials,rows:ODataRow[]) {
+  const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['companyId']))).filter(Boolean)));
+  if(!ids.length)return new Map<string,string>();
+  const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'Company',{
+    '$select':'companyId,name',
+    '$filter':batch.map(id=>`companyId eq ${id}`).join(' or '),
+    '$orderby':'companyId',
+  },500,100));
+  return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
+}
+
+async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:ODataRow[]) {
+  const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean)));
+  if(!ids.length)return [] as Restaurant365AccountRow[];
+  const pages=await parallelMap(chunks(ids,40),5,batch=>odataAll(credentials,'GlAccount',{
+    '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName',
+    '$filter':batch.map(id=>/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`).join(' or '),
+    '$orderby':'glAccountAutoId',
+  },500,100));
+  return uniqueRows(pages.flat(),['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
+}
+
 async function locationCatalog(credentials: Restaurant365Credentials) {
   const rows = await odataAll(credentials,'Location',{'$select':'locationId,locationNumber,name','$orderby':'name,locationId'},1_000);
   return rows.map(locationFromRow).filter(location=>location.id&&location.name);
@@ -415,13 +442,14 @@ async function monthTransactionRows(credentials: Restaurant365Credentials, month
     '$select':'transactionId,locationId,locationName,date,transactionNumber,name,type,isApproved,companyId,createdBy,createdOn,modifiedOn',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
     '$orderby':'date,transactionNumber,transactionId',
-  },10_000);
+  },10_000,250);
   return {period,...uniqueRows(rows,['transactionId','id'])};
 }
 
 async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[]) {
-  const batches = chunks(transactionIds.filter(Boolean),12);
-  const pages = await parallelMap(batches,4,batch=>odataAll(credentials,'TransactionDetail',{
+  const ids=transactionIds.map(odataIdentifier).filter(Boolean);
+  const batches = chunks(ids,40);
+  const pages = await parallelMap(batches,6,batch=>odataAll(credentials,'TransactionDetail',{
     '$select':'transactionDetailAutoId,transactionDetailId,transactionId,locationId,glAccountId,item,credit,debit,amount,quantity,adjustment,unitOfMeasureName,comment,createdOn,modifiedOn',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
     '$orderby':'transactionId,transactionDetailAutoId',
@@ -435,14 +463,15 @@ export async function getRestaurant365Ledger(organizationId:string, month:string
   const locations = await locationCatalog(credentials);
   const sourceLocation = locations.find(location=>location.opsVistaLocation===entity);
   if (!sourceLocation) throw new Error(`${entity} no tiene una locación correspondiente en Restaurant365.`);
-  const [accounts,companyResult,transactionResult] = await Promise.all([
-    glAccountCatalog(credentials,sourceLocation.id),
-    companyCatalog(credentials),
-    monthTransactionRows(credentials,month,sourceLocation.id),
+  const transactionResult = await monthTransactionRows(credentials,month,sourceLocation.id);
+  const approvedSourceRows=transactionResult.rows.filter(row=>booleanValue(row,['isApproved']));
+  const [detailResult,companies] = await Promise.all([
+    transactionDetails(credentials,approvedSourceRows.map(row=>stringValue(row,['transactionId','id']))),
+    companiesForTransactions(credentials,approvedSourceRows),
   ]);
-  const transactions = transactionResult.rows.map(row=>transactionFromRow(row,companyResult.companies));
+  const accounts=await glAccountsForDetails(credentials,detailResult.rows);
+  const transactions = transactionResult.rows.map(row=>transactionFromRow(row,companies));
   const approved = transactions.filter(transaction=>transaction.approved);
-  const detailResult = await transactionDetails(credentials,approved.map(transaction=>transaction.id));
   const transactionMap = new Map(approved.map(transaction=>[transaction.id.toLowerCase(),transaction]));
   const accountMap = new Map<string,Restaurant365AccountRow>();
   for (const account of accounts) {
@@ -504,8 +533,10 @@ export async function getRestaurant365Ledger(organizationId:string, month:string
 
 export async function getRestaurant365Ap(organizationId:string,month:string):Promise<Restaurant365ApSnapshot> {
   const credentials = await requiredCredentials(organizationId);
-  const [companyResult,transactionResult] = await Promise.all([companyCatalog(credentials),monthTransactionRows(credentials,month)]);
-  const transactions = transactionResult.rows.map(row=>transactionFromRow(row,companyResult.companies)).filter(transaction=>/ap\s*invoice/i.test(transaction.type)).sort((left,right)=>right.date.localeCompare(left.date));
+  const transactionResult=await monthTransactionRows(credentials,month);
+  const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
+  const companies=await companiesForTransactions(credentials,apSourceRows);
+  const transactions = apSourceRows.map(row=>transactionFromRow(row,companies)).sort((left,right)=>right.date.localeCompare(left.date));
   return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
     totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size},
     caveats:['Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};

@@ -15,6 +15,8 @@ import { getRestaurant365Ap, getRestaurant365Catalog, getRestaurant365Ledger, ge
 import { getManagedUser, listManagedUsers, type ManagedDirectoryUser } from '../server/managementStore.js';
 import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
 
+export const config={maxDuration:120};
+
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
