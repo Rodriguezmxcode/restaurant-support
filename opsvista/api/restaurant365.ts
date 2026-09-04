@@ -13,7 +13,7 @@ const query=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
   const requestId=`r365-${Date.now().toString(36)}`;
-  res.setHeader?.('X-OpsVista-R365-Version','r365-api-v6');
+  res.setHeader?.('X-OpsVista-R365-Version','r365-api-v8');
   res.setHeader?.('X-OpsVista-Request-Id',requestId);
   res.setHeader?.('Cache-Control','private, no-store');
   try{
