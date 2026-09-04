@@ -225,3 +225,138 @@
     text-align: left;
   }
 }
+
+.r365-gl-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.r365-gl-reference {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid #dce6f0;
+  background: #eef7ff;
+  color: #244c75;
+}
+
+.r365-gl-reference strong {
+  white-space: nowrap;
+}
+
+.r365-gl-reference span {
+  color: #5d7691;
+  font-size: 11px;
+}
+
+.r365-gl-toolbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  padding: 16px 18px;
+  border-bottom: 1px solid #dfe7f0;
+  background: #f8fbff;
+}
+
+.r365-gl-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.r365-gl-toolbar label > span {
+  color: #607894;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.r365-gl-toolbar select,
+.r365-gl-toolbar input {
+  width: 100%;
+  border: 1px solid #c9d7e7;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #183052;
+}
+
+.r365-gl-search {
+  grid-column: span 2;
+}
+
+.r365-gl-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 18px;
+  border-bottom: 1px solid #dfe7f0;
+}
+
+.r365-gl-actions button {
+  border: 1px solid #b9cce1;
+  border-radius: 9px;
+  padding: 9px 12px;
+  background: #fff;
+  color: #23496f;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.r365-gl-actions button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.r365-gl-actions span {
+  color: #6b7e97;
+  font-size: 11px;
+}
+
+.r365-gl-table {
+  min-width: 1260px !important;
+}
+
+.r365-pnl-section {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: #eaf3ff;
+  color: #245f9f;
+  font-size: 9px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.r365-pnl-section.review {
+  background: #fff2d9;
+  color: #97610d;
+}
+
+@media(max-width:1200px) {
+  .r365-gl-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .r365-gl-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media(max-width:760px) {
+  .r365-gl-metrics,
+  .r365-gl-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .r365-gl-search {
+    grid-column: auto;
+  }
+
+  .r365-gl-reference,
+  .r365-gl-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
