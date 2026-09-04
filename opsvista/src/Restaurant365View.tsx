@@ -8,6 +8,8 @@ type PeriodKey='today'|'yesterday'|'this-week'|'prior-week'|'this-month'|'prior-
 type InvoiceStatusFilter='all'|'approved'|'pending';
 type InvoiceSort='oldest'|'newest'|'created-oldest'|'created-newest'|'highest'|'lowest'|'vendor'|'invoice'|'location'|'status';
 type Classification='Revenue'|'COGS'|'Labor'|'Operating Expense'|'Other Income'|'Other Expense'|'Balance Sheet'|'Unclassified';
+type PnlSection='Sales'|'Cost of Sales'|'Labor'|'Operating Expenses'|'Occupancy'|'Non-operating / Extraordinary'|'Balance Sheet'|'Review';
+type PnlMapping={section:PnlSection;category:string;status:'mapped'|'review'};
 type Status={
   configured:boolean;connected:boolean;mappedLocationCount:number;mappedRestaurantCount:number;corporateMapped:boolean;pnlReady:boolean;
   checkedAt?:string;latestTransactionAt?:string;error?:string;
@@ -31,6 +33,8 @@ type Catalog={fetchedAt:string;vendors?:Array<{id:string;number?:string;name:str
 const tabs:Tab[]=['Resumen','P&L','Facturas y AP','Corporate Office','Vendors','Cuentas GL','Conexión'];
 const entities=['Stamford','Orange','Fairfield','Danbury','Avon','Southington','Corporate Office'];
 const classLabels:Record<Classification,string>={Revenue:'Ingresos',COGS:'COGS',Labor:'Labor','Operating Expense':'Gastos operativos','Other Income':'Otros ingresos','Other Expense':'Otros gastos','Balance Sheet':'Balance general',Unclassified:'Sin clasificar'};
+const pnlSectionOrder:PnlSection[]=['Sales','Cost of Sales','Labor','Operating Expenses','Occupancy','Non-operating / Extraordinary','Balance Sheet','Review'];
+const pnlSectionLabels:Record<PnlSection,string>={Sales:'Ventas','Cost of Sales':'Costo de ventas',Labor:'Labor','Operating Expenses':'Gastos operativos',Occupancy:'Ocupación','Non-operating / Extraordinary':'No operativo / extraordinario','Balance Sheet':'Balance general',Review:'Pendiente de revisar'};
 const money=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 const preciseMoney=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2});
 const periodOptions:Array<{key:PeriodKey;label:string}>=[{key:'today',label:'Today'},{key:'yesterday',label:'Yesterday'},{key:'this-week',label:'This week'},{key:'prior-week',label:'Prior week'},{key:'this-month',label:'This month'},{key:'prior-month',label:'Prior month'},{key:'last-30',label:'Last 30 days'},{key:'custom',label:'Custom'}];
@@ -47,6 +51,73 @@ function dateTimeLabel(value?:string){if(!value)return 'No disponible';const dat
 function invoiceAgeDays(value:string){if(!value)return null;const invoice=new Date(`${value.slice(0,10)}T12:00:00Z`),today=new Date(`${easternToday()}T12:00:00Z`);if(Number.isNaN(invoice.getTime()))return null;return Math.max(0,Math.floor((today.getTime()-invoice.getTime())/86_400_000));}
 function invoiceAgeLabel(value:string){const days=invoiceAgeDays(value);return days===null?'Antigüedad no disponible':days===0?'Hoy':days===1?'1 día':`${days} días`;}
 function compareText(left?:string,right?:string){return (left||'').localeCompare(right||'','es',{numeric:true,sensitivity:'base'});}
+function accountingText(value:string){return value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').trim();}
+function pnlMapping(account:Account):PnlMapping{
+  const name=accountingText(account.name),type=accountingText(account.glType||''),operational=accountingText(account.operationalCategory||''),all=`${type} ${operational} ${name}`;
+  const mapped=(section:PnlSection,category:string):PnlMapping=>({section,category,status:'mapped'});
+  const review=(section:PnlSection,category:string):PnlMapping=>({section,category,status:'review'});
+
+  if(/asset|liability|equity|balance sheet/.test(type)){
+    if(/asset/.test(type))return mapped('Balance Sheet','Activo');
+    if(/liability/.test(type))return mapped('Balance Sheet','Pasivo');
+    if(/equity/.test(type))return mapped('Balance Sheet','Capital');
+    return mapped('Balance Sheet','Balance general');
+  }
+  if(/other income/.test(`${type} ${operational}`))return mapped('Non-operating / Extraordinary','Otros ingresos');
+  if(/income|revenue|sales/.test(`${type} ${operational}`)){
+    if(/discount/.test(name))return mapped('Sales','Descuentos');
+    if(/refund|return/.test(name))return mapped('Sales','Reembolsos');
+    if(/net sales/.test(name))return mapped('Sales','Ventas netas');
+    if(/gross sales/.test(name))return mapped('Sales','Ventas brutas');
+    return review('Sales','Otros ingresos por ventas');
+  }
+  if(/cost of goods|cost of sales|cogs|food cost|beverage cost/.test(`${type} ${operational}`)){
+    if(/liquor|alcohol|beer|wine|beverage/.test(all))return mapped('Cost of Sales','Costo de alcohol');
+    if(/food|produce|seafood|meat|grocery|kitchen/.test(all))return mapped('Cost of Sales','Costo de alimentos');
+    return review('Cost of Sales','Otro costo de ventas');
+  }
+  if(/settlement|extraordinary|non operating/.test(all))return mapped('Non-operating / Extraordinary',/legal|settlement/.test(all)?'Acuerdo legal':'Otro extraordinario');
+  if(/intercompany|inter company|ramp credit|wallet funding|internal transfer/.test(all))return review('Non-operating / Extraordinary','Crédito / transferencia intercompañía');
+  if(/other expense/.test(`${type} ${operational}`))return review('Non-operating / Extraordinary','Otros gastos');
+  if(/payroll tax|employer tax/.test(all))return mapped('Labor','Impuestos patronales');
+  if(/special event labor/.test(all))return mapped('Labor','Labor de eventos especiales');
+  if(/labor accrual|payroll accrual/.test(all))return mapped('Labor','Acumulación de labor');
+  if(/bonus/.test(all))return mapped('Labor','Bonos');
+  if(/tip/.test(all))return review('Labor','Propinas de empleados');
+  if(/labor|payroll|wage|gross pay|salary/.test(all))return mapped('Labor','Sueldos y salarios');
+  if(/corporate office.*rent|rent.*corporate office/.test(all))return mapped('Occupancy','Renta de oficina corporativa');
+  if(/yardi|occupancy processing/.test(all))return mapped('Occupancy','Cargos de ocupación');
+  if(/rent|lease|occupancy|common area|\bcam\b/.test(all))return mapped('Occupancy','Renta de restaurante / ocupación');
+  if(/paper|operating suppl|smallware|imperial bag/.test(all))return mapped('Operating Expenses','Suministros / papel');
+  if(/linen|uniform|vestis/.test(all))return mapped('Operating Expenses','Linen / uniformes');
+  if(/legal|attorney|law firm/.test(all))return mapped('Operating Expenses','Legal');
+  if(/entertainment|\bdj\b|music/.test(all))return mapped('Operating Expenses','Entretenimiento / DJs');
+  if(/print/.test(all))return mapped('Operating Expenses','Imprenta');
+  if(/bookkeep|accounting|\bcpa\b/.test(all))return mapped('Operating Expenses','Contabilidad / bookkeeping');
+  if(/electric|eversource|uinet/.test(all))return mapped('Operating Expenses','Electricidad');
+  if(/chemical|sanitation|ecolab/.test(all))return mapped('Operating Expenses','Químicos / sanidad');
+  if(/\bco2\b|nuco2/.test(all))return mapped('Operating Expenses','CO₂');
+  if(/waste|environment|trash|garbage/.test(all))return mapped('Operating Expenses','Basura / ambiental');
+  if(/gas utility|natural gas|fuel|propane|tri state carbon/.test(all))return mapped('Operating Expenses','Gas / combustible');
+  if(/utilit/.test(all))return mapped('Operating Expenses','Servicios públicos');
+  if(/toast|jolt|resy|zendesk|software|technology|\bpos\b/.test(all))return mapped('Operating Expenses','Tecnología / software');
+  if(/cleaning|carpet/.test(all))return mapped('Operating Expenses','Limpieza');
+  if(/telecom|telephone|internet|directv|comcast|optimum|cox communication|\bat and t\b/.test(all))return mapped('Operating Expenses','Telecomunicaciones');
+  if(/insurance|hanover|northwestern mutual/.test(all))return mapped('Operating Expenses','Seguros');
+  if(/travel|toll|ezpass|e z pass/.test(all))return mapped('Operating Expenses','Viajes / peajes');
+  if(/repair|maintenance|equipment|service tech/.test(all))return mapped('Operating Expenses','Reparaciones / equipo / tecnología');
+  if(/bank|fintech|processing fee|chargeback|merchant fee/.test(all))return mapped('Operating Expenses','Cargos bancarios / procesamiento');
+  if(/pest|orkin/.test(all))return mapped('Operating Expenses','Control de plagas');
+  if(/local tax|permit|license/.test(all))return mapped('Operating Expenses','Impuestos locales / permisos');
+  if(/employee reimbursement/.test(all))return mapped('Operating Expenses','Reembolsos a empleados');
+  if(/decor/.test(all))return mapped('Operating Expenses','Decoración');
+  if(/fine|penalt/.test(all))return mapped('Operating Expenses','Multas / cargos');
+  if(/corporate allocation|ramp corporate/.test(all))return mapped('Operating Expenses','Asignación corporativa');
+  if(/other operating/.test(all))return mapped('Operating Expenses','Otros gastos operativos');
+  if(/pending|unclassified|suspense|unknown/.test(all))return review('Review','Pendiente de clasificación');
+  if(/expense/.test(`${type} ${operational}`))return review('Operating Expenses','Otros gastos operativos');
+  return review('Review','Pendiente de clasificación');
+}
 async function requestJson<T>(url:string,signal?:AbortSignal){
   const response=await fetch(url,{credentials:'include',cache:'no-store',signal});
   const raw=await response.text();
@@ -119,6 +190,10 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   const [ap,setAp]=useState<ApSnapshot>();
   const [catalog,setCatalog]=useState<Catalog>();
   const [search,setSearch]=useState('');
+  const [glLocation,setGlLocation]=useState('All locations');
+  const [glSection,setGlSection]=useState('All sections');
+  const [glCategory,setGlCategory]=useState('All categories');
+  const [glMappingStatus,setGlMappingStatus]=useState<'all'|'mapped'|'review'>('all');
   const [invoiceEntity,setInvoiceEntity]=useState('All entities');
   const [invoiceVendor,setInvoiceVendor]=useState('All vendors');
   const [invoiceStatus,setInvoiceStatus]=useState<InvoiceStatusFilter>('all');
@@ -171,7 +246,13 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
 
   const normalizedSearch=search.trim().toLowerCase();
   const vendors=useMemo(()=>catalog?.vendors?.filter(vendor=>!normalizedSearch||`${vendor.number||''} ${vendor.name} ${vendor.comment||''}`.toLowerCase().includes(normalizedSearch))||[],[catalog?.vendors,normalizedSearch]);
-  const accounts=useMemo(()=>catalog?.accounts?.filter(account=>!normalizedSearch||`${account.number||''} ${account.name} ${account.glType||''} ${account.operationalCategory||''}`.toLowerCase().includes(normalizedSearch))||[],[catalog?.accounts,normalizedSearch]);
+  const mappedAccounts=useMemo(()=>(catalog?.accounts||[]).map(account=>({...account,...pnlMapping(account)})),[catalog?.accounts]);
+  const glLocationOptions=useMemo(()=>Array.from(new Set(mappedAccounts.map(account=>account.locationName||'Global'))).sort(compareText),[mappedAccounts]);
+  const glSectionOptions=useMemo(()=>pnlSectionOrder.filter(section=>mappedAccounts.some(account=>account.section===section)),[mappedAccounts]);
+  const glCategoryOptions=useMemo(()=>Array.from(new Set(mappedAccounts.filter(account=>(glLocation==='All locations'||(account.locationName||'Global')===glLocation)&&(glSection==='All sections'||account.section===glSection)).map(account=>account.category))).sort(compareText),[mappedAccounts,glLocation,glSection]);
+  const accounts=useMemo(()=>mappedAccounts.filter(account=>(glLocation==='All locations'||(account.locationName||'Global')===glLocation)&&(glSection==='All sections'||account.section===glSection)&&(glCategory==='All categories'||account.category===glCategory)&&(glMappingStatus==='all'||account.status===glMappingStatus)&&(!normalizedSearch||`${account.number||''} ${account.name} ${account.glType||''} ${account.operationalCategory||''} ${pnlSectionLabels[account.section]} ${account.category} ${account.locationName||'Global'}`.toLowerCase().includes(normalizedSearch))),[mappedAccounts,glLocation,glSection,glCategory,glMappingStatus,normalizedSearch]);
+  const mappedAccountCount=mappedAccounts.filter(account=>account.status==='mapped').length;
+  const reviewAccountCount=mappedAccounts.length-mappedAccountCount;
   const invoiceVendorOptions=useMemo(()=>{
     const counts=new Map<string,number>();
     (ap?.transactions||[]).filter(row=>invoiceEntity==='All entities'||row.entity===invoiceEntity).forEach(row=>{const vendor=row.vendor||'Sin vendor enlazado';counts.set(vendor,(counts.get(vendor)||0)+1);});
@@ -204,6 +285,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   const selectedInvoices=ap?.transactions.filter(row=>selectedInvoiceSet.has(row.id))||[];
   const selectedInvoiceAmount=rounded(selectedInvoices.reduce((sum,row)=>sum+(Number(row.amount)||0),0));
   const hasInvoiceFilters=invoiceEntity!=='All entities'||invoiceVendor!=='All vendors'||invoiceStatus!=='all'||invoiceDateStart!==range.start||invoiceDateEnd!==range.end||Boolean(search.trim())||invoiceSort!=='oldest';
+  const hasGlFilters=glLocation!=='All locations'||glSection!=='All sections'||glCategory!=='All categories'||glMappingStatus!=='all'||Boolean(search.trim());
   const activeLedger=ledger&&ledger.period.start===range.start&&ledger.period.endExclusive===addDays(range.end,1)&&(tab==='Corporate Office'?ledger.entity==='Corporate Office':ledger.entity===entity)?ledger:undefined;
   const retry=()=>setReload(value=>value+1);
   const showPeriod=['P&L','Facturas y AP','Corporate Office'].includes(tab);
@@ -211,6 +293,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
   const toggleVisibleInvoices=()=>setSelectedInvoiceIds(current=>{const next=new Set(current);if(allVisibleSelected)visibleInvoices.forEach(row=>next.delete(row.id));else visibleInvoices.forEach(row=>next.add(row.id));return Array.from(next);});
   const toggleInvoice=(id:string)=>setSelectedInvoiceIds(current=>current.includes(id)?current.filter(item=>item!==id):[...current,id]);
   const clearInvoiceFilters=()=>{setInvoiceEntity('All entities');setInvoiceVendor('All vendors');setInvoiceStatus('all');setInvoiceDateStart(range.start);setInvoiceDateEnd(range.end);setInvoiceSort('oldest');setSearch('');setSelectedInvoiceIds([]);setCopyNotice('');};
+  const clearGlFilters=()=>{setGlLocation('All locations');setGlSection('All sections');setGlCategory('All categories');setGlMappingStatus('all');setSearch('');};
   const toggleInvoiceSort=(ascending:InvoiceSort,descending:InvoiceSort)=>setInvoiceSort(current=>current===ascending?descending:ascending);
   const copyInvoiceFollowUp=async()=>{
     if(!ap)return;
@@ -253,6 +336,21 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
         <div className="r365-table-wrap"><table className="r365-ap-table"><thead><tr><th className="r365-check"><input type="checkbox" aria-label="Seleccionar todas las facturas visibles" checked={allVisibleSelected} onChange={toggleVisibleInvoices}/></th><SortableHeader label="Invoice" active={invoiceSort==='invoice'} direction="asc" onClick={()=>setInvoiceSort('invoice')}/><SortableHeader label="Fecha invoice" active={invoiceSort==='oldest'||invoiceSort==='newest'} direction={invoiceSort==='newest'?'desc':'asc'} onClick={()=>toggleInvoiceSort('oldest','newest')}/><th>Antigüedad</th><SortableHeader label="Creada en R365" active={invoiceSort==='created-oldest'||invoiceSort==='created-newest'} direction={invoiceSort==='created-newest'?'desc':'asc'} onClick={()=>toggleInvoiceSort('created-oldest','created-newest')}/><SortableHeader label="Vendor" active={invoiceSort==='vendor'} direction="asc" onClick={()=>setInvoiceSort('vendor')}/><SortableHeader label="Locación" active={invoiceSort==='location'} direction="asc" onClick={()=>setInvoiceSort('location')}/><SortableHeader label="Monto" active={invoiceSort==='highest'||invoiceSort==='lowest'} direction={invoiceSort==='highest'?'desc':'asc'} onClick={()=>toggleInvoiceSort('lowest','highest')}/><SortableHeader label="Estado R365" active={invoiceSort==='status'} direction="asc" onClick={()=>setInvoiceSort('status')}/></tr></thead><tbody>{visibleInvoices.slice(0,500).map(row=><tr key={row.id} className={selectedInvoiceSet.has(row.id)?'selected':''}><td className="r365-check"><input type="checkbox" aria-label={`Seleccionar factura ${row.number||row.name}`} checked={selectedInvoiceSet.has(row.id)} onChange={()=>toggleInvoice(row.id)}/></td><td><strong>{row.number||row.name}</strong><small>{row.name!==row.number?row.name:'AP Invoice'}</small></td><td><strong>{dateLabel(row.date)}</strong></td><td><span className="r365-age">{invoiceAgeLabel(row.date)}</span></td><td><strong>{dateTimeLabel(row.createdOn)}</strong><small>{row.createdBy?`Cargada por ${row.createdBy}`:'Usuario no disponible'}</small></td><td>{row.vendor||'Sin vendor enlazado'}</td><td><strong>{row.entity||row.location}</strong><small>{row.location}</small></td><td className="amount">{row.amount===null?'No disponible':preciseMoney.format(row.amount)}</td><td><span className={`r365-status ${row.approved?'approved':'pending'}`}>{row.approved?'Aprobada':'Pendiente'}</span></td></tr>)}</tbody></table>{visibleInvoices.length>500&&<div className="r365-table-limit">Mostrando 500 de {visibleInvoices.length} facturas filtradas.</div>}{!visibleInvoices.length&&<div className="r365-empty">No se encontraron facturas con estos filtros.</div>}</div>
       </section><SourceNote fetchedAt={ap.fetchedAt} caveats={ap.caveats}/>
     </>:tab==='Vendors'&&catalog?<section className="panel r365-card"><header><div><h2>Directorio de vendors</h2><p>Catálogo leído directamente desde Company en Restaurant365.</p></div><input className="r365-search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar vendor…"/></header><div className="r365-table-wrap"><table><thead><tr><th>Número</th><th>Vendor</th><th>Comentario</th></tr></thead><tbody>{vendors.slice(0,500).map(row=><tr key={row.id}><td>{row.number||'—'}</td><td><strong>{row.name}</strong></td><td>{row.comment||'—'}</td></tr>)}</tbody></table>{!vendors.length&&<div className="r365-empty">No hay vendors que coincidan con la búsqueda.</div>}</div></section>
-    :tab==='Cuentas GL'&&catalog?<><section className="panel r365-card"><header><div><h2>Plan de cuentas GL</h2><p>Número, tipo y categoría operacional utilizados para construir la clasificación.</p></div><input className="r365-search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar cuenta…"/></header><div className="r365-table-wrap"><table><thead><tr><th>Número</th><th>Cuenta</th><th>Tipo GL</th><th>Categoría operacional</th><th>Locación R365</th></tr></thead><tbody>{accounts.slice(0,750).map(row=><tr key={row.id}><td>{row.number||'—'}</td><td><strong>{row.name}</strong></td><td>{row.glType||'—'}</td><td>{row.operationalCategory||'—'}</td><td>{row.locationName||'Global'}</td></tr>)}</tbody></table>{!accounts.length&&<div className="r365-empty">No hay cuentas que coincidan con la búsqueda.</div>}</div></section>{catalog.caveats?.length?<SourceNote fetchedAt={catalog.fetchedAt} caveats={catalog.caveats}/>:null}</>:<Loading detail={loadingDetail}/>}
+    :tab==='Cuentas GL'&&catalog?<>
+      <div className="r365-metrics-grid r365-gl-metrics"><Metric label="Cuentas detectadas" value={String(mappedAccounts.length)} note="Nombres originales de R365"/><Metric label="Clasificadas" value={String(mappedAccountCount)} note="Coinciden con el catálogo P&L" tone="good"/><Metric label="Por revisar" value={String(reviewAccountCount)} note="No se fuerzan dentro del P&L" tone={reviewAccountCount?'warn':'good'}/><Metric label="Secciones P&L" value={String(glSectionOptions.length)} note="Orange · Fairfield · Stamford"/></div>
+      <section className="panel r365-card r365-gl-card">
+        <header><div><h2>Plan de cuentas GL clasificado</h2><p>Conserva la cuenta original de Restaurant365 y agrega la sección y categoría sugeridas con los P&L de Orange, Fairfield y Stamford.</p></div><span className="count-pill">{accounts.length} DE {mappedAccounts.length} CUENTAS</span></header>
+        <div className="r365-gl-reference"><strong>Catálogo P&L unificado</strong><span>Ventas · Costo de ventas · Labor · Gastos operativos · Ocupación · No operativo / extraordinario · Balance general</span></div>
+        <div className="r365-gl-toolbar">
+          <label><span>LOCACIÓN</span><select value={glLocation} onChange={event=>{setGlLocation(event.target.value);setGlCategory('All categories');}}><option value="All locations">Todas las locaciones</option>{glLocationOptions.map(item=><option key={item}>{item}</option>)}</select></label>
+          <label><span>SECCIÓN P&L</span><select value={glSection} onChange={event=>{setGlSection(event.target.value);setGlCategory('All categories');}}><option value="All sections">Todas las secciones</option>{glSectionOptions.map(item=><option key={item} value={item}>{pnlSectionLabels[item]}</option>)}</select></label>
+          <label><span>CATEGORÍA</span><select value={glCategory} onChange={event=>setGlCategory(event.target.value)}><option value="All categories">Todas las categorías</option>{glCategoryOptions.map(item=><option key={item}>{item}</option>)}</select></label>
+          <label><span>ESTADO</span><select value={glMappingStatus} onChange={event=>setGlMappingStatus(event.target.value as 'all'|'mapped'|'review')}><option value="all">Todos</option><option value="mapped">Clasificadas</option><option value="review">Por revisar</option></select></label>
+          <label className="r365-gl-search"><span>BUSCAR CUENTA</span><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Número, cuenta, categoría o locación…"/></label>
+        </div>
+        <div className="r365-gl-actions"><button type="button" onClick={clearGlFilters} disabled={!hasGlFilters}>Limpiar filtros</button><span>Las cuentas “Por revisar” permanecen fuera de una categoría definitiva hasta confirmar su tratamiento.</span></div>
+        <div className="r365-table-wrap"><table className="r365-gl-table"><thead><tr><th>Número</th><th>Cuenta original R365</th><th>Sección P&L</th><th>Categoría OpsVista</th><th>Clasificación R365</th><th>Locación</th><th>Estado</th></tr></thead><tbody>{accounts.slice(0,750).map(row=><tr key={row.id}><td>{row.number||'—'}</td><td><strong>{row.name}</strong></td><td><span className={`r365-pnl-section ${row.status}`}>{pnlSectionLabels[row.section]}</span></td><td><strong>{row.category}</strong></td><td><strong>{row.glType||'Sin tipo GL'}</strong><small>{row.operationalCategory||'Sin categoría operacional'}</small></td><td>{row.locationName||'Global'}</td><td><span className={`r365-status ${row.status==='mapped'?'approved':'pending'}`}>{row.status==='mapped'?'Clasificada':'Por revisar'}</span></td></tr>)}</tbody></table>{accounts.length>750&&<div className="r365-table-limit">Mostrando 750 de {accounts.length} cuentas filtradas.</div>}{!accounts.length&&<div className="r365-empty">No hay cuentas que coincidan con estos filtros.</div>}</div>
+      </section>{catalog.caveats?.length?<SourceNote fetchedAt={catalog.fetchedAt} caveats={catalog.caveats}/>:null}
+    </>:<Loading detail={loadingDetail}/>}
   </div>;
 }
