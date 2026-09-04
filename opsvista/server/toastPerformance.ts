@@ -7,7 +7,7 @@ type ToastCheck={amount?:number;voided?:boolean;deleted?:boolean;selections?:Toa
 type ToastOrder={businessDate?:number;voided?:boolean;deleted?:boolean;excessFood?:boolean;checks?:ToastCheck[]};
 type ExternalReference={guid?:string;externalId?:string};
 type WageOverride={wage?:number;jobReference?:ExternalReference};
-type TimeEntry={deleted?:boolean;regularHours?:number;overtimeHours?:number;hourlyWage?:number|null;employeeReference?:ExternalReference;jobReference?:ExternalReference};
+type TimeEntry={guid?:string;deleted?:boolean;regularHours?:number;overtimeHours?:number;hourlyWage?:number|null;employeeReference?:ExternalReference;jobReference?:ExternalReference};
 type ToastEmployee={guid?:string;externalEmployeeId?:string;firstName?:string;chosenName?:string;lastName?:string;email?:string;deleted?:boolean;wageOverrides?:WageOverride[]};
 type AccessibleRestaurant={restaurantGuid?:string;restaurantName?:string;locationName?:string};
 
@@ -114,8 +114,27 @@ async function getOrdersForRange(restaurantGuid:string,start:string,end:string){
 }
 
 async function getLaborForRange(restaurantGuid:string,start:string,end:string){
-  const query=new URLSearchParams({startDate:rangeStart(start),endDate:dayAfter(end),includeArchived:'false'});
-  return await standardToastRequest(`/labor/v1/timeEntries?${query.toString()}`,restaurantGuid) as TimeEntry[];
+  // Toast rejects time-entry windows longer than 30 days. Calendar months can
+  // contain 31 days, so keep the user-facing range intact and read it through
+  // adjacent half-open chunks: [start, endDate). This avoids gaps and overlap.
+  const entries:TimeEntry[]=[];
+  const seen=new Set<string>();
+  for(let cursor=start;cursor<=end;){
+    const maximumChunkEnd=new Date(`${cursor}T00:00:00.000Z`);
+    maximumChunkEnd.setUTCDate(maximumChunkEnd.getUTCDate()+29);
+    const maximumChunkEndDate=maximumChunkEnd.toISOString().slice(0,10);
+    const chunkEnd=maximumChunkEndDate<end?maximumChunkEndDate:end;
+    const query=new URLSearchParams({startDate:rangeStart(cursor),endDate:dayAfter(chunkEnd),includeArchived:'false'});
+    const chunk=await standardToastRequest(`/labor/v1/timeEntries?${query.toString()}`,restaurantGuid) as TimeEntry[];
+    for(const entry of Array.isArray(chunk)?chunk:[]){
+      const guid=String(entry.guid||'').trim();
+      if(guid&&seen.has(guid))continue;
+      if(guid)seen.add(guid);
+      entries.push(entry);
+    }
+    cursor=dayAfter(chunkEnd).slice(0,10);
+  }
+  return entries;
 }
 
 async function getEmployees(restaurantGuid:string){
