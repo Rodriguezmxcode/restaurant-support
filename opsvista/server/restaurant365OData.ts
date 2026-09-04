@@ -453,25 +453,69 @@ async function companiesForTransactions(credentials:Restaurant365Credentials,row
 }
 
 const glAccountFields='glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName';
+const glAccountCatalogFields='glAccountId,glAccountNumber,name,glType,operationalCategory';
 
-async function glAccountReferenceCatalog(credentials:Restaurant365Credentials) {
-  const attempts:Record<string,string>[]=[
-    {'$select':glAccountFields},
-    {'$select':glAccountFields,'$top':'500'},
-    {'$select':'glAccountAutoId,glAccountId,glAccountNumber,name'},
-    {'$select':'glAccountAutoId,glAccountId,glAccountNumber,name','$top':'500'},
-  ];
-  let lastError:unknown;
-  for(const params of attempts){
+type GlAccountCatalog={accounts:Restaurant365AccountRow[];limited:boolean;partial:boolean};
+
+async function glAccountCatalogPage(credentials:Restaurant365Credentials,pageSize:number,maxRows=2_000):Promise<GlAccountCatalog> {
+  const rows:ODataRow[]=[];
+  const seen=new Set<string>();
+  let partial=false;
+  let complete=false;
+  for(let skip=0;skip<maxRows;skip+=pageSize){
+    let page:ODataRow[];
     try{
-      const rows=await odata(credentials,'GlAccount',params);
-      const accounts=uniqueRows(rows,['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
-      if(accounts.length)return {accounts,limited:params.$top==='500'&&rows.length>=500};
+      page=await odata(credentials,'GlAccount',{
+        '$select':glAccountCatalogFields,
+        '$top':String(Math.min(pageSize,maxRows-skip)),
+        '$skip':String(skip),
+      });
+    }catch(error){
+      if(!rows.length)throw error;
+      partial=true;
+      break;
+    }
+    if(!page.length){complete=true;break;}
+    let added=0;
+    for(const row of page){
+      const key=stringValue(row,['glAccountId','id','glAccountNumber','number']).toLowerCase();
+      if(!key||seen.has(key))continue;
+      seen.add(key);
+      rows.push(row);
+      added++;
+    }
+    if(!added){partial=true;break;}
+    if(page.length<pageSize){complete=true;break;}
+  }
+  const accounts=rows.map(accountFromRow).filter(account=>Boolean(account.id||account.number));
+  return {accounts,partial,limited:partial||(!complete&&rows.length>=maxRows)};
+}
+
+async function glAccountReferenceCatalog(credentials:Restaurant365Credentials):Promise<GlAccountCatalog> {
+  let lastError:unknown;
+  let best:GlAccountCatalog|undefined;
+  // R365 occasionally returns 500 for one large GlAccount response even though
+  // the same view works for small pages. Restart with progressively smaller
+  // pages and preserve the largest honest partial result if a later page fails.
+  for(const pageSize of [100,50,25,10]){
+    try{
+      const result=await glAccountCatalogPage(credentials,pageSize);
+      if(result.accounts.length&&!result.partial)return result;
+      if(result.accounts.length>(best?.accounts.length||0))best=result;
     }catch(error){
       if(error instanceof Error&&/rechazó el usuario|permiso OData/i.test(error.message))throw error;
       lastError=error;
     }
   }
+  if(best?.accounts.length)return best;
+  // The connection probe uses this exact read. Keep the tab usable and label
+  // the result as partial instead of replacing a recoverable R365 outage with
+  // a blank screen.
+  try{
+    const rows=await odata(credentials,'GlAccount',{'$select':glAccountCatalogFields,'$top':'1'});
+    const accounts=rows.map(accountFromRow).filter(account=>Boolean(account.id||account.number));
+    if(accounts.length)return {accounts,limited:true,partial:true};
+  }catch(error){lastError=error;}
   throw lastError instanceof Error?lastError:new Error('Restaurant365 no entregó el plan de cuentas GL.');
 }
 
@@ -645,5 +689,8 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
   const catalog=await glAccountReferenceCatalog(credentials);
   const accounts = uniqueRows(catalog.accounts.map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
     .sort((left,right)=>(left.number||'').localeCompare(right.number||'')||left.name.localeCompare(right.name));
-  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats:catalog.limited?['Restaurant365 limitó esta lectura a 500 cuentas; la vista muestra las cuentas recuperadas sin inventar datos.']:[]};
+  const caveats:string[]=[];
+  if(catalog.partial)caveats.push(`Restaurant365 interrumpió una página del catálogo. Se muestran ${accounts.length} cuentas GL recuperadas; intenta actualizar para completar la lista.`);
+  else if(catalog.limited)caveats.push(`Restaurant365 limitó esta lectura a ${accounts.length} cuentas; la vista muestra las cuentas recuperadas sin inventar datos.`);
+  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats};
 }
