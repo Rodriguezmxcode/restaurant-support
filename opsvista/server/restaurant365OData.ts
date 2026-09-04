@@ -589,14 +589,8 @@ async function glAccountReferenceCatalog(credentials:Restaurant365Credentials):P
 async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:ODataRow[]) {
   const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean)));
   if(!ids.length)return [] as Restaurant365AccountRow[];
-  let catalog:Restaurant365AccountRow[]=[];
-  try{catalog=(await glAccountReferenceCatalog(credentials)).accounts;}catch{/* Recover the exact accounts below. */}
-  const wanted=new Set(ids.map(id=>id.toLowerCase()));
-  const matched=catalog.filter(account=>wanted.has(account.id.toLowerCase())||Boolean(account.autoId&&wanted.has(account.autoId.toLowerCase())));
-  const matchedIds=new Set(matched.flatMap(account=>[account.id.toLowerCase(),account.autoId?.toLowerCase()||'']).filter(Boolean));
-  const missing=ids.filter(id=>!matchedIds.has(id.toLowerCase()));
-  const recovered=await parallelMap(missing,6,id=>glAccountById(credentials,id));
-  return uniqueRows([...matched,...recovered.filter((account):account is Restaurant365AccountRow=>Boolean(account))].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
+  const recovered=await parallelMap(ids,6,id=>glAccountById(credentials,id));
+  return uniqueRows(recovered.filter((account):account is Restaurant365AccountRow=>Boolean(account)).map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
 }
 
 async function locationCatalog(credentials: Restaurant365Credentials) {
@@ -719,7 +713,7 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
   const unclassifiedDetailRows = rows.filter(row=>row.classification==='Unclassified').length;
   const qualityReady = approved.length>0 && transactionsWithoutDetails===0 && detailsWithoutGlAccount===0 && unclassifiedDetailRows===0;
   const revenue=groupAmount('Revenue'),cogs=groupAmount('COGS'),labor=groupAmount('Labor'),operatingExpense=groupAmount('Operating Expense'),otherIncome=groupAmount('Other Income'),otherExpense=groupAmount('Other Expense');
-  return {
+  const snapshot:Restaurant365LedgerSnapshot={
     provider:'restaurant365-odata',period:transactionResult.period,entity,sourceLocation:{id:sourceLocation.id,name:sourceLocation.name},fetchedAt:new Date().toISOString(),
     totals:{transactions:transactions.length,approvedTransactions:approved.length,apInvoices:approved.filter(transaction=>/ap\s*invoice/i.test(transaction.type)).length,detailRows:rows.length,
       debits:money(rows.reduce((sum,row)=>sum+row.debit,0)),credits:money(rows.reduce((sum,row)=>sum+row.credit,0)),revenue,cogs,labor,operatingExpense,otherIncome,otherExpense,
@@ -729,6 +723,12 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
       transactionsWithoutDetails,detailsWithoutGlAccount,unclassifiedDetailRows,duplicateTransactionIds:transactionResult.duplicates,duplicateDetailIds:detailResult.duplicates},
     caveats:['Solo se incluyen transacciones aprobadas en los cálculos del ledger.','El resultado clasificado es preliminar hasta compararlo con el P&L oficial de Restaurant365.','El estado exacto de pago y los archivos de recibos no forman parte de estas vistas OData verificadas.'],
   };
+  if(accounts.length){
+    const catalogAccounts:Restaurant365AccountRow[]=accounts.map(account=>({id:account.id,autoId:account.autoId,number:account.number,name:account.name,glType:account.glType,operationalCategory:account.operationalCategory}));
+    const catalogSnapshot:Restaurant365CatalogSnapshot={provider:'restaurant365-odata',fetchedAt:snapshot.fetchedAt,accounts:catalogAccounts,caveats:[`Cuentas verificadas desde el ledger de ${entity}.`]};
+    try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',`gl-ledger:${entity}`,catalogSnapshot);}catch{/* Keep the ledger available if snapshot persistence fails. */}
+  }
+  return snapshot;
 }
 
 export async function getRestaurant365Ap(organizationId:string,startOrMonth:string,end?:string):Promise<Restaurant365ApSnapshot> {
@@ -775,17 +775,31 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
   const snapshotKey='gl-account-catalog:v1';
   let cached:{payload:Restaurant365CatalogSnapshot;updatedAt:string}|null=null;
   try{cached=await getIntegrationSnapshot<Restaurant365CatalogSnapshot>(organizationId,'restaurant365-odata',snapshotKey);}catch{/* Continue with the live source. */}
-  if(cached?.payload.accounts?.length&&Date.now()-Date.parse(cached.updatedAt)<24*60*60*1_000){
-    return {...cached.payload,caveats:[...(cached.payload.caveats||[]),'Catálogo respaldado en OpsVista; se revalida automáticamente cada 24 horas.']};
+  const cachedAccounts=cached?.payload.accounts||[];
+  const cacheIsFresh=Boolean(cachedAccounts.length&&Date.now()-Date.parse(cached?.updatedAt||'')<24*60*60*1_000);
+  let ledgerAccounts:Restaurant365AccountRow[]=[];
+  try{
+    const snapshots=await parallelMap(opsVistaLocations,7,entity=>getIntegrationSnapshot<Restaurant365CatalogSnapshot>(organizationId,'restaurant365-odata',`gl-ledger:${entity}`));
+    ledgerAccounts=snapshots.flatMap(snapshot=>snapshot?.payload.accounts||[]);
+  }catch{/* The live reconstruction below can still seed the catalog. */}
+  if(!cachedAccounts.length&&!ledgerAccounts.length){
+    try{
+      const corporateLedger=await getRestaurant365Ledger(organizationId,previousCompletedMonth(),corporateLocation);
+      ledgerAccounts=corporateLedger.accounts.map(account=>({id:account.id,autoId:account.autoId,number:account.number,name:account.name,glType:account.glType,operationalCategory:account.operationalCategory}));
+    }catch{/* Return an honest empty state if even the verified ledger source is unavailable. */}
   }
-  const catalog=await glAccountReferenceCatalog(credentials);
-  const accounts = uniqueRows(catalog.accounts.map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
+  const catalog:GlAccountCatalog=(cachedAccounts.length||ledgerAccounts.length)
+    ? {accounts:[],limited:false,partial:false,source:'activity'}
+    : await glAccountReferenceCatalog(credentials);
+  const accounts = uniqueRows([...cachedAccounts,...catalog.accounts,...ledgerAccounts].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
     .sort((left,right)=>(left.number||'').localeCompare(right.number||'')||left.name.localeCompare(right.name));
   if(!accounts.length&&cached?.payload.accounts?.length)return {...cached.payload,caveats:[...(cached.payload.caveats||[]),'Restaurant365 no entregó el catálogo en esta actualización; se conserva la última copia verificada de OpsVista.']};
   const caveats:string[]=[];
-  if(catalog.source==='activity')caveats.push(`Restaurant365 no expuso el catálogo directo. OpsVista reconstruyó ${accounts.length} cuentas GL desde movimientos contables de ${catalog.coverageMonth||'la actividad reciente'}.`);
+  if(cacheIsFresh)caveats.push('Catálogo respaldado en OpsVista; se revalida automáticamente cada 24 horas.');
+  if(ledgerAccounts.length)caveats.push(`OpsVista completó el catálogo con ${ledgerAccounts.length} cuentas verificadas desde los ledgers por locación.`);
+  if(catalog.source==='activity'&&catalog.accounts.length)caveats.push(`Restaurant365 no expuso el catálogo directo. OpsVista reconstruyó ${catalog.accounts.length} cuentas GL desde movimientos contables de ${catalog.coverageMonth||'la actividad reciente'}.`);
   if(catalog.unresolvedNames)caveats.push(`${catalog.unresolvedNames} cuentas conservan su identificador real, pero Restaurant365 no entregó todavía el nombre.`);
-  else if(catalog.partial)caveats.push(`Restaurant365 interrumpió una página del catálogo. Se muestran ${accounts.length} cuentas GL recuperadas; intenta actualizar para completar la lista.`);
+  else if(catalog.source==='catalog'&&catalog.partial)caveats.push(`Restaurant365 interrumpió una página del catálogo. Se muestran ${accounts.length} cuentas GL recuperadas; intenta actualizar para completar la lista.`);
   else if(catalog.limited)caveats.push(`Restaurant365 limitó esta lectura a ${accounts.length} cuentas; la vista muestra las cuentas recuperadas sin inventar datos.`);
   const snapshot:Restaurant365CatalogSnapshot={provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats};
   if(accounts.length)try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',snapshotKey,snapshot);}catch{/* Keep the live view available if backup persistence fails. */}
