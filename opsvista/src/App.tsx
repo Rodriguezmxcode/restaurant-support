@@ -90,6 +90,7 @@ export default function App(){
   const [authenticatedUser]=useState(currentAuthenticatedUser);
   const [previewUser,setPreviewUser]=useState<OpsVistaUser|null>(null);
   const [previewNotice,setPreviewNotice]=useState('');
+  const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>{try{return window.localStorage.getItem('opsvista-sidebar-collapsed')==='1'}catch{return false}});
   const currentUser=previewUser??authenticatedUser;
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
@@ -183,6 +184,7 @@ export default function App(){
   const refreshData=()=>{rememberSection(section);window.location.reload()};
   const startUserPreview=(user:OpsVistaUser)=>{setPreviewNotice('');setPreviewUser(user);setSearch('');setSearchTarget(null);};
   const stopUserPreview=()=>{setPreviewUser(null);setPreviewNotice('');setSection('Configuración');};
+  const toggleSidebar=()=>setSidebarCollapsed(collapsed=>{const next=!collapsed;try{window.localStorage.setItem('opsvista-sidebar-collapsed',next?'1':'0')}catch{/* Storage can be unavailable. */}return next});
   const openSearchResult=(target:GlobalSearchResult)=>{
     if(!nav.includes(target.section))return;
     rememberSection(target.section);
@@ -230,11 +232,12 @@ export default function App(){
   const title=isOverview?(section==='Ventas'?'Ventas · Performance':'Resumen · Operating Performance'):isLocations?'Locaciones · Performance Dashboard':isGoogleReviews?'Google Reviews':isLocalIntelligence?'Local Intelligence':isRamp?(currentUser.role==='Location Manager'?`Gastos Ramp · ${allowedLocations.join(', ')}`:'Gastos Ramp'):isLabor?'Horarios · Labor Intelligence':isEvidence?'Tasks · 7shifts & Logbook':isBonus?'Bono semanal':isPriorities?'Prioridades · Action Center':isActionCenter?'Action Center':isProjects?'Proyectos':isFinance?'Finanzas · Control de pagos':isPayments?'Pagos · Approval Workflow':isTransfers?'Transferencias · Restaurant Ledger':isRestaurant365?'Restaurant365 · Accounting Intelligence':isSettings?'Configuración · Roles & Permissions':section;
   const subtitle=isOverview?'Ventas, labor, task compliance, voids y descuentos en una sola vista operativa.':isLocations?'Compara el desempeño completo de cada restaurante con datos reales de Toast, 7shifts y OpsVista.':isGoogleReviews?'Monitorea volumen, calificación, respuestas y reseñas críticas por restaurante desde Google Business Profile.':isLocalIntelligence?'Clima, tráfico, incidentes y eventos cercanos convertidos en impacto y recomendaciones por restaurante.':isRamp?(currentUser.role==='Location Manager'?'Revisa los gastos de tus restaurantes y completa en Ramp los memos o recibos pendientes.':'Cada gasto debe mostrar quién lo hizo, dónde pertenece, por qué se hizo y contar con la evidencia requerida.'):isLabor?'Compara ventas, forecast, labor, SPLH y overtime para convertir desviaciones en acciones con impacto financiero.':isEvidence?'Controla Tasks, responsables y Logbook por ubicación y periodo.':isBonus?'Scorecard semanal con Tasks, descuentos, voids, overtime y reglas de elegibilidad.':isPriorities?'Muestra las acciones persistentes que requieren atención, ordenadas por prioridad y dentro del alcance autorizado.':isActionCenter?'Convierte señales operativas en acciones asignadas, verificables y guardadas permanentemente.':isProjects?'Planifica iniciativas con responsables, fechas, milestones, presupuesto y resultados sin mezclarlas con alertas operativas.':isFinance?'Usa el flujo real de solicitudes, aprobaciones y emisión de pagos con bitácora completa.':isPayments?'Managers solicitan; Corporate aprueba; Administration emite únicamente pagos aprobados, con bitácora completa.':isTransfers?'Registra qué salió, qué llegó, quién recibió, a qué hora y cualquier faltante o diferencia entre restaurantes.':isRestaurant365?'P&L, facturas AP, vendors, cuentas GL y salud de sincronización, separados del trabajo diario de los managers.':isSettings?'Controla acceso, credenciales, usuarios y permisos.':'La fuente de este módulo no está disponible.';
 
-  return <div className={`app-shell ${previewUser?'user-preview-active':''}`}>
+  return <div className={`app-shell ${previewUser?'user-preview-active':''} ${sidebarCollapsed?'sidebar-collapsed':''}`}>
     <aside className="sidebar">
-      <div className="brand"><div className="brand-mark">OV</div><div><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
-      <nav>{nav.map(item=><button key={item} className={section===item?'active':''} onClick={()=>{rememberSection(item);setSearchTarget(null);setSection(item);}}><span className="nav-icon">{icon[item]}</span>{item==='Gastos'?'Gastos Ramp':item}</button>)}</nav>
-      <div className="user-card"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{previewUser?'Vista previa · ':''}{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
+      <div className="brand"><div className="brand-mark">OV</div><div className="brand-copy"><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
+      <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed?'Expandir menú lateral':'Compactar menú lateral'} aria-pressed={sidebarCollapsed} title={sidebarCollapsed?'Expandir menú':'Compactar menú'}>{sidebarCollapsed?'›':'‹'}</button>
+      <nav aria-label="Módulos de OpsVista">{nav.map(item=>{const label=item==='Gastos'?'Gastos Ramp':item;return <button key={item} className={section===item?'active':''} onClick={()=>{rememberSection(item);setSearchTarget(null);setSection(item);}} aria-label={sidebarCollapsed?label:undefined} title={sidebarCollapsed?label:undefined}><span className="nav-icon">{icon[item]}</span><span className="nav-label">{label}</span></button>})}</nav>
+      <div className="user-card" title={sidebarCollapsed?`${currentUser.name} · ${currentUser.role}`:undefined}><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div className="user-card-copy"><strong>{currentUser.name}</strong><span>{previewUser?'Vista previa · ':''}{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
     </aside>
 
     <main>
