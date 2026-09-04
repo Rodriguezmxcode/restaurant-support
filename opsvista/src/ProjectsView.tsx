@@ -16,9 +16,34 @@ const statuses:ProjectStatus[]=['Planning','In Progress','Blocked','Completed','
 const priorities:ProjectPriority[]=['High','Medium','Low'];
 const money=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);
 function easternToday(){const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));return `${values.year}-${values.month}-${values.day}`;}
-function addDays(value:string,days:number){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
-const date=(value:string)=>new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-const dayNumber=(value:string)=>Math.floor(new Date(`${value}T00:00:00Z`).getTime()/86400000);
+function validDate(value:unknown){const candidate=typeof value==='string'?value.slice(0,10):'';return /^\d{4}-\d{2}-\d{2}$/.test(candidate)&&Number.isFinite(Date.parse(`${candidate}T00:00:00Z`));}
+function addDays(value:string,days:number){const parsed=Date.parse(`${value}T00:00:00Z`);if(!Number.isFinite(parsed))return value;const date=new Date(parsed);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
+const date=(value:string)=>validDate(value)?new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'Date unavailable';
+const dayNumber=(value:string)=>{const parsed=Date.parse(`${value}T00:00:00Z`);return Number.isFinite(parsed)?Math.floor(parsed/86400000):0;};
+const text=(value:unknown)=>value==null?'':String(value).trim();
+const number=(value:unknown)=>{const parsed=Number(value);return Number.isFinite(parsed)?parsed:0;};
+function normalizeProject(value:unknown,today:string,index=0):ProjectRecord|null{
+  if(!value||typeof value!=='object')return null;
+  const row=value as Record<string,unknown>;
+  const id=text(row.id);if(!id)return null;
+  const startDate=validDate(row.startDate)?text(row.startDate).slice(0,10):today;
+  const candidateDue=validDate(row.dueDate)?text(row.dueDate).slice(0,10):addDays(startDate,30);
+  const dueDate=candidateDue<startDate?startDate:candidateDue;
+  const locations=Array.isArray(row.locations)?[...new Set(row.locations.map(text).filter(Boolean))]:[];
+  const rawMilestones=Array.isArray(row.milestones)?row.milestones:[];
+  const milestones=rawMilestones.flatMap((item,milestoneIndex)=>{
+    if(!item||typeof item!=='object')return [];
+    const milestone=item as Record<string,unknown>;const title=text(milestone.title);if(!title)return [];
+    const rawStatus=text(milestone.status);const milestoneStatus:ProjectMilestone['status']=rawStatus==='Completed'||rawStatus==='In Progress'?rawStatus:'Pending';
+    return [{id:text(milestone.id)||`${id}-MS-${milestoneIndex+1}`,title,owner:text(milestone.owner)||undefined,dueDate:validDate(milestone.dueDate)?text(milestone.dueDate).slice(0,10):undefined,status:milestoneStatus}];
+  });
+  const rawAttachments=Array.isArray(row.attachments)?row.attachments:[];
+  const attachments=rawAttachments.flatMap(item=>{if(!item||typeof item!=='object')return [];const attachment=item as Record<string,unknown>;const name=text(attachment.name),url=text(attachment.url);return name&&url?[{name,url}]:[];});
+  const rawStatus=text(row.status);const status:ProjectStatus=statuses.includes(rawStatus as ProjectStatus)?rawStatus as ProjectStatus:'Planning';
+  const rawPriority=text(row.priority);const priority:ProjectPriority=priorities.includes(rawPriority as ProjectPriority)?rawPriority as ProjectPriority:'Medium';
+  return {id,name:text(row.name)||`Project ${index+1}`,description:text(row.description),objective:text(row.objective),locations,ownerName:text(row.ownerName)||'Unassigned',collaborators:Array.isArray(row.collaborators)?row.collaborators.map(text).filter(Boolean):[],status,priority,startDate,dueDate,completedAt:text(row.completedAt)||undefined,budget:Math.max(0,number(row.budget)),actualSpend:Math.max(0,number(row.actualSpend)),progress:Math.max(0,Math.min(100,number(row.progress))),milestones,attachments,createdAt:text(row.createdAt),updatedAt:text(row.updatedAt)};
+}
+function normalizeAudit(value:unknown):AuditRow[]{if(!Array.isArray(value))return [];return value.flatMap((item,index)=>{if(!item||typeof item!=='object')return [];const row=item as Record<string,unknown>;return [{id:text(row.id)||`audit-${index}`,at:text(row.at),actor_name:text(row.actor_name)||'OpsVista',event:text(row.event)||'Project updated',before_value:text(row.before_value)||undefined,after_value:text(row.after_value)||undefined,reason:text(row.reason)}];});}
 function isUserPreview(user:OpsVistaUser){try{return currentAuthenticatedUser().id!==user.id;}catch{return false;}}
 
 export default function ProjectsView({currentUser,allowedLocations,canSeeFinancialImpact,initialSearch,initialRecordId,readOnly=false}:Props){
@@ -39,14 +64,14 @@ export default function ProjectsView({currentUser,allowedLocations,canSeeFinanci
   const [newMilestone,setNewMilestone]=useState('');
   const [form,setForm]=useState({name:'',description:'',objective:'',locations:allowedLocations.slice(0,1),ownerName:currentUser.name,collaborators:'',status:'Planning' as ProjectStatus,priority:'Medium' as ProjectPriority,startDate:today,dueDate:addDays(today,30),budget:0});
   const locationScopeKey=allowedLocations.join('|');
-  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {projects?:ProjectRecord[];error?:string};if(!response.ok)throw new Error(body.error||'Projects unavailable');const scope=new Set(allowedLocations);const scoped=(body.projects||[]).filter(item=>item.locations.every(projectLocation=>scope.has(projectLocation)));setProjects(scoped);setSelectedId(current=>initialRecordId&&scoped.some(item=>item.id===initialRecordId)?initialRecordId:scoped.some(item=>item.id===current)?current:'');}catch(e){setError(e instanceof Error?e.message:'Projects unavailable');}finally{setLoading(false);}};
+  const load=async()=>{setLoading(true);setError('');try{const response=await fetch(api,{credentials:'include',cache:'no-store'});const body=await response.json().catch(()=>({})) as {projects?:unknown;error?:string};if(!response.ok)throw new Error(body.error||'Projects unavailable');if(!Array.isArray(body.projects))throw new Error('Projects returned an invalid response');const scope=new Set(allowedLocations);const scoped=body.projects.map((item,index)=>normalizeProject(item,today,index)).filter((item):item is ProjectRecord=>Boolean(item)).filter(item=>item.locations.length>0&&item.locations.every(projectLocation=>scope.has(projectLocation)));setProjects(scoped);setSelectedId(current=>initialRecordId&&scoped.some(item=>item.id===initialRecordId)?initialRecordId:scoped.some(item=>item.id===current)?current:'');}catch(e){setProjects([]);setError(e instanceof Error?e.message:'Projects unavailable');}finally{setLoading(false);}};
   useEffect(()=>{void load();},[locationScopeKey]);
   useEffect(()=>{if(initialSearch||initialRecordId){setSearch(initialSearch||'');setStatus('All');if(initialRecordId)setSelectedId(initialRecordId);}},[initialSearch,initialRecordId]);
   const selected=projects.find(item=>item.id===selectedId);
-  useEffect(()=>{if(!selected){setAudit([]);return;}setProgress(selected.progress);setActualSpend(selected.actualSpend);fetch(`${api}&id=${encodeURIComponent(selected.id)}`,{credentials:'include',cache:'no-store'}).then(r=>r.json()).then((body:{audit?:AuditRow[]})=>setAudit(body.audit||[])).catch(()=>setAudit([]));},[selected?.id]);
+  useEffect(()=>{if(!selected){setAudit([]);return;}setProgress(selected.progress);setActualSpend(selected.actualSpend);fetch(`${api}&id=${encodeURIComponent(selected.id)}`,{credentials:'include',cache:'no-store'}).then(r=>r.json()).then((body:{audit?:unknown})=>setAudit(normalizeAudit(body.audit))).catch(()=>setAudit([]));},[selected?.id]);
   const filtered=useMemo(()=>projects.filter(project=>{const locationMatch=location==='All locations'||project.locations.includes(location);const statusMatch=status==='All'||(status==='Active'?!['Completed','Cancelled'].includes(project.status):project.status===status);const q=search.trim().toLowerCase();const searchMatch=!q||[project.name,project.description,project.objective,project.ownerName,...project.locations].join(' ').toLowerCase().includes(q);return locationMatch&&statusMatch&&searchMatch;}),[projects,location,status,search]);
   const gantt=useMemo(()=>{
-    const projectDates=filtered.flatMap(project=>[project.startDate,project.dueDate]).filter(Boolean);
+    const projectDates=view==='Gantt'?filtered.flatMap(project=>[project.startDate,project.dueDate]).filter(validDate):[];
     const first=projectDates.length?projectDates.reduce((min,value)=>value<min?value:min,projectDates[0]):today;
     const last=projectDates.length?projectDates.reduce((max,value)=>value>max?value:max,projectDates[0]):addDays(today,30);
     const start=addDays(first<today?first:today,-7);
@@ -54,20 +79,22 @@ export default function ProjectsView({currentUser,allowedLocations,canSeeFinanci
     const days=Math.max(1,dayNumber(end)-dayNumber(start)+1);
     const months:Array<{label:string;left:number;width:number}>=[];
     let cursor=start;
-    while(cursor<=end){
+    let monthCount=0;
+    while(cursor<=end&&monthCount<240){
       const current=new Date(`${cursor}T00:00:00Z`);
       const nextMonth=new Date(Date.UTC(current.getUTCFullYear(),current.getUTCMonth()+1,1)).toISOString().slice(0,10);
       const monthEnd=addDays(nextMonth,-1)<end?addDays(nextMonth,-1):end;
       months.push({label:current.toLocaleDateString('en-US',{timeZone:'UTC',month:'short',year:'numeric'}),left:(dayNumber(cursor)-dayNumber(start))/days*100,width:(dayNumber(monthEnd)-dayNumber(cursor)+1)/days*100});
       cursor=nextMonth;
+      monthCount+=1;
     }
     return {start,end,days,months,todayLeft:(dayNumber(today)-dayNumber(start)+.5)/days*100};
-  },[filtered,today]);
+  },[filtered,today,view]);
   const active=projects.filter(item=>!['Completed','Cancelled'].includes(item.status));const totalBudget=active.reduce((sum,item)=>sum+item.budget,0);const totalSpend=active.reduce((sum,item)=>sum+item.actualSpend,0);const overdue=active.filter(item=>item.dueDate<today).length;
   const effectiveReadOnly=readOnly||isUserPreview(currentUser);
   const canCreateProjects=!effectiveReadOnly&&canCreateProjectsForIdentity(currentUser);
-  const create=async(event:FormEvent)=>{event.preventDefault();if(!canCreateProjects){setError('Only Roberto Rodríguez or Jacob Rodríguez can create projects');return;}if(!form.locations.length){setError('Select at least one location');return;}setSaving(true);setError('');try{const response=await fetch(api,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,collaborators:form.collaborators.split(',').map(value=>value.trim()).filter(Boolean),milestones:[]})});const body=await response.json().catch(()=>({})) as {project?:ProjectRecord;error?:string};if(!response.ok||!body.project)throw new Error(body.error||'Project could not be created');setProjects(items=>[body.project!,...items]);setSelectedId(body.project.id);setShowCreate(false);setForm({...form,name:'',description:'',objective:'',budget:0});}catch(e){setError(e instanceof Error?e.message:'Project could not be created');}finally{setSaving(false);}};
-  const update=async(id:string,patch:Record<string,unknown>,reason:string)=>{if(effectiveReadOnly){setError('User preview is read-only');return;}setSaving(true);setError('');try{const response=await fetch(api,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...patch,reason})});const body=await response.json().catch(()=>({})) as {project?:ProjectRecord;error?:string};if(!response.ok||!body.project)throw new Error(body.error||'Project could not be updated');setProjects(items=>items.map(item=>item.id===id?body.project!:item));const detail=await fetch(`${api}&id=${encodeURIComponent(id)}`,{credentials:'include',cache:'no-store'}).then(r=>r.json()) as {audit?:AuditRow[]};setAudit(detail.audit||[]);}catch(e){setError(e instanceof Error?e.message:'Project could not be updated');}finally{setSaving(false);}};
+  const create=async(event:FormEvent)=>{event.preventDefault();if(!canCreateProjects){setError('Only Roberto Rodríguez or Jacob Rodríguez can create projects');return;}if(!form.locations.length){setError('Select at least one location');return;}setSaving(true);setError('');try{const response=await fetch(api,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,collaborators:form.collaborators.split(',').map(value=>value.trim()).filter(Boolean),milestones:[]})});const body=await response.json().catch(()=>({})) as {project?:unknown;error?:string};const project=normalizeProject(body.project,today);if(!response.ok||!project)throw new Error(body.error||'Project could not be created');setProjects(items=>[project,...items]);setSelectedId(project.id);setShowCreate(false);setForm({...form,name:'',description:'',objective:'',budget:0});}catch(e){setError(e instanceof Error?e.message:'Project could not be created');}finally{setSaving(false);}};
+  const update=async(id:string,patch:Record<string,unknown>,reason:string)=>{if(effectiveReadOnly){setError('User preview is read-only');return;}setSaving(true);setError('');try{const response=await fetch(api,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...patch,reason})});const body=await response.json().catch(()=>({})) as {project?:unknown;error?:string};const project=normalizeProject(body.project,today);if(!response.ok||!project)throw new Error(body.error||'Project could not be updated');setProjects(items=>items.map(item=>item.id===id?project:item));const detail=await fetch(`${api}&id=${encodeURIComponent(id)}`,{credentials:'include',cache:'no-store'}).then(r=>r.json()) as {audit?:unknown};setAudit(normalizeAudit(detail.audit));}catch(e){setError(e instanceof Error?e.message:'Project could not be updated');}finally{setSaving(false);}};
   const addMilestone=()=>{if(!selected||!newMilestone.trim())return;const milestones=[...selected.milestones,{id:`MS-${Date.now()}`,title:newMilestone.trim(),owner:selected.ownerName,dueDate:selected.dueDate,status:'Pending' as const}];setNewMilestone('');void update(selected.id,{milestones},'Milestone added');};
   const toggleMilestone=(milestone:ProjectMilestone)=>{if(!selected)return;const milestones=selected.milestones.map(item=>item.id===milestone.id?{...item,status:item.status==='Completed'?'Pending' as const:'Completed' as const}:item);const completed=milestones.filter(item=>item.status==='Completed').length;const calculated=milestones.length?Math.round(completed/milestones.length*100):selected.progress;void update(selected.id,{milestones,progress:calculated},`Milestone ${milestone.status==='Completed'?'reopened':'completed'}`);};
   const toggleLocation=(value:string)=>setForm(current=>({...current,locations:current.locations.includes(value)?current.locations.filter(item=>item!==value):[...current.locations,value]}));
