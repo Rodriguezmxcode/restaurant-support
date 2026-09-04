@@ -40,7 +40,7 @@ function MetricCell({label,value,note,tone='neutral'}:{label:string;value:string
   return <div className={`location-metric-cell ${tone}`}><span>{label}</span><strong>{value}</strong>{note&&<small>{note}</small>}</div>;
 }
 
-export default function LocationDashboard({allowedLocations,allLocations,onOpenTasks,onOpenLabor}:Props){
+export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLabor}:Props){
   const today=useMemo(easternToday,[]);
   const [period,setPeriod]=useState<PeriodKey>(()=>{const saved=window.localStorage.getItem('opsvista-locations-period');return saved&&['today','yesterday','this-week','previous-week','this-month','last-30-days','custom'].includes(saved)?saved as PeriodKey:'today'});
   const [customStart,setCustomStart]=useState(()=>window.localStorage.getItem('opsvista-locations-custom-start')||today);
@@ -60,7 +60,9 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
   const rangeDays=daysInclusive(range.start,range.end);
   const rangeError=!range.start||!range.end||rangeDays<1?'Selecciona un periodo válido.':rangeDays>31?'El periodo puede incluir hasta 31 días.':'';
   const selectionKey=selectedLocations.join('|');
-  const locationLabel=!selectedLocations.length?'All locations':selectedLocations.length===1?selectedLocations[0]:`${selectedLocations.length} locaciones`;
+  const visibleLocations=selectedLocations.length?selectedLocations:allowedLocations;
+  const visibleLocationKey=visibleLocations.join('|');
+  const locationLabel=!selectedLocations.length?`Todas · ${allowedLocations.length} locaciones`:selectedLocations.length===1?selectedLocations[0]:`${selectedLocations.length} locaciones`;
 
   useEffect(()=>{const valid=selectedLocations.filter(location=>allowedLocations.includes(location));if(valid.length!==selectedLocations.length)setSelectedLocations(valid)},[allowedLocations,selectionKey]);
   useEffect(()=>{window.localStorage.setItem('opsvista-locations-period',period);window.localStorage.setItem('opsvista-locations-custom-start',customStart);window.localStorage.setItem('opsvista-locations-custom-end',customEnd);window.localStorage.setItem('opsvista-locations-selection',JSON.stringify(selectedLocations))},[period,customStart,customEnd,selectionKey]);
@@ -73,7 +75,7 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
     setError('');setComparisonError('');setTasksError('');
     const currentParams=new URLSearchParams({start:range.start,end:range.end});
     const priorParams=new URLSearchParams({start:prior.start,end:prior.end,include_tasks:'false'});
-    if(selectedLocations.length){const locations=selectedLocations.join(',');currentParams.set('locations',locations);priorParams.set('locations',locations)}
+    if(visibleLocations.length){const locations=visibleLocations.join(',');currentParams.set('locations',locations);priorParams.set('locations',locations)}
     const tasksParams=new URLSearchParams({start:range.start,end:range.end});
     const performanceRequest=(params:URLSearchParams,message:string)=>fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as PerformanceResponse&{error?:string};if(!response.ok)throw new Error(body.error||message);return body});
 
@@ -105,10 +107,9 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
     });
 
     return()=>{cancelled=true;controller.abort()};
-  },[range.start,range.end,prior.start,prior.end,selectionKey,rangeError]);
+  },[range.start,range.end,prior.start,prior.end,visibleLocationKey,rangeError]);
 
-  const visibleLocations=selectedLocations.length?selectedLocations:allowedLocations;
-  const toggleLocation=(location:string)=>setSelectedLocations(currentSelection=>{const next=currentSelection.includes(location)?currentSelection.filter(item=>item!==location):[...currentSelection,location];return next.length===allowedLocations.length?[]:next});
+  const toggleLocation=(location:string)=>setSelectedLocations(currentSelection=>{const base=currentSelection.length?currentSelection:allowedLocations;if(base.length===1&&base.includes(location))return base;const next=base.includes(location)?base.filter(item=>item!==location):[...base,location];return next.length===allowedLocations.length?[]:next});
   const logbookAvailable=tasks!==null&&!tasksError&&!tasks.logbookError&&tasks.logbookComplete!==false;
   const cards=useMemo(()=>{
     if(!current)return[];
@@ -135,10 +136,11 @@ export default function LocationDashboard({allowedLocations,allLocations,onOpenT
     <section className="location-dashboard-controls">
       <div><span>LOCATION PERFORMANCE</span><h2>Dashboard completo por locación</h2><p>Ventas, labor, productividad, overtime, Tasks y Logbook dentro del mismo periodo.</p></div>
       <div className="location-dashboard-filter-row">
-        <details className="location-dashboard-location-picker"><summary><span>LOCACIONES</span><strong>{locationLabel}</strong></summary><div><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/>All locations</label>{allowedLocations.map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/>{location}</label>)}</div></details>
+        <details className="location-dashboard-location-picker"><summary><span>LOCACIONES</span><strong>{locationLabel}</strong></summary><div><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/>Todas las locaciones ({allowedLocations.length})</label>{allowedLocations.map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/>{location}</label>)}</div></details>
         <label className="location-dashboard-period"><span>PERIODO</span><select value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this-week">This week</option><option value="previous-week">Prior week</option><option value="this-month">This month</option><option value="last-30-days">Last 30 days</option><option value="custom">Custom</option></select></label>
         <CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end)}} ariaLabel="Seleccionar periodo de Locaciones"/>
       </div>
+      <div className="location-dashboard-scope"><strong>Incluye {visibleLocations.length} locación{visibleLocations.length===1?'':'es'}:</strong><span>{visibleLocations.join(' · ')}</span></div>
       <div className={`location-dashboard-source ${error||rangeError?'error':''}`}><span><strong>{range.label}</strong> · {range.start} → {range.end}</span><span>{loading?'Actualizando Toast…':error||rangeError||(current?`Live · ${comparisonLoading?'comparación cargando':tasksLoading?'7shifts cargando':current.source}`:'Fuentes pendientes')}</span></div>
     </section>
 
