@@ -1,4 +1,4 @@
-import { getRestaurant365Credentials, type Restaurant365Credentials } from './integrationStore.js';
+import { getIntegrationSnapshot, getRestaurant365Credentials, saveIntegrationSnapshot, type Restaurant365Credentials } from './integrationStore.js';
 
 const DEFAULT_BASE_URL = 'https://odata.restaurant365.net/api/v2/views';
 const restaurantLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
@@ -455,7 +455,30 @@ async function companiesForTransactions(credentials:Restaurant365Credentials,row
 const glAccountFields='glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName';
 const glAccountCatalogFields='glAccountId,glAccountNumber,name,glType,operationalCategory';
 
-type GlAccountCatalog={accounts:Restaurant365AccountRow[];limited:boolean;partial:boolean};
+type GlAccountCatalog={
+  accounts:Restaurant365AccountRow[];
+  limited:boolean;
+  partial:boolean;
+  source:'catalog'|'activity';
+  coverageMonth?:string;
+  unresolvedNames?:number;
+};
+
+async function glAccountById(credentials:Restaurant365Credentials,id:string) {
+  const filter=/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`;
+  const selects=[glAccountCatalogFields,'glAccountId,glAccountNumber,name',''];
+  for(const select of selects){
+    try{
+      const params:Record<string,string>={'$filter':filter,'$top':'1'};
+      if(select)params.$select=select;
+      const account=(await odata(credentials,'GlAccount',params)).map(accountFromRow).find(row=>Boolean(row.id||row.number));
+      if(account)return account;
+    }catch(error){
+      if(error instanceof Error&&/rechazó el usuario|permiso OData/i.test(error.message))throw error;
+    }
+  }
+  return undefined;
+}
 
 async function glAccountCatalogPage(credentials:Restaurant365Credentials,pageSize:number,maxRows=2_000):Promise<GlAccountCatalog> {
   const rows:ODataRow[]=[];
@@ -488,7 +511,44 @@ async function glAccountCatalogPage(credentials:Restaurant365Credentials,pageSiz
     if(page.length<pageSize){complete=true;break;}
   }
   const accounts=rows.map(accountFromRow).filter(account=>Boolean(account.id||account.number));
-  return {accounts,partial,limited:partial||(!complete&&rows.length>=maxRows)};
+  return {accounts,partial,limited:partial||(!complete&&rows.length>=maxRows),source:'catalog'};
+}
+
+function previousCompletedMonth() {
+  const date=new Date();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth()-1);
+  return date.toISOString().slice(0,7);
+}
+
+async function glAccountCatalogFromActivity(credentials:Restaurant365Credentials):Promise<GlAccountCatalog> {
+  const month=previousCompletedMonth();
+  const period=monthPeriod(month);
+  const locations=(await locationCatalog(credentials)).filter(location=>Boolean(location.opsVistaLocation));
+  const locationPages=await parallelMap(locations,2,async location=>{
+    try{return await odataAll(credentials,'Transaction',{
+      '$select':'transactionId,date,type,isApproved',
+      '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z and locationId eq ${location.id}`,
+    },250,50);}
+    catch{return [] as ODataRow[];}
+  });
+  const rows=locationPages.flat();
+  const uniqueTransactions=uniqueRows(rows,['transactionId','id']).rows;
+  const approved=uniqueTransactions.filter(row=>booleanValue(row,['isApproved']));
+  const candidates=approved.length?approved:uniqueTransactions;
+  const ap=candidates.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type']))).slice(0,180);
+  const other=candidates.filter(row=>!/ap\s*invoice/i.test(stringValue(row,['type']))).slice(0,80);
+  const transactionIds=uniqueRows([...ap,...other],['transactionId','id']).rows.map(row=>stringValue(row,['transactionId','id']));
+  if(!transactionIds.length)return {accounts:[],limited:rows.length>=locations.length*250,partial:true,source:'activity',coverageMonth:month};
+  const details=await transactionDetails(credentials,transactionIds);
+  const ids=Array.from(new Set(details.rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean))).slice(0,250);
+  const recovered=await parallelMap(ids,8,id=>glAccountById(credentials,id));
+  const resolved=recovered.filter((account):account is Restaurant365AccountRow=>Boolean(account));
+  const resolvedIds=new Set(resolved.flatMap(account=>[account.id.toLowerCase(),account.autoId?.toLowerCase()||'']).filter(Boolean));
+  const unresolved=ids.filter(id=>!resolvedIds.has(id.toLowerCase()));
+  const placeholders:Restaurant365AccountRow[]=unresolved.map(id=>({id,name:`Cuenta GL ${id.slice(0,8)} · nombre pendiente de R365`}));
+  const accounts=uniqueRows([...resolved,...placeholders].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
+  return {accounts,limited:rows.length>=locations.length*250||ids.length>=250,partial:unresolved.length>0,source:'activity',coverageMonth:month,unresolvedNames:unresolved.length};
 }
 
 async function glAccountReferenceCatalog(credentials:Restaurant365Credentials):Promise<GlAccountCatalog> {
@@ -514,9 +574,16 @@ async function glAccountReferenceCatalog(credentials:Restaurant365Credentials):P
   try{
     const rows=await odata(credentials,'GlAccount',{'$select':glAccountCatalogFields,'$top':'1'});
     const accounts=rows.map(accountFromRow).filter(account=>Boolean(account.id||account.number));
-    if(accounts.length)return {accounts,limited:true,partial:true};
+    if(accounts.length)return {accounts,limited:true,partial:true,source:'catalog'};
   }catch(error){lastError=error;}
-  throw lastError instanceof Error?lastError:new Error('Restaurant365 no entregó el plan de cuentas GL.');
+  try{
+    const activityCatalog=await glAccountCatalogFromActivity(credentials);
+    if(activityCatalog.accounts.length)return activityCatalog;
+  }catch(error){
+    if(error instanceof Error&&/rechazó el usuario|permiso OData/i.test(error.message))throw error;
+    lastError=error;
+  }
+  return {accounts:[],limited:true,partial:true,source:'activity',coverageMonth:previousCompletedMonth()};
 }
 
 async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:ODataRow[]) {
@@ -528,12 +595,8 @@ async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:OD
   const matched=catalog.filter(account=>wanted.has(account.id.toLowerCase())||Boolean(account.autoId&&wanted.has(account.autoId.toLowerCase())));
   const matchedIds=new Set(matched.flatMap(account=>[account.id.toLowerCase(),account.autoId?.toLowerCase()||'']).filter(Boolean));
   const missing=ids.filter(id=>!matchedIds.has(id.toLowerCase()));
-  const recovered=await parallelMap(missing,3,async id=>{
-    const filter=/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`;
-    try{return (await odata(credentials,'GlAccount',{'$select':glAccountFields,'$filter':filter,'$top':'1'})).map(accountFromRow);}
-    catch{return [] as Restaurant365AccountRow[];}
-  });
-  return uniqueRows([...matched,...recovered.flat()].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
+  const recovered=await parallelMap(missing,6,id=>glAccountById(credentials,id));
+  return uniqueRows([...matched,...recovered.filter((account):account is Restaurant365AccountRow=>Boolean(account))].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
 }
 
 async function locationCatalog(credentials: Restaurant365Credentials) {
@@ -670,14 +733,37 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
 
 export async function getRestaurant365Ap(organizationId:string,startOrMonth:string,end?:string):Promise<Restaurant365ApSnapshot> {
   const credentials = await requiredCredentials(organizationId);
-  const transactionResult=await periodTransactionRows(credentials,requestedPeriod(startOrMonth,end));
+  const period=requestedPeriod(startOrMonth,end);
+  const snapshotKey=`ap:${period.start}:${period.endExclusive}`;
+  let cached:Restaurant365ApSnapshot|undefined;
+  try{cached=(await getIntegrationSnapshot<Restaurant365ApSnapshot>(organizationId,'restaurant365-odata',snapshotKey))?.payload;}catch{/* R365 remains available if snapshot storage is temporarily unavailable. */}
+  let transactionResult:Awaited<ReturnType<typeof periodTransactionRows>>;
+  try{transactionResult=await periodTransactionRows(credentials,period);}
+  catch(error){
+    if(cached)return {...cached,caveats:[...cached.caveats,'Restaurant365 no respondió en esta actualización; se muestra la última copia verificada guardada en OpsVista.']};
+    throw error;
+  }
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
-  const [companies,detailResult]=await Promise.all([companiesForTransactions(credentials,apSourceRows),transactionDetails(credentials,apSourceRows.map(row=>stringValue(row,['transactionId','id'])))]);
+  const cachedById=new Map((cached?.transactions||[]).map(row=>[row.id.toLowerCase(),row]));
+  const hydrateRows=apSourceRows.filter(row=>{
+    const id=transactionIdentifier(row),previous=cachedById.get(id);
+    return !previous||!booleanValue(row,['isApproved'])||previous.amount===null;
+  });
+  const [companies,detailResult]=await Promise.all([companiesForTransactions(credentials,hydrateRows),transactionDetails(credentials,hydrateRows.map(row=>stringValue(row,['transactionId','id'])))]);
   const amounts=invoiceAmounts(detailResult.rows);
-  const transactions = apSourceRows.map(row=>{const transaction=transactionFromRow(row,companies);return{...transaction,amount:amounts.get(transaction.id.toLowerCase())??null};}).filter(row=>Boolean(row.entity)).sort((left,right)=>left.date.localeCompare(right.date)||left.createdOn?.localeCompare(right.createdOn||'')||0);
-  return {provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
+  const liveTransactions=apSourceRows.map(row=>{
+    const transaction=transactionFromRow(row,companies),previous=cachedById.get(transaction.id.toLowerCase());
+    if(transaction.approved&&previous?.amount!==null&&previous?.amount!==undefined)return {...transaction,createdOn:transaction.createdOn||previous.createdOn,vendor:previous.vendor||transaction.vendor,createdBy:transaction.createdBy||previous.createdBy,amount:previous.amount};
+    return {...transaction,createdOn:transaction.createdOn||previous?.createdOn,vendor:transaction.vendor||previous?.vendor,createdBy:transaction.createdBy||previous?.createdBy,amount:amounts.get(transaction.id.toLowerCase())??previous?.amount??null};
+  }).filter(row=>Boolean(row.entity));
+  const liveIds=new Set(liveTransactions.map(row=>row.id.toLowerCase()));
+  const archivedApproved=(cached?.transactions||[]).filter(row=>row.approved&&!liveIds.has(row.id.toLowerCase()));
+  const transactions=[...liveTransactions,...archivedApproved].sort((left,right)=>left.date.localeCompare(right.date)||left.createdOn?.localeCompare(right.createdOn||'')||0);
+  const snapshot:Restaurant365ApSnapshot={provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
     totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size,amount:money(transactions.reduce((sum,row)=>sum+(row.amount||0),0)),approvedAmount:money(transactions.filter(row=>row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),pendingAmount:money(transactions.filter(row=>!row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),invoicesWithoutAmount:transactions.filter(row=>row.amount===null).length},
-    caveats:['El monto se recupera de TransactionDetail y se valida contra sus débitos y créditos.','Las facturas sin detalle contable se marcan como “sin monto”; nunca se cuentan como $0.','Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.']};
+    caveats:['Las facturas aprobadas se conservan como copia histórica en OpsVista; cada actualización consulta el estado actual y vuelve a hidratar las pendientes o nuevas.','El monto se recupera de TransactionDetail y se valida contra sus débitos y créditos.','Las facturas sin detalle contable se marcan como “sin monto”; nunca se cuentan como $0.','Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.',...(archivedApproved.length?[`${archivedApproved.length} facturas aprobadas históricas permanecen en la copia de OpsVista aunque R365 no las incluyó en esta lectura.`]:[])]};
+  try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',snapshotKey,snapshot);}catch{/* Do not block the live accounting view if backup persistence fails. */}
+  return snapshot;
 }
 
 export async function getRestaurant365Catalog(organizationId:string,kind:'vendors'|'accounts'):Promise<Restaurant365CatalogSnapshot> {
@@ -686,11 +772,22 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
     const {rows} = await companyCatalog(credentials);
     return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),vendors:rows.map(row=>({id:stringValue(row,['companyId','id']),number:stringValue(row,['companyNumber','number'])||undefined,name:stringValue(row,['name'])||'Vendor sin nombre',comment:stringValue(row,['comment'])||undefined})).filter(vendor=>vendor.id&&vendor.name)};
   }
+  const snapshotKey='gl-account-catalog:v1';
+  let cached:{payload:Restaurant365CatalogSnapshot;updatedAt:string}|null=null;
+  try{cached=await getIntegrationSnapshot<Restaurant365CatalogSnapshot>(organizationId,'restaurant365-odata',snapshotKey);}catch{/* Continue with the live source. */}
+  if(cached?.payload.accounts?.length&&Date.now()-Date.parse(cached.updatedAt)<24*60*60*1_000){
+    return {...cached.payload,caveats:[...(cached.payload.caveats||[]),'Catálogo respaldado en OpsVista; se revalida automáticamente cada 24 horas.']};
+  }
   const catalog=await glAccountReferenceCatalog(credentials);
   const accounts = uniqueRows(catalog.accounts.map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
     .sort((left,right)=>(left.number||'').localeCompare(right.number||'')||left.name.localeCompare(right.name));
+  if(!accounts.length&&cached?.payload.accounts?.length)return {...cached.payload,caveats:[...(cached.payload.caveats||[]),'Restaurant365 no entregó el catálogo en esta actualización; se conserva la última copia verificada de OpsVista.']};
   const caveats:string[]=[];
-  if(catalog.partial)caveats.push(`Restaurant365 interrumpió una página del catálogo. Se muestran ${accounts.length} cuentas GL recuperadas; intenta actualizar para completar la lista.`);
+  if(catalog.source==='activity')caveats.push(`Restaurant365 no expuso el catálogo directo. OpsVista reconstruyó ${accounts.length} cuentas GL desde movimientos contables de ${catalog.coverageMonth||'la actividad reciente'}.`);
+  if(catalog.unresolvedNames)caveats.push(`${catalog.unresolvedNames} cuentas conservan su identificador real, pero Restaurant365 no entregó todavía el nombre.`);
+  else if(catalog.partial)caveats.push(`Restaurant365 interrumpió una página del catálogo. Se muestran ${accounts.length} cuentas GL recuperadas; intenta actualizar para completar la lista.`);
   else if(catalog.limited)caveats.push(`Restaurant365 limitó esta lectura a ${accounts.length} cuentas; la vista muestra las cuentas recuperadas sin inventar datos.`);
-  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats};
+  const snapshot:Restaurant365CatalogSnapshot={provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats};
+  if(accounts.length)try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',snapshotKey,snapshot);}catch{/* Keep the live view available if backup persistence fails. */}
+  return snapshot;
 }
