@@ -104,6 +104,7 @@ export type Restaurant365CatalogSnapshot = {
   fetchedAt: string;
   vendors?: Array<{ id: string; number?: string; name: string; comment?: string }>;
   accounts?: Restaurant365AccountRow[];
+  caveats?: string[];
 };
 
 export type Restaurant365Location = {
@@ -451,14 +452,44 @@ async function companiesForTransactions(credentials:Restaurant365Credentials,row
   return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
 }
 
+const glAccountFields='glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName';
+
+async function glAccountReferenceCatalog(credentials:Restaurant365Credentials) {
+  const attempts:Record<string,string>[]=[
+    {'$select':glAccountFields},
+    {'$select':glAccountFields,'$top':'500'},
+    {'$select':'glAccountAutoId,glAccountId,glAccountNumber,name'},
+    {'$select':'glAccountAutoId,glAccountId,glAccountNumber,name','$top':'500'},
+  ];
+  let lastError:unknown;
+  for(const params of attempts){
+    try{
+      const rows=await odata(credentials,'GlAccount',params);
+      const accounts=uniqueRows(rows,['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
+      if(accounts.length)return {accounts,limited:params.$top==='500'&&rows.length>=500};
+    }catch(error){
+      if(error instanceof Error&&/rechazó el usuario|permiso OData/i.test(error.message))throw error;
+      lastError=error;
+    }
+  }
+  throw lastError instanceof Error?lastError:new Error('Restaurant365 no entregó el plan de cuentas GL.');
+}
+
 async function glAccountsForDetails(credentials:Restaurant365Credentials,rows:ODataRow[]) {
   const ids=Array.from(new Set(rows.map(row=>odataIdentifier(stringValue(row,['glAccountId']))).filter(Boolean)));
   if(!ids.length)return [] as Restaurant365AccountRow[];
-  const pages=await parallelMap(chunks(ids,20),1,batch=>odataAll(credentials,'GlAccount',{
-    '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory',
-    '$filter':batch.map(id=>/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`).join(' or '),
-  },200,50));
-  return uniqueRows(pages.flat(),['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
+  let catalog:Restaurant365AccountRow[]=[];
+  try{catalog=(await glAccountReferenceCatalog(credentials)).accounts;}catch{/* Recover the exact accounts below. */}
+  const wanted=new Set(ids.map(id=>id.toLowerCase()));
+  const matched=catalog.filter(account=>wanted.has(account.id.toLowerCase())||Boolean(account.autoId&&wanted.has(account.autoId.toLowerCase())));
+  const matchedIds=new Set(matched.flatMap(account=>[account.id.toLowerCase(),account.autoId?.toLowerCase()||'']).filter(Boolean));
+  const missing=ids.filter(id=>!matchedIds.has(id.toLowerCase()));
+  const recovered=await parallelMap(missing,3,async id=>{
+    const filter=/^\d+$/.test(id)?`glAccountAutoId eq ${id}`:`glAccountId eq ${id}`;
+    try{return (await odata(credentials,'GlAccount',{'$select':glAccountFields,'$filter':filter,'$top':'1'})).map(accountFromRow);}
+    catch{return [] as Restaurant365AccountRow[];}
+  });
+  return uniqueRows([...matched,...recovered.flat()].map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow);
 }
 
 async function locationCatalog(credentials: Restaurant365Credentials) {
@@ -470,15 +501,6 @@ async function companyCatalog(credentials: Restaurant365Credentials) {
   const rows = await odataAll(credentials,'Company',{'$select':'companyId,companyNumber,name,comment','$orderby':'name,companyId'},10_000,250);
   const companies = new Map(rows.map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
   return {rows,companies};
-}
-
-async function glAccountCatalog(credentials: Restaurant365Credentials, locationId:string) {
-  const rows = await odataAll(credentials,'GlAccount',{
-    '$select':'glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName',
-    '$filter':`locationId eq ${locationId}`,
-    '$orderby':'glAccountAutoId',
-  },5_000,100);
-  return uniqueRows(rows,['glAccountAutoId','glAccountId','id']).rows.map(accountFromRow);
 }
 
 async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string) {
@@ -620,9 +642,8 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
     const {rows} = await companyCatalog(credentials);
     return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),vendors:rows.map(row=>({id:stringValue(row,['companyId','id']),number:stringValue(row,['companyNumber','number'])||undefined,name:stringValue(row,['name'])||'Vendor sin nombre',comment:stringValue(row,['comment'])||undefined})).filter(vendor=>vendor.id&&vendor.name)};
   }
-  const locations = await locationCatalog(credentials);
-  const accountPages = await parallelMap(locations.filter(location=>location.id),1,location=>glAccountCatalog(credentials,location.id));
-  const accounts = uniqueRows(accountPages.flat().map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
+  const catalog=await glAccountReferenceCatalog(credentials);
+  const accounts = uniqueRows(catalog.accounts.map(account=>account as unknown as ODataRow),['autoId','id']).rows.map(row=>row as unknown as Restaurant365AccountRow)
     .sort((left,right)=>(left.number||'').localeCompare(right.number||'')||left.name.localeCompare(right.name));
-  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts};
+  return {provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats:catalog.limited?['Restaurant365 limitó esta lectura a 500 cuentas; la vista muestra las cuentas recuperadas sin inventar datos.']:[]};
 }
