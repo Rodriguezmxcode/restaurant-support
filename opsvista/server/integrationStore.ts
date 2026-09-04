@@ -67,7 +67,45 @@ async function ensureSchema() {
       primary key (organization_id, provider)
     )
   `;
+  await sql()`
+    create table if not exists opsvista_integration_snapshots (
+      organization_id text not null,
+      provider text not null,
+      snapshot_key text not null,
+      payload jsonb not null,
+      updated_at timestamptz not null default now(),
+      primary key (organization_id, provider, snapshot_key)
+    )
+  `;
   initialized = true;
+}
+
+export async function getIntegrationSnapshot<T>(organizationId:string,provider:string,snapshotKey:string):Promise<{payload:T;updatedAt:string}|null> {
+  if (!databaseUrl()) return null;
+  await ensureSchema();
+  const rows=await sql()`
+    select payload,updated_at
+    from opsvista_integration_snapshots
+    where organization_id=${organizationId} and provider=${provider} and snapshot_key=${snapshotKey}
+    limit 1
+  `;
+  const row=rows[0];
+  if(!row)return null;
+  const payload=typeof row.payload==='string'?JSON.parse(row.payload):row.payload;
+  return {payload:payload as T,updatedAt:new Date(row.updated_at as string|number|Date).toISOString()};
+}
+
+export async function saveIntegrationSnapshot<T>(organizationId:string,provider:string,snapshotKey:string,payload:T) {
+  if (!databaseUrl()) return;
+  await ensureSchema();
+  const database=sql();
+  await database`
+    insert into opsvista_integration_snapshots (organization_id,provider,snapshot_key,payload,updated_at)
+    values (${organizationId},${provider},${snapshotKey},${database.json(payload as never)},now())
+    on conflict (organization_id,provider,snapshot_key) do update set
+      payload=excluded.payload,
+      updated_at=now()
+  `;
 }
 
 export async function getGoogleBusinessCredentials(organizationId: string): Promise<GoogleBusinessCredentials | null> {
@@ -164,6 +202,10 @@ export async function disconnectRestaurant365(organizationId: string) {
   await ensureSchema();
   await sql()`
     delete from opsvista_integration_credentials
+    where organization_id=${organizationId} and provider='restaurant365-odata'
+  `;
+  await sql()`
+    delete from opsvista_integration_snapshots
     where organization_id=${organizationId} and provider='restaurant365-odata'
   `;
 }
