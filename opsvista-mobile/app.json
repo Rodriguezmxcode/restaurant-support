@@ -21,7 +21,7 @@
     "plugins": ["expo-notifications"],
     "extra": {
       "apiBaseUrl": "https://restaurant-support.vercel.app",
-      "eas": { "projectId": "REPLACE_AFTER_EAS_INIT" }
+      "eas": { "projectId": "1a94f5e6-1ea4-4e92-b071-e0250345e75c" }
     }
   }
 }
