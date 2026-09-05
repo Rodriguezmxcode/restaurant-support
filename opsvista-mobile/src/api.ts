@@ -26,4 +26,5 @@ export const actionApi={
   assign:(actionId:string,ownerId:string,acceptWithinMinutes:number)=>request<{action:ActionRecord}>('/api/workflows?resource=actions',{method:'PUT',body:JSON.stringify({id:actionId,status:'Assigned',ownerId,resendNotification:true,acceptWithinMinutes,reason:'Smart assignment sent from OpsVista Mobile'})}),
   receipt:(actionId:string,status:'Delivered'|'Seen'|'Accepted'|'In progress'|'Evidence submitted')=>request<ActionNotificationDetail>('/api/workflows?resource=action_notifications',{method:'POST',body:JSON.stringify({actionId,status})}),
   registerDevice:(token:string,platform:'ios'|'android',deviceName?:string)=>request<{registered:boolean}>('/api/workflows?resource=mobile_devices',{method:'POST',body:JSON.stringify({token,platform,deviceName,appVersion:Constants.expoConfig?.version||'unknown'})}),
+  scanOperationalAlerts:()=>request<{createdActions:ActionRecord[];scannedLocations:number}>('/api/workflows?resource=operational_alert_scan',{method:'POST'}),
 };
