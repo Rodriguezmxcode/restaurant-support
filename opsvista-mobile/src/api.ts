@@ -33,4 +33,5 @@ export type NotificationPreferences={emailEnabled:boolean;pushEnabled:boolean;sm
 export const notificationApi={
   getPreferences:()=>request<NotificationPreferences>('/api/workflows?resource=notification_preferences'),
   updatePreferences:(preferences:NotificationPreferences)=>request<NotificationPreferences>('/api/workflows?resource=notification_preferences',{method:'PUT',body:JSON.stringify(preferences)}),
+  sendTest:()=>request<{sent:boolean;email?:{accepted:number;configured:boolean;warning?:string};devices:number}>('/api/workflows?resource=notification_test',{method:'POST'}),
 };
