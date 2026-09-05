@@ -104,6 +104,13 @@ async function ensureSchema() {
     push_enabled boolean not null default true, sms_enabled boolean not null default false, phone text,
     updated_at timestamptz not null default now(), primary key(organization_id,user_id)
   )`;
+  await db`create table if not exists opsvista_email_outbox (
+    event_key text not null, organization_id text not null, recipient_id text not null,
+    recipient_email text not null, title text not null, body text not null, action_id text,
+    status text not null default 'Pending', attempts integer not null default 0,
+    last_error text, created_at timestamptz not null default now(), sent_at timestamptz,
+    primary key(event_key,recipient_email)
+  )`;
   await db`create index if not exists opsvista_mobile_devices_user_idx on opsvista_mobile_devices(organization_id,user_id,active)`;
   await db`create index if not exists opsvista_action_notification_events_idx on opsvista_action_notification_events(action_id,at desc)`;
   await db`create index if not exists opsvista_action_notification_accept_idx on opsvista_action_notification_state(organization_id,accept_by,latest_status)`;
@@ -129,19 +136,29 @@ async function recipientsFor(userIds:string[], actor:SessionUser) {
     where u.id in ${db(userIds)} and u.active=true`;
 }
 
-async function sendEmail(title:string,body:string,recipientRows:Record<string,unknown>[],actionId?:string) {
+async function sendEmail(eventKey:string,title:string,body:string,recipientRows:Record<string,unknown>[],actor:SessionUser,actionId?:string) {
   const apiKey = process.env.RESEND_API_KEY || '';
-  const recipients = recipientRows.filter(row => row.email_enabled !== false && row.email).map(row => String(row.email));
+  const enabledRows = recipientRows.filter(row => row.email_enabled !== false && row.email);
+  const recipients = enabledRows.map(row => String(row.email));
   if (!recipients.length) return {accepted:0,configured:Boolean(apiKey)};
-  if (!apiKey) return {accepted:0,configured:false,warning:'RESEND_API_KEY is not configured'};
+  const db = sql();
+  for (const row of enabledRows) await db`insert into opsvista_email_outbox
+    (event_key,organization_id,recipient_id,recipient_email,title,body,action_id,status)
+    values(${eventKey},${organization(actor)},${String(row.id)},${String(row.email)},${title},${body},${actionId ?? null},'Pending')
+    on conflict(event_key,recipient_email) do nothing`;
+  if (!apiKey) return {accepted:0,queued:recipients.length,configured:false,warning:'Email queued until the sender is connected'};
   const from = process.env.OPSVISTA_EMAIL_FROM || 'OpsVista Alerts <alerts@getopsvista.com>';
   const actionLink = actionId ? `<p style="margin:28px 0"><a href="${publicUrl()}/?action=${encodeURIComponent(actionId)}" style="background:#1769ff;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700">Abrir en OpsVista</a></p>` : '';
   const response = await fetch('https://api.resend.com/emails',{
     method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},
     body:JSON.stringify({from,to:recipients,subject:title,html:`<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#172033"><p style="font-size:13px;font-weight:800;letter-spacing:1px;color:#1769ff">OPSVISTA</p><h1 style="font-size:24px">${html(title)}</h1><p style="font-size:17px;line-height:1.55">${html(body)}</p>${actionLink}<p style="font-size:12px;color:#738096">Restaurant operating intelligence · Mensaje automático</p></div>`})
   });
-  if (!response.ok) return {accepted:0,configured:true,warning:`Email provider returned ${response.status}`};
-  return {accepted:recipients.length,configured:true};
+  if (!response.ok) {
+    await db`update opsvista_email_outbox set attempts=attempts+1,last_error=${`Email provider returned ${response.status}`} where event_key=${eventKey}`;
+    return {accepted:0,queued:recipients.length,configured:true,warning:`Email provider returned ${response.status}`};
+  }
+  await db`update opsvista_email_outbox set status='Sent',attempts=attempts+1,last_error=null,sent_at=now() where event_key=${eventKey}`;
+  return {accepted:recipients.length,queued:0,configured:true};
 }
 
 export async function getNotificationPreferences(user:SessionUser):Promise<NotificationPreferences> {
@@ -209,7 +226,7 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
   const pushUserIds = recipientRows.filter(row => row.push_enabled !== false).map(row => String(row.id));
   const devices = pushUserIds.length ? await db`select token,user_id from opsvista_mobile_devices
     where organization_id=${organization(actor)} and user_id in ${db(pushUserIds)} and active=true` : [];
-  const email = await sendEmail(input.title,input.body,recipientRows,input.actionId);
+  const email = await sendEmail(input.eventKey,input.title,input.body,recipientRows,actor,input.actionId);
   await db`update opsvista_operational_notifications set email_recipients=${email.accepted} where event_key=${input.eventKey}`;
   if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, email };
   const messages = devices.map(row => ({
@@ -248,7 +265,7 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     latest_status='Sent',sent_at=excluded.sent_at,accept_by=excluded.accept_by,delivered_at=null,seen_at=null,accepted_at=null,updated_at=now()`;
   await appendEvent(action.id, action.ownerId, action.ownerName, 'Sent', actor, `Accept by ${acceptBy.toISOString()}`);
   const recipientRows = await recipientsFor([action.ownerId],actor);
-  const email = await sendEmail(`${action.location}: ${action.title}`,`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,action.id);
+  const email = await sendEmail(`action:${action.id}:assigned:${sentAt.toISOString()}`,`${action.location}: ${action.title}`,`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,actor,action.id);
   if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
   const pushEnabled = recipientRows.some(row => row.push_enabled !== false);
   const devices = pushEnabled ? await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true` : [];
