@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test:notification-email": "node scripts/test-notification-email.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

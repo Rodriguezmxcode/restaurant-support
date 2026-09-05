@@ -1,6 +1,8 @@
 import postgres from 'postgres';
 import type { SessionUser } from './authSession.js';
 import type { ActionRecord } from './actionStore.js';
+import { getManagedUser } from './managementStore.js';
+import { deliverNotificationEmail } from './emailDelivery.js';
 
 export type ActionReceiptStatus =
   | 'Sent'
@@ -111,6 +113,7 @@ async function ensureSchema() {
     last_error text, created_at timestamptz not null default now(), sent_at timestamptz,
     primary key(event_key,recipient_email)
   )`;
+  await db`alter table opsvista_email_outbox add column if not exists provider_id text`;
   await db`create index if not exists opsvista_mobile_devices_user_idx on opsvista_mobile_devices(organization_id,user_id,active)`;
   await db`create index if not exists opsvista_action_notification_events_idx on opsvista_action_notification_events(action_id,at desc)`;
   await db`create index if not exists opsvista_action_notification_accept_idx on opsvista_action_notification_state(organization_id,accept_by,latest_status)`;
@@ -122,7 +125,6 @@ const organization = (user: SessionUser) => user.organizationId || 'org-puerto-v
 const eventId = () => `an-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 const iso = (value: unknown) => value ? new Date(String(value)).toISOString() : undefined;
 const publicUrl = () => (process.env.OPSVISTA_PUBLIC_URL || 'https://restaurant-support.vercel.app').replace(/\/$/,'');
-const html = (value:string) => value.replace(/[&<>'"]/g,character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character] || character));
 
 async function recipientsFor(userIds:string[], actor:SessionUser) {
   if (!userIds.length) return [];
@@ -148,17 +150,34 @@ async function sendEmail(eventKey:string,title:string,body:string,recipientRows:
     on conflict(event_key,recipient_email) do nothing`;
   if (!apiKey) return {accepted:0,queued:recipients.length,configured:false,warning:'Email queued until the sender is connected'};
   const from = process.env.OPSVISTA_EMAIL_FROM || 'OpsVista Alerts <alerts@getopsvista.com>';
-  const actionLink = actionId ? `<p style="margin:28px 0"><a href="${publicUrl()}/?action=${encodeURIComponent(actionId)}" style="background:#1769ff;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700">Abrir en OpsVista</a></p>` : '';
-  const response = await fetch('https://api.resend.com/emails',{
-    method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},
-    body:JSON.stringify({from,to:recipients,subject:title,html:`<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#172033"><p style="font-size:13px;font-weight:800;letter-spacing:1px;color:#1769ff">OPSVISTA</p><h1 style="font-size:24px">${html(title)}</h1><p style="font-size:17px;line-height:1.55">${html(body)}</p>${actionLink}<p style="font-size:12px;color:#738096">Restaurant operating intelligence · Mensaje automático</p></div>`})
-  });
-  if (!response.ok) {
-    await db`update opsvista_email_outbox set attempts=attempts+1,last_error=${`Email provider returned ${response.status}`} where event_key=${eventKey}`;
-    return {accepted:0,queued:recipients.length,configured:true,warning:`Email provider returned ${response.status}`};
+  const delivery = await deliverNotificationEmail({apiKey,from,recipients,eventKey:`${organization(actor)}:${eventKey}`,title,body,
+    appUrl:actionId ? `${publicUrl()}/?action=${encodeURIComponent(actionId)}` : `${publicUrl()}/`});
+  if (!delivery.accepted) {
+    await db`update opsvista_email_outbox set attempts=attempts+1,last_error=${delivery.error} where event_key=${eventKey} and organization_id=${organization(actor)}`;
+    return {accepted:0,queued:recipients.length,configured:true,warning:delivery.error};
   }
-  await db`update opsvista_email_outbox set status='Sent',attempts=attempts+1,last_error=null,sent_at=now() where event_key=${eventKey}`;
-  return {accepted:recipients.length,queued:0,configured:true};
+  await db`update opsvista_email_outbox set status='Accepted',provider_id=${delivery.providerId},attempts=attempts+1,last_error=null,sent_at=now() where event_key=${eventKey} and organization_id=${organization(actor)}`;
+  return {accepted:recipients.length,queued:0,configured:true,providerId:delivery.providerId};
+}
+
+export async function getNotificationEmailStatus(user:SessionUser) {
+  const recipient = await getManagedUser(user.id);
+  if (!recipient?.active || !recipient.email) throw new Error('Your active OpsVista account needs an email address');
+  const preferences = await getNotificationPreferences(user);
+  return {recipientEmail:recipient.email,emailEnabled:preferences.emailEnabled,senderConfigured:Boolean(process.env.RESEND_API_KEY?.trim())};
+}
+
+export async function sendNotificationEmailTest(user:SessionUser) {
+  const status = await getNotificationEmailStatus(user);
+  if (!status.senderConfigured) return {...status,accepted:false,reason:'sender_unconfigured'};
+  if (!status.emailEnabled) return {...status,accepted:false,reason:'email_disabled'};
+  // Same-account retries in this minute use the same provider idempotency key.
+  const eventKey = `test-email:${organization(user)}:${user.id}:${Math.floor(Date.now()/60000)}`;
+  const result = await sendEmail(eventKey,'OpsVista · Prueba de notificación por correo',
+    'Esta es una prueba solicitada desde tu cuenta de OpsVista. Si puedes leer este mensaje, el correo de prueba llegó a tu bandeja. Abre OpsVista para continuar.',
+    [{id:user.id,email:status.recipientEmail,email_enabled:true}],user);
+  return {...status,accepted:result.accepted===1,providerId:result.providerId,
+    reason:result.accepted===1?'provider_accepted':'delivery_unconfirmed'};
 }
 
 export async function getNotificationPreferences(user:SessionUser):Promise<NotificationPreferences> {

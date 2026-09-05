@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import OpsVistaDatePicker from './OpsVistaDatePicker';
+import NotificationEmailPanel from './NotificationEmailPanel';
 import { permissionsFor, type OpsVistaUser } from './accessControl';
 import type { ActionNotificationDetail, ActionRecord, ActionSeverity, ActionStatus } from './actionCenterTypes';
 import type { VerificationStatus } from './verificationLoop';
@@ -8,7 +9,7 @@ import './actionCenter.css';
 type AuditRow={id:string;at:string;actor_name:string;event:string;before_value?:string;after_value?:string;reason:string};
 type Assignee={id:string;name:string;title:string;role:string;locations:string[]};
 type SuggestedAssignee={id:string;name:string;title:string;reason:string};
-type Props={currentUser:OpsVistaUser;allowedLocations:string[];initialSearch?:string;initialRecordId?:string;initialLocation?:string};
+type Props={currentUser:OpsVistaUser;allowedLocations:string[];initialSearch?:string;initialRecordId?:string;initialLocation?:string;canTestNotifications?:boolean};
 const statuses:ActionStatus[]=['Open','Assigned','Investigating','Completed','Dismissed'];
 const severities:ActionSeverity[]=['High','Medium','Low'];
 const api='/api/workflows?resource=actions';
@@ -16,7 +17,7 @@ const dateTime=(value?:string)=>value?new Date(value).toLocaleString('en-US',{ti
 const easternDate=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const displayDate=(value?:string)=>value?new Date(`${value.slice(0,10)}T12:00:00Z`).toLocaleDateString('en-US',{timeZone:'UTC'}):'—';
 
-export default function ActionCenterView({currentUser,allowedLocations,initialSearch,initialRecordId,initialLocation}:Props){
+export default function ActionCenterView({currentUser,allowedLocations,initialSearch,initialRecordId,initialLocation,canTestNotifications=true}:Props){
   const permissions=permissionsFor(currentUser);
   const [actions,setActions]=useState<ActionRecord[]>([]);
   const [assignees,setAssignees]=useState<Assignee[]>([]);
@@ -63,6 +64,7 @@ export default function ActionCenterView({currentUser,allowedLocations,initialSe
   useEffect(()=>{if(!filtered.some(item=>item.id===selectedId))setSelectedId(filtered[0]?.id||'');},[filtered,selectedId]);
 
   return <div className="action-center-live">
+    {canTestNotifications&&<NotificationEmailPanel/>}
     <section className="action-live-toolbar"><div><strong>Persistent operational workflow</strong><span>Every assignment, status change and verification is saved with an audit trail.</span></div><div><select value={ownership} onChange={e=>setOwnership(e.target.value)}><option>My actions</option><option>All actions</option></select><select value={location} onChange={e=>setLocation(e.target.value)}><option>All locations</option>{allowedLocations.map(item=><option key={item}>{item}</option>)}</select><select value={status} onChange={e=>setStatus(e.target.value)}><option>Active</option><option>All</option>{statuses.map(item=><option key={item}>{item}</option>)}</select><button onClick={()=>setShowCreate(true)} disabled={!permissions.canEscalateActions}>+ New action</button></div></section>
     {error&&<div className="action-live-error">{error}</div>}
     <section className="metrics-grid action-live-metrics"><div className="metric-card my-actions-card" onClick={()=>setOwnership('My actions')} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setOwnership('My actions');}}} role="button" tabIndex={0}><div className="metric-label">MY ACTIONS</div><div className="metric-value">{myActions.length}</div><div className="metric-note">Assigned directly to {currentUser.name}</div></div><div className="metric-card"><div className="metric-label">OPEN ACTIONS</div><div className="metric-value">{open.length}</div><div className="metric-note">Saved in OpsVista</div></div><div className="metric-card"><div className="metric-label">HIGH PRIORITY</div><div className="metric-value warn">{open.filter(item=>item.severity==='High').length}</div><div className="metric-note">Requires immediate ownership</div></div><div className="metric-card"><div className="metric-label">UNASSIGNED</div><div className="metric-value">{open.filter(item=>!item.ownerName).length}</div><div className="metric-note">No responsible person</div></div><div className="metric-card"><div className="metric-label">OVERDUE</div><div className="metric-value warn">{open.filter(item=>item.dueAt&&item.dueAt<easternDate()).length}</div><div className="metric-note">Past assigned deadline</div></div><div className="metric-card"><div className="metric-label">VERIFIED WORKED</div><div className="metric-value">{actions.filter(item=>item.verificationStatus==='Worked').length}</div><div className="metric-note">Closed with evidence</div></div></section>
