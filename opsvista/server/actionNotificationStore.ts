@@ -5,6 +5,7 @@ import type { ActionRecord } from './actionStore.js';
 export type ActionReceiptStatus =
   | 'Sent'
   | 'Push accepted'
+  | 'Email accepted'
   | 'Delivered'
   | 'Seen'
   | 'Accepted'
@@ -55,6 +56,13 @@ export type OperationalPushInput = {
   actionId?: string;
 };
 
+export type NotificationPreferences = {
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+  smsEnabled: boolean;
+  phone?: string;
+};
+
 let client: ReturnType<typeof postgres> | undefined;
 let initialized = false;
 const databaseUrl = () => process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL || '';
@@ -86,7 +94,15 @@ async function ensureSchema() {
   await db`create table if not exists opsvista_operational_notifications (
     event_key text primary key, organization_id text not null, category text not null, location text,
     title text not null, body text not null, recipient_ids jsonb not null default '[]'::jsonb,
-    sent_at timestamptz not null default now(), push_devices integer not null default 0
+    sent_at timestamptz not null default now(), push_devices integer not null default 0,
+    email_recipients integer not null default 0, sms_recipients integer not null default 0
+  )`;
+  await db`alter table opsvista_operational_notifications add column if not exists email_recipients integer not null default 0`;
+  await db`alter table opsvista_operational_notifications add column if not exists sms_recipients integer not null default 0`;
+  await db`create table if not exists opsvista_notification_preferences (
+    organization_id text not null, user_id text not null, email_enabled boolean not null default true,
+    push_enabled boolean not null default true, sms_enabled boolean not null default false, phone text,
+    updated_at timestamptz not null default now(), primary key(organization_id,user_id)
   )`;
   await db`create index if not exists opsvista_mobile_devices_user_idx on opsvista_mobile_devices(organization_id,user_id,active)`;
   await db`create index if not exists opsvista_action_notification_events_idx on opsvista_action_notification_events(action_id,at desc)`;
@@ -98,6 +114,53 @@ async function ensureSchema() {
 const organization = (user: SessionUser) => user.organizationId || 'org-puerto-vallarta';
 const eventId = () => `an-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 const iso = (value: unknown) => value ? new Date(String(value)).toISOString() : undefined;
+const publicUrl = () => (process.env.OPSVISTA_PUBLIC_URL || 'https://restaurant-support.vercel.app').replace(/\/$/,'');
+const html = (value:string) => value.replace(/[&<>'"]/g,character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character] || character));
+
+async function recipientsFor(userIds:string[], actor:SessionUser) {
+  if (!userIds.length) return [];
+  const db = sql();
+  return db`select u.id,u.name,u.email,
+      coalesce(p.email_enabled,true) as email_enabled,
+      coalesce(p.push_enabled,true) as push_enabled,
+      coalesce(p.sms_enabled,false) as sms_enabled,p.phone
+    from opsvista_management_users u
+    left join opsvista_notification_preferences p on p.organization_id=${organization(actor)} and p.user_id=u.id
+    where u.id in ${db(userIds)} and u.active=true`;
+}
+
+async function sendEmail(title:string,body:string,recipientRows:Record<string,unknown>[],actionId?:string) {
+  const apiKey = process.env.RESEND_API_KEY || '';
+  const recipients = recipientRows.filter(row => row.email_enabled !== false && row.email).map(row => String(row.email));
+  if (!recipients.length) return {accepted:0,configured:Boolean(apiKey)};
+  if (!apiKey) return {accepted:0,configured:false,warning:'RESEND_API_KEY is not configured'};
+  const from = process.env.OPSVISTA_EMAIL_FROM || 'OpsVista Alerts <alerts@getopsvista.com>';
+  const actionLink = actionId ? `<p style="margin:28px 0"><a href="${publicUrl()}/?action=${encodeURIComponent(actionId)}" style="background:#1769ff;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700">Abrir en OpsVista</a></p>` : '';
+  const response = await fetch('https://api.resend.com/emails',{
+    method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},
+    body:JSON.stringify({from,to:recipients,subject:title,html:`<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#172033"><p style="font-size:13px;font-weight:800;letter-spacing:1px;color:#1769ff">OPSVISTA</p><h1 style="font-size:24px">${html(title)}</h1><p style="font-size:17px;line-height:1.55">${html(body)}</p>${actionLink}<p style="font-size:12px;color:#738096">Restaurant operating intelligence · Mensaje automático</p></div>`})
+  });
+  if (!response.ok) return {accepted:0,configured:true,warning:`Email provider returned ${response.status}`};
+  return {accepted:recipients.length,configured:true};
+}
+
+export async function getNotificationPreferences(user:SessionUser):Promise<NotificationPreferences> {
+  await ensureSchema();
+  const rows = await sql()`select * from opsvista_notification_preferences where organization_id=${organization(user)} and user_id=${user.id} limit 1`;
+  const row = rows[0];
+  return {emailEnabled:row ? Boolean(row.email_enabled) : true,pushEnabled:row ? Boolean(row.push_enabled) : true,smsEnabled:row ? Boolean(row.sms_enabled) : false,phone:row?.phone ? String(row.phone) : undefined};
+}
+
+export async function updateNotificationPreferences(input:NotificationPreferences,user:SessionUser) {
+  await ensureSchema();
+  const phone = input.phone?.trim() || null;
+  if (input.smsEnabled && !phone) throw new Error('A phone number is required to enable SMS');
+  await sql()`insert into opsvista_notification_preferences(organization_id,user_id,email_enabled,push_enabled,sms_enabled,phone,updated_at)
+    values(${organization(user)},${user.id},${input.emailEnabled},${input.pushEnabled},${input.smsEnabled},${phone},now())
+    on conflict(organization_id,user_id) do update set email_enabled=excluded.email_enabled,push_enabled=excluded.push_enabled,
+      sms_enabled=excluded.sms_enabled,phone=excluded.phone,updated_at=now()`;
+  return getNotificationPreferences(user);
+}
 
 function normalizeState(row: Record<string, unknown>): ActionNotificationState {
   return {
@@ -142,9 +205,13 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
     values(${input.eventKey},${organization(actor)},${input.category},${input.location ?? null},${input.title},${input.body},${db.json(recipientIds)})
     on conflict(event_key) do nothing returning event_key`;
   if (!inserted.length) return { sent: false, duplicate: true, devices: 0 };
-  const devices = await db`select token,user_id from opsvista_mobile_devices
-    where organization_id=${organization(actor)} and user_id in ${db(recipientIds)} and active=true`;
-  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0 };
+  const recipientRows = await recipientsFor(recipientIds,actor);
+  const pushUserIds = recipientRows.filter(row => row.push_enabled !== false).map(row => String(row.id));
+  const devices = pushUserIds.length ? await db`select token,user_id from opsvista_mobile_devices
+    where organization_id=${organization(actor)} and user_id in ${db(pushUserIds)} and active=true` : [];
+  const email = await sendEmail(input.title,input.body,recipientRows,input.actionId);
+  await db`update opsvista_operational_notifications set email_recipients=${email.accepted} where event_key=${input.eventKey}`;
+  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, email };
   const messages = devices.map(row => ({
     to: String(row.token), sound: 'default', title: input.title, body: input.body,
     priority: 'high', channelId: 'opsvista-actions',
@@ -156,9 +223,9 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
     const response = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) });
     if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
     await db`update opsvista_operational_notifications set push_devices=${devices.length} where event_key=${input.eventKey}`;
-    return { sent: true, pushAccepted: true, devices: devices.length };
+    return { sent: true, pushAccepted: true, devices: devices.length, email };
   } catch (error) {
-    return { sent: true, pushAccepted: false, devices: devices.length, warning: error instanceof Error ? error.message : 'Push unavailable' };
+    return { sent: true, pushAccepted: false, devices: devices.length, email, warning: error instanceof Error ? error.message : 'Push unavailable' };
   }
 }
 
@@ -180,8 +247,12 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     on conflict(action_id) do update set recipient_id=excluded.recipient_id,recipient_name=excluded.recipient_name,
     latest_status='Sent',sent_at=excluded.sent_at,accept_by=excluded.accept_by,delivered_at=null,seen_at=null,accepted_at=null,updated_at=now()`;
   await appendEvent(action.id, action.ownerId, action.ownerName, 'Sent', actor, `Accept by ${acceptBy.toISOString()}`);
-  const devices = await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true`;
-  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, acceptBy: acceptBy.toISOString() };
+  const recipientRows = await recipientsFor([action.ownerId],actor);
+  const email = await sendEmail(`${action.location}: ${action.title}`,`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,action.id);
+  if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
+  const pushEnabled = recipientRows.some(row => row.push_enabled !== false);
+  const devices = pushEnabled ? await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true` : [];
+  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, email, acceptBy: acceptBy.toISOString() };
   const messages = devices.map(row => ({
     to: String(row.token), sound: 'default', title: `${action.location}: ${action.title}`,
     body: action.recommendation, priority: 'high', channelId: 'opsvista-actions',
@@ -194,9 +265,9 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id, action.ownerId, action.ownerName, 'Push accepted', actor, `${devices.length} registered device${devices.length === 1 ? '' : 's'}`);
-    return { sent: true, pushAccepted: true, devices: devices.length, acceptBy: acceptBy.toISOString() };
+    return { sent: true, pushAccepted: true, devices: devices.length, email, acceptBy: acceptBy.toISOString() };
   } catch (error) {
-    return { sent: true, pushAccepted: false, devices: devices.length, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
+    return { sent: true, pushAccepted: false, devices: devices.length, email, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
   }
 }
 
