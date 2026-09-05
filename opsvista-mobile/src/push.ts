@@ -19,14 +19,15 @@ export async function registerPushDevice(){
   return {registered:true,message:'Push notifications active'};
 }
 
-export function listenForActionPush(onOpen:(actionId:string)=>void){
+export function listenForActionPush(onOpen:(actionId?:string)=>void){
   const received=Notifications.addNotificationReceivedListener(notification=>{
     const actionId=String(notification.request.content.data?.actionId||'');
     if(actionId)void actionApi.receipt(actionId,'Delivered').catch(()=>undefined);
   });
   const opened=Notifications.addNotificationResponseReceivedListener(response=>{
     const actionId=String(response.notification.request.content.data?.actionId||'');
-    if(actionId){void actionApi.receipt(actionId,'Seen').catch(()=>undefined);onOpen(actionId);}
+    if(actionId)void actionApi.receipt(actionId,'Seen').catch(()=>undefined);
+    onOpen(actionId||undefined);
   });
   return()=>{received.remove();opened.remove();};
 }
