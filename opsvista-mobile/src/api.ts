@@ -28,3 +28,9 @@ export const actionApi={
   registerDevice:(token:string,platform:'ios'|'android',deviceName?:string)=>request<{registered:boolean}>('/api/workflows?resource=mobile_devices',{method:'POST',body:JSON.stringify({token,platform,deviceName,appVersion:Constants.expoConfig?.version||'unknown'})}),
   scanOperationalAlerts:()=>request<{createdActions:ActionRecord[];scannedLocations:number}>('/api/workflows?resource=operational_alert_scan',{method:'POST'}),
 };
+
+export type NotificationPreferences={emailEnabled:boolean;pushEnabled:boolean;smsEnabled:boolean;phone?:string};
+export const notificationApi={
+  getPreferences:()=>request<NotificationPreferences>('/api/workflows?resource=notification_preferences'),
+  updatePreferences:(preferences:NotificationPreferences)=>request<NotificationPreferences>('/api/workflows?resource=notification_preferences',{method:'PUT',body:JSON.stringify(preferences)}),
+};
