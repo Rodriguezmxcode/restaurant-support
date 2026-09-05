@@ -45,6 +45,16 @@ type DeviceInput = {
   appVersion?: string;
 };
 
+export type OperationalPushInput = {
+  eventKey: string;
+  category: 'sales' | 'labor' | 'tasks' | 'maintenance' | 'action';
+  title: string;
+  body: string;
+  recipientIds: string[];
+  location?: string;
+  actionId?: string;
+};
+
 let client: ReturnType<typeof postgres> | undefined;
 let initialized = false;
 const databaseUrl = () => process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL || '';
@@ -73,9 +83,15 @@ async function ensureSchema() {
     recipient_name text not null, status text not null, at timestamptz not null, actor_id text not null,
     actor_name text not null, note text
   )`;
+  await db`create table if not exists opsvista_operational_notifications (
+    event_key text primary key, organization_id text not null, category text not null, location text,
+    title text not null, body text not null, recipient_ids jsonb not null default '[]'::jsonb,
+    sent_at timestamptz not null default now(), push_devices integer not null default 0
+  )`;
   await db`create index if not exists opsvista_mobile_devices_user_idx on opsvista_mobile_devices(organization_id,user_id,active)`;
   await db`create index if not exists opsvista_action_notification_events_idx on opsvista_action_notification_events(action_id,at desc)`;
   await db`create index if not exists opsvista_action_notification_accept_idx on opsvista_action_notification_state(organization_id,accept_by,latest_status)`;
+  await db`create index if not exists opsvista_operational_notifications_org_idx on opsvista_operational_notifications(organization_id,sent_at desc)`;
   initialized = true;
 }
 
@@ -109,6 +125,41 @@ export async function registerMobileDevice(input: DeviceInput, user: SessionUser
     on conflict(token) do update set organization_id=excluded.organization_id,user_id=excluded.user_id,user_name=excluded.user_name,
     platform=excluded.platform,device_name=excluded.device_name,app_version=excluded.app_version,active=true,last_seen_at=now()`;
   return { registered: true, userId: user.id, platform: input.platform };
+}
+
+/**
+ * Sends a deduplicated operational event to every active device registered to
+ * the selected users. The event key makes repeated scans safe: the same alert
+ * is recorded and pushed only once.
+ */
+export async function dispatchOperationalPush(input: OperationalPushInput, actor: SessionUser) {
+  await ensureSchema();
+  const recipientIds = Array.from(new Set(input.recipientIds.map(value => value.trim()).filter(Boolean)));
+  if (!recipientIds.length) return { sent: false, reason: 'No recipients selected', devices: 0 };
+  const db = sql();
+  const inserted = await db`insert into opsvista_operational_notifications
+    (event_key,organization_id,category,location,title,body,recipient_ids)
+    values(${input.eventKey},${organization(actor)},${input.category},${input.location ?? null},${input.title},${input.body},${db.json(recipientIds)})
+    on conflict(event_key) do nothing returning event_key`;
+  if (!inserted.length) return { sent: false, duplicate: true, devices: 0 };
+  const devices = await db`select token,user_id from opsvista_mobile_devices
+    where organization_id=${organization(actor)} and user_id in ${db(recipientIds)} and active=true`;
+  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0 };
+  const messages = devices.map(row => ({
+    to: String(row.token), sound: 'default', title: input.title, body: input.body,
+    priority: 'high', channelId: 'opsvista-actions',
+    data: { type: 'operational_alert', category: input.category, location: input.location, actionId: input.actionId },
+  }));
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    if (process.env.EXPO_ACCESS_TOKEN) headers.Authorization = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
+    const response = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) });
+    if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+    await db`update opsvista_operational_notifications set push_devices=${devices.length} where event_key=${input.eventKey}`;
+    return { sent: true, pushAccepted: true, devices: devices.length };
+  } catch (error) {
+    return { sent: true, pushAccepted: false, devices: devices.length, warning: error instanceof Error ? error.message : 'Push unavailable' };
+  }
 }
 
 async function appendEvent(actionId: string, recipientId: string, recipientName: string, status: ActionReceiptStatus, actor: SessionUser, note?: string) {
