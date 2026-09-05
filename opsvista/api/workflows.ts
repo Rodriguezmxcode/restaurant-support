@@ -6,6 +6,8 @@ import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 import { authorize } from '../server/authorization.js';
 import { createAction, getAction, listActionAudit, listActions, updateActionRecord, type ActionSeverity, type ActionStatus, type ActionVerificationStatus } from '../server/actionStore.js';
 import { dispatchActionPush, escalateUnacceptedActions, getActionNotification, recordActionReceipt, registerMobileDevice, type ActionReceiptStatus } from '../server/actionNotificationStore.js';
+import { notifyActionObservers } from '../server/operationalNotificationRouting.js';
+import { scanOperationalAlerts } from '../server/operationalAlertScan.js';
 import { createProject, getProject, listProjectAudit, listProjects, updateProjectRecord, type ProjectMilestone, type ProjectPriority, type ProjectStatus } from '../server/projectStore.js';
 import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../server/googleBusinessProfile.js';
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
@@ -19,7 +21,7 @@ export const config={maxDuration:120};
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
-const WORKFLOW_VERSION='mobile-smart-actions-v1';
+const WORKFLOW_VERSION='mobile-operational-push-v2';
 const text=(v:unknown)=>typeof v==='string'?v.trim():'';
 const q=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query?.[key] as string).trim():'';
 const isApprover=(role:string)=>role==='Founder'||role==='Corporate';
@@ -104,6 +106,7 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const sourceUrl=safeActionSourceUrl(text(req.body?.sourceUrl));
   const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
   const notification=action&&assignee?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
+  if(action&&assignee)await notifyActionObservers(action,user,'assigned');
   return res.status(201).json({action,notification});
  }
  if(req.method==='PUT'){
@@ -122,6 +125,7 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
   const ownerChanged=has(req.body,'ownerId')&&Boolean(action?.ownerId)&&(action?.ownerId!==existing.ownerId||Boolean(req.body?.resendNotification));
   const notification=action&&ownerChanged?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
+  if(action&&ownerChanged)await notifyActionObservers(action,user,'assigned');
   return res.status(200).json({action,notification});
  }
  res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
@@ -144,9 +148,10 @@ async function actionNotifications(req:ApiRequest,res:ApiResponse,user:NonNullab
  if(req.method==='POST'){
   const status=text(req.body?.status) as ActionReceiptStatus;if(!actionReceiptStatuses.includes(status))return res.status(400).json({error:'Unknown receipt status'});
   const receipt=await recordActionReceipt(action,status,user,text(req.body?.note)||undefined);
-  if(status==='Accepted')await updateActionRecord(action.id,{status:'Assigned'},'Responsible user accepted the assignment',user);
-  if(status==='In progress')await updateActionRecord(action.id,{status:'Investigating'},'Responsible user started the assigned action',user);
-  if(status==='Verified')await updateActionRecord(action.id,{status:'Completed'},'Assigned action verified and closed',user);
+  if(status==='Accepted'){const updated=await updateActionRecord(action.id,{status:'Assigned'},'Responsible user accepted the assignment',user);if(updated)await notifyActionObservers(updated,user,'accepted');}
+  if(status==='In progress'){const updated=await updateActionRecord(action.id,{status:'Investigating'},'Responsible user started the assigned action',user);if(updated)await notifyActionObservers(updated,user,'in_progress');}
+  if(status==='Evidence submitted')await notifyActionObservers(action,user,'evidence');
+  if(status==='Verified'){const updated=await updateActionRecord(action.id,{status:'Completed'},'Assigned action verified and closed',user);if(updated)await notifyActionObservers(updated,user,'verified');}
   return res.status(200).json(receipt);
  }
  res.setHeader?.('Allow','GET, POST');return res.status(405).json({error:'Method not allowed'});
@@ -179,6 +184,12 @@ async function actionEscalations(req:ApiRequest,res:ApiResponse,user:NonNullable
  if(req.method!=='POST'){res.setHeader?.('Allow','POST');return res.status(405).json({error:'Method not allowed'});}
  if(!['Founder','Corporate'].includes(user.role))return res.status(403).json({error:'Corporate access required'});
  return res.status(200).json(await escalateUnacceptedActions(user));
+}
+
+async function operationalAlertScan(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method!=='POST'){res.setHeader?.('Allow','POST');return res.status(405).json({error:'Method not allowed'});}
+ const access=authorize(user,'actions:write');if(!access.ok)return res.status(access.status).json({error:access.error});
+ return res.status(200).json(await scanOperationalAlerts(user));
 }
 
 async function projects(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
@@ -330,5 +341,5 @@ async function managementAudit(req:ApiRequest,res:ApiResponse,user:NonNullable<R
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const resource=q(req,'resource');
- try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='operational_alert_scan')return await operationalAlertScan(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }
