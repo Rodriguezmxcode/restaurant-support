@@ -22,6 +22,11 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Grounded operational answers using the user's current Action Center scope
 - Dedicated Restaurant365 module with connection health, encrypted credential storage, six-restaurant plus Corporate Office validation and source-gated P&L/AP areas
 - Restaurant365 monthly ledger explorer with approved-transaction detail, AP invoice index, vendor catalog, GL account catalog and reconciliation quality checks
+- Smart Action assignment based on alert category: on-duty location manager for labor/operations, Roberto or Jacob for sales coaching, and Miguel Bello for maintenance
+- Live 7shifts on-duty manager resolution with authorized-directory fallback
+- Mobile device registration and Expo push dispatch through the existing authenticated workflow API
+- Push accountability timeline: sent, push accepted, delivered, seen, accepted, in progress, evidence submitted, verified and escalated
+- Acceptance deadlines and corporate escalation records for unaccepted assignments
 
 ## Existing product areas represented in navigation
 
@@ -59,7 +64,7 @@ The Action Center metrics and alerts in this branch are representative demo valu
 3. Add Ramp memo/receipt compliance signals
 4. Add projected labor and overtime rules
 5. Connect the OpsVista Assistant to additional verified live module adapters
-6. Add mobile API contracts for native iOS/Android clients
+6. Connect the native iOS/Android client to the implemented mobile device, action assignment and notification-receipt API contracts
 
 ## Safety
 

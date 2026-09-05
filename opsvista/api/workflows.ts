@@ -1,10 +1,11 @@
 import { clearSessionCookie, readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
-import { listSevenShiftsLogbook, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
+import { listSevenShiftsLogbook, listSevenShiftsManagersOnDuty, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
 import { getWeeklyGoogleReviews } from '../server/googleBusinessReviews.js';
 import { getSevenShiftsTaskCompliance } from '../server/sevenShiftsTasks.js';
 import { authorize } from '../server/authorization.js';
 import { createAction, getAction, listActionAudit, listActions, updateActionRecord, type ActionSeverity, type ActionStatus, type ActionVerificationStatus } from '../server/actionStore.js';
+import { dispatchActionPush, escalateUnacceptedActions, getActionNotification, recordActionReceipt, registerMobileDevice, type ActionReceiptStatus } from '../server/actionNotificationStore.js';
 import { createProject, getProject, listProjectAudit, listProjects, updateProjectRecord, type ProjectMilestone, type ProjectPriority, type ProjectStatus } from '../server/projectStore.js';
 import { getGoogleReviewSummaries, googleBusinessProfileConfigured } from '../server/googleBusinessProfile.js';
 import { getImportedReviewSummaries, importVistaSocialReviewAggregates, reviewImportConfigured, type ReviewDailyAggregate } from '../server/reviewImportStore.js';
@@ -18,7 +19,7 @@ export const config={maxDuration:120};
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void;end?:()=>void};
 const locations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
-const WORKFLOW_VERSION='7shifts-workflow-v5';
+const WORKFLOW_VERSION='mobile-smart-actions-v1';
 const text=(v:unknown)=>typeof v==='string'?v.trim():'';
 const q=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query?.[key] as string).trim():'';
 const isApprover=(role:string)=>role==='Founder'||role==='Corporate';
@@ -34,6 +35,7 @@ const verificationStatuses:ActionVerificationStatus[]=['Pending','Worked','Did n
 const projectStatuses:ProjectStatus[]=['Planning','In Progress','Blocked','Completed','Cancelled'];
 const projectPriorities:ProjectPriority[]=['High','Medium','Low'];
 const globalAssigneeRoles=['Founder','Corporate','HR','Administration','Maintenance'];
+const actionReceiptStatuses:ActionReceiptStatus[]=['Delivered','Seen','Accepted','In progress','Evidence submitted','Verified'];
 
 function managedLocations(user:ManagedDirectoryUser){const now=Date.now();const grants=user.locationGrants?.length?user.locationGrants:user.locations.map((location,index)=>({location,type:index===0?'Primary' as const:'Additional' as const}));return Array.from(new Set(grants.filter(grant=>!grant.expiresAt||new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));}
 function canOwnLocation(user:ManagedDirectoryUser,location:string){return globalAssigneeRoles.includes(user.role)||managedLocations(user).includes(location);}
@@ -89,7 +91,7 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const id=q(req,'id');if(!id)return res.status(200).json({actions:await listActions(user),assignees:await actionAssignees(user)});
   const action=await getAction(id);if(!action||action.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
   const scoped=authorize(user,'actions:read',action.location);if(!scoped.ok)return res.status(scoped.status).json({error:scoped.error});
-  return res.status(200).json({action,audit:await listActionAudit(id)});
+  return res.status(200).json({action,audit:await listActionAudit(id),notification:await getActionNotification(id,user)});
  }
  if(req.method==='POST'){
   const location=text(req.body?.location),category=text(req.body?.category),title=text(req.body?.title),severity=text(req.body?.severity) as ActionSeverity;
@@ -101,7 +103,8 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
   const sourceUrl=safeActionSourceUrl(text(req.body?.sourceUrl));
   const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
-  return res.status(201).json({action});
+  const notification=action&&assignee?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
+  return res.status(201).json({action,notification});
  }
  if(req.method==='PUT'){
   const id=text(req.body?.id);if(!id)return res.status(400).json({error:'Action id required'});const existing=await getAction(id);if(!existing||existing.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
@@ -117,9 +120,65 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const requestedOwnerId=has(req.body,'ownerId')?text(req.body?.ownerId):existing.ownerId||'';const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,existing.location):null;
   if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
   const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
-  return res.status(200).json({action});
+  const ownerChanged=has(req.body,'ownerId')&&Boolean(action?.ownerId)&&(action?.ownerId!==existing.ownerId||Boolean(req.body?.resendNotification));
+  const notification=action&&ownerChanged?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
+  return res.status(200).json({action,notification});
  }
  res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
+}
+
+async function mobileDevices(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method!=='POST'){res.setHeader?.('Allow','POST');return res.status(405).json({error:'Method not allowed'});}
+ const token=text(req.body?.token),platform=text(req.body?.platform);
+ if(!/^ExponentPushToken\[[^\]]+\]$/.test(token)&&!/^ExpoPushToken\[[^\]]+\]$/.test(token))return res.status(400).json({error:'Valid Expo push token required'});
+ if(platform!=='ios'&&platform!=='android')return res.status(400).json({error:'Platform must be ios or android'});
+ return res.status(200).json(await registerMobileDevice({token,platform,deviceName:text(req.body?.deviceName)||undefined,appVersion:text(req.body?.appVersion)||undefined},user));
+}
+
+async function actionNotifications(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const actionId=req.method==='GET'?q(req,'actionId'):text(req.body?.actionId);
+ if(!actionId)return res.status(400).json({error:'Action id required'});
+ const action=await getAction(actionId);if(!action||action.organizationId!==userOrganization(user))return res.status(404).json({error:'Action not found'});
+ const scoped=authorize(user,'actions:read',action.location);if(!scoped.ok)return res.status(scoped.status).json({error:scoped.error});
+ if(!req.method||req.method==='GET')return res.status(200).json(await getActionNotification(actionId,user));
+ if(req.method==='POST'){
+  const status=text(req.body?.status) as ActionReceiptStatus;if(!actionReceiptStatuses.includes(status))return res.status(400).json({error:'Unknown receipt status'});
+  const receipt=await recordActionReceipt(action,status,user,text(req.body?.note)||undefined);
+  if(status==='Accepted')await updateActionRecord(action.id,{status:'Assigned'},'Responsible user accepted the assignment',user);
+  if(status==='In progress')await updateActionRecord(action.id,{status:'Investigating'},'Responsible user started the assigned action',user);
+  if(status==='Verified')await updateActionRecord(action.id,{status:'Completed'},'Assigned action verified and closed',user);
+  return res.status(200).json(receipt);
+ }
+ res.setHeader?.('Allow','GET, POST');return res.status(405).json({error:'Method not allowed'});
+}
+
+async function actionSuggestions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
+ const location=q(req,'location'),category=q(req,'category');
+ const access=authorize(user,'actions:read',location);if(!access.ok)return res.status(access.status).json({error:access.error});
+ if(!locations.includes(location))return res.status(400).json({error:'Valid location required'});
+ const directory=(await listManagedUsers()).filter(candidate=>candidate.active&&canOwnLocation(candidate,location));
+ const key=category.toLowerCase();
+ if(/maintenance|mantenimiento|facilities|repair/.test(key)){
+  const miguel=directory.find(candidate=>candidate.id==='usr-miguel');
+  return res.status(200).json({strategy:'maintenance',onDutyVerified:false,suggestions:miguel?[{id:miguel.id,name:miguel.name,title:miguel.title,reason:'Head of Maintenance · all locations'}]:[]});
+ }
+ if(/sales|venta|upsell|revenue/.test(key)){
+  const commercial=directory.filter(candidate=>['usr-roberto-ops','usr-jacob'].includes(candidate.id));
+  return res.status(200).json({strategy:'commercial',onDutyVerified:false,suggestions:commercial.map(candidate=>({id:candidate.id,name:candidate.name,title:candidate.title,reason:'Authorized to send sales coaching'}))});
+ }
+ const managers=directory.filter(candidate=>candidate.role==='Location Manager'&&managedLocations(candidate).includes(location));
+ let onDuty:Awaited<ReturnType<typeof listSevenShiftsManagersOnDuty>>=[];
+ try{onDuty=await listSevenShiftsManagersOnDuty(location);}catch{/* Directory fallback remains available when 7shifts is unavailable. */}
+ const matched=managers.filter(manager=>onDuty.some(shift=>{const a=normalizedLocation(manager.name),b=normalizedLocation(shift.name);return a===b||a.includes(b)||b.includes(a);}));
+ const selected=matched.length?matched:managers;
+ return res.status(200).json({strategy:'manager_on_duty',onDutyVerified:matched.length>0,suggestions:selected.map(candidate=>({id:candidate.id,name:candidate.name,title:candidate.title,reason:matched.length?'Currently scheduled in 7shifts':'Location manager fallback'}))});
+}
+
+async function actionEscalations(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ if(req.method!=='POST'){res.setHeader?.('Allow','POST');return res.status(405).json({error:'Method not allowed'});}
+ if(!['Founder','Corporate'].includes(user.role))return res.status(403).json({error:'Corporate access required'});
+ return res.status(200).json(await escalateUnacceptedActions(user));
 }
 
 async function projects(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
@@ -271,5 +330,5 @@ async function managementAudit(req:ApiRequest,res:ApiResponse,user:NonNullable<R
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const resource=q(req,'resource');
- try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }

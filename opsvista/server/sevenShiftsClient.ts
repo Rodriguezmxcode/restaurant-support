@@ -130,6 +130,36 @@ export async function listSevenShiftsLocations(){
   throw new Error('7shifts authenticated successfully but returned 0 locations. Verify that the access token belongs to the Puerto Vallarta company account and that its technical contact is an active company admin.');
 }
 
+export type SevenShiftsOnDutyManager={userId:number;name:string;role:string;shiftStart:string;shiftEnd:string;location:string};
+
+export async function listSevenShiftsManagersOnDuty(locationName:string,at=new Date()):Promise<SevenShiftsOnDutyManager[]>{
+  const cid=await resolveCompanyId();
+  const locations=await listSevenShiftsLocations();
+  const normalize=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/puerto\s+vallarta|mexican\s+restaurant|restaurant/g,'').replace(/[^a-z0-9]/g,'');
+  const wanted=locations.find(row=>{const left=normalize(row.name),right=normalize(locationName);return left===right||left.includes(right)||right.includes(left);});
+  if(!wanted)return [];
+  const start=new Date(at.getTime()-12*60*60*1000).toISOString();
+  const end=new Date(at.getTime()+12*60*60*1000).toISOString();
+  const query=new URLSearchParams({limit:'500','start[gte]':start,'start[lte]':end,include_draft:'false',deleted:'false',consider_tz_in_ranges:'true'});
+  const [users,roles,shifts]=await Promise.all([
+    requestAll(`/company/${cid}/users?limit=500`),
+    requestAll(`/company/${cid}/roles?limit=500`),
+    requestAll(`/company/${cid}/shifts?${query.toString()}`),
+  ]);
+  const userMap=new Map(users.map(row=>[Number(row.id),row]));
+  const roleMap=new Map(roles.map(row=>[Number(row.id),String(row.name||row.title||'')]));
+  const instant=at.getTime();
+  return shifts.flatMap(shift=>{
+    if(Number(shift.location_id)!==wanted.id||shift.deleted===true||shift.draft===true||shift.open===true||shift.unassigned===true)return [];
+    const shiftStart=new Date(String(shift.start)).getTime(),shiftEnd=new Date(String(shift.end)).getTime();
+    if(!Number.isFinite(shiftStart)||!Number.isFinite(shiftEnd)||instant<shiftStart||instant>shiftEnd)return [];
+    const role=roleMap.get(Number(shift.role_id))||String(shift.station_name||'');
+    if(!/(manager|management|gerente|\bmgr\b|general manager|gm)/i.test(role))return [];
+    const user=userMap.get(Number(shift.user_id));if(!user)return [];
+    return [{userId:Number(shift.user_id),name:displayName(user,Number(shift.user_id)),role,shiftStart:String(shift.start),shiftEnd:String(shift.end),location:wanted.name}];
+  });
+}
+
 export type SevenShiftsScheduleShift={
   id:number;
   start:string;
