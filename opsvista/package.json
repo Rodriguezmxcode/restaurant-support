@@ -1,0 +1,26 @@
+{
+  "name": "opsvista-migration-v1",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test:notification-email": "node scripts/test-notification-email.mjs",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "@vitejs/plugin-react": "latest",
+    "postgres": "^3.4.7",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "5.9.3",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  }
+}

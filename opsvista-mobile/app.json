@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "OpsVista",
+    "slug": "opsvista-mobile",
+    "scheme": "opsvista",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.opsvista.mobile",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "com.opsvista.mobile",
+      "permissions": ["POST_NOTIFICATIONS"],
+      "adaptiveIcon": { "backgroundColor": "#0B2447" }
+    },
+    "plugins": ["expo-notifications"],
+    "extra": {
+      "apiBaseUrl": "https://restaurant-support.vercel.app",
+      "eas": { "projectId": "1a94f5e6-1ea4-4e92-b071-e0250345e75c" }
+    }
+  }
+}

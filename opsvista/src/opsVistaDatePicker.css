@@ -1,0 +1,34 @@
+.ops-date-picker{position:relative;width:100%;margin-top:5px}
+.ops-date-trigger{width:100%;min-height:42px;border:1px solid #cbd8e6;border-radius:9px;padding:10px 42px 10px 12px;background:#fff;color:#687b92;display:flex;align-items:center;text-align:left;position:relative;cursor:pointer;font:inherit}
+.ops-date-trigger.has-value{color:#183052;font-weight:750}
+.ops-date-trigger:hover,.ops-date-trigger:focus-visible{border-color:#73a6ec;box-shadow:0 0 0 3px rgba(35,104,207,.12);outline:none}
+.ops-date-trigger i{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-style:normal;font-size:17px;color:#2868cf}
+.ops-date-backdrop{position:fixed;inset:0;z-index:1200;background:rgba(10,25,47,.5);backdrop-filter:blur(2px);display:grid;place-items:center;padding:24px}
+.ops-date-dialog{width:min(720px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;background:#fff;border:1px solid #cbd8e8;border-radius:18px;box-shadow:0 28px 80px rgba(8,27,54,.34);padding:0;color:#213852}
+.ops-date-header{padding:20px 22px 17px;border-bottom:1px solid #dbe4ee;display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.ops-date-header span{display:block;font-size:9px;font-weight:900;letter-spacing:.1em;color:#54708f}
+.ops-date-header h2{margin:5px 0 3px;font-size:22px;color:#183052}
+.ops-date-header p{margin:0;color:#6b7e95;font-size:12px}
+.ops-date-header>button{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:50%;background:#eef3f9;color:#38526f;font-size:23px;cursor:pointer}
+.ops-date-navigation{display:grid;grid-template-columns:48px 1fr 48px;align-items:center;gap:12px;padding:18px 22px 12px}
+.ops-date-navigation strong{text-align:center;text-transform:capitalize;font-size:18px;color:#263b57}
+.ops-date-navigation button{width:48px;height:48px;border:0;border-radius:50%;background:#f1f6fc;color:#476481;font-size:28px;cursor:pointer}
+.ops-date-navigation button:hover,.ops-date-navigation button:focus-visible{background:#e3eefc;color:#2368cf;outline:none}
+.ops-date-weekdays,.ops-date-days{margin:0 22px;display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.ops-date-weekdays span{text-align:center;color:#7e8da0;font-size:11px;font-weight:800;padding:6px 0 10px}
+.ops-date-days button{height:54px;border:0;background:#fff;color:#2d3f55;font-size:14px;border-radius:12px;cursor:pointer;position:relative}
+.ops-date-days button:hover:not(:disabled),.ops-date-days button:focus-visible:not(:disabled){background:#edf4ff;color:#1e61be;outline:none}
+.ops-date-days button.outside{color:#bcc6d2}
+.ops-date-days button.today:not(.selected)::after{content:'';position:absolute;width:5px;height:5px;border-radius:50%;background:#2868cf;bottom:6px;left:50%;transform:translateX(-50%)}
+.ops-date-days button.selected{background:#2868cf;color:#fff;border-radius:999px;font-weight:900;box-shadow:0 6px 14px rgba(35,104,207,.24)}
+.ops-date-days button:disabled{color:#d5dae0;background:#fff;cursor:not-allowed}
+.ops-date-footer{margin-top:16px;padding:16px 22px 20px;border-top:1px solid #dce5ef;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.ops-date-selection{min-width:0}
+.ops-date-selection span,.ops-date-selection strong{display:block}
+.ops-date-selection span{font-size:8px;font-weight:900;letter-spacing:.1em;color:#7a8ca2}
+.ops-date-selection strong{font-size:13px;color:#344b67;margin-top:5px;white-space:nowrap}
+.ops-date-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.ops-date-actions button{border:1px solid #c8d6e6;border-radius:10px;padding:11px 15px;background:#fff;color:#36516f;font-weight:800;cursor:pointer}
+.ops-date-actions button.apply{border-color:#2368cf;background:#2368cf;color:#fff;min-width:120px}
+.ops-date-actions button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:640px){.ops-date-backdrop{padding:10px}.ops-date-dialog{width:100%;max-height:calc(100vh - 20px);border-radius:15px}.ops-date-header{padding:16px}.ops-date-header h2{font-size:19px}.ops-date-navigation{padding:13px 14px 8px;grid-template-columns:44px 1fr 44px}.ops-date-navigation button{width:44px;height:44px}.ops-date-weekdays,.ops-date-days{margin:0 12px}.ops-date-weekdays span{font-size:9px}.ops-date-days button{height:46px}.ops-date-footer{padding:14px 16px;align-items:stretch;flex-direction:column}.ops-date-selection strong{white-space:normal}.ops-date-actions{display:grid;grid-template-columns:1fr 1fr}.ops-date-actions button.apply{grid-column:1/-1;min-height:46px}}
