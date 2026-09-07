@@ -8,6 +8,17 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 
 ## Implemented in this branch
 
+### Native Tasks and assignment oversight
+
+- Tasks opens with **Tasks de OpsVista**. Managers and corporate users can create, edit, duplicate, archive and reopen tasks within their authorized locations. Kitchen leadership has the same location-scoped controls; Maintenance can complete its assigned tasks.
+- Each task supports custom category and position/team, instructions, an authorized responsible user, due date, priority and up to 50 checklist steps. Steps record who completed them and when. A task can close only after all of its steps are checked.
+- Records and audit snapshots persist in `opsvista_native_tasks` and `opsvista_native_task_audit` using the existing OpsVista Postgres connection. Schema initialization is additive and follows the existing store pattern. No 7shifts credentials are required for this workflow.
+- Updates use a version check to reject concurrent overwrites. Repeated create requests use a stable request identifier; archiving preserves the record and history. Editing a checklist label resets completion of that step.
+- The existing 7shifts Tasks/evidence view remains available in its source tab, and existing Tasks search links open that view. Native tasks do not change the 7shifts compliance or Weekly Bonus calculations.
+- Founder and Corporate Action Center users have a **Seguimiento por responsable** table. Click a person or status count to filter the action queue. Overdue, in-progress, undated, completed and verified totals stay distinct; dismissed actions are excluded from the summary.
+- Native Tasks and Action Center retain separate records and histories. Native Tasks currently supports individual tasks and duplication, without automatic recurrence or external notification dispatch.
+- Run `node scripts/test-native-tasks.mjs` for the native-task authorization, validation, progress and assignment-summary checks.
+
 - Responsive OpsVista operations shell based on the current production navigation
 - Mobile-first navigation behavior
 - Action Center as a first-class module

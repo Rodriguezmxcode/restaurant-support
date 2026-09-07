@@ -15,6 +15,9 @@ import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBu
 import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../server/integrationStore.js';
 import { getManagedUser, listManagedUsers, listManagementAudit, type ManagedDirectoryUser } from '../server/managementStore.js';
 import { canCreateProjectsForIdentity } from '../shared/projectAccess.js';
+import { nativeTaskRequest } from '../server/nativeTaskService.js';
+import { nativeTaskRepository } from '../server/nativeTaskStore.js';
+import { NativeTaskError } from '../shared/nativeTasks.js';
 
 export const config={maxDuration:120};
 
@@ -64,6 +67,17 @@ async function taskComplianceWithFallback(start:string,end:string,scope?:string[
   fallbackError='7shifts returned zero locations';
  }catch(error){fallbackError=diagnostic(error);}
  throw new Error(`7shifts Tasks unavailable for ${start} through ${end}. Daily summary: ${primaryError||'no location rows'}. Task Lists fallback: ${fallbackError||'no location rows'}.`);
+}
+
+async function nativeTasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ try{
+  const result=await nativeTaskRequest(req.method||'GET',req.query||{},req.body||{},user,nativeTaskRepository,locations);
+  return res.status(result.status).json(result.body);
+ }catch(error){
+  if(error instanceof NativeTaskError){if(error.status===405)res.setHeader?.('Allow','GET, POST, PUT');return res.status(error.status).json({error:error.message});}
+  console.error('Native tasks request failed',error instanceof Error?error.name:'Unknown error');
+  return res.status(503).json({error:'No se pudieron consultar o guardar las tareas de OpsVista. Intenta de nuevo.'});
+ }
 }
 
 async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
@@ -370,5 +384,5 @@ async function managementAudit(req:ApiRequest,res:ApiResponse,user:NonNullable<R
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const resource=q(req,'resource');
- try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='operational_alert_scan')return await operationalAlertScan(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='notification_preferences')return await notificationPreferences(req,res,user);if(resource==='notification_email_status')return await notificationEmailStatus(req,res,user);if(resource==='notification_test')return await notificationTest(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='native_tasks')return await nativeTasks(req,res,user);if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='operational_alert_scan')return await operationalAlertScan(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='notification_preferences')return await notificationPreferences(req,res,user);if(resource==='notification_email_status')return await notificationEmailStatus(req,res,user);if(resource==='notification_test')return await notificationTest(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }
