@@ -1,3 +1,4 @@
+import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
@@ -25,6 +26,7 @@ export default async function handler(req:Req,res:Res){
   if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
+  if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
   const start=asString(req.query?.start),end=asString(req.query?.end);
   const defaultSchedule=validDate(end)?operatingWeek(end):{start,end};
   const scheduleStart=asString(req.query?.schedule_start)||defaultSchedule.start,scheduleEnd=asString(req.query?.schedule_end)||defaultSchedule.end,overtimeEnd=asString(req.query?.overtime_end)||end;

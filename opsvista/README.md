@@ -8,6 +8,14 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 
 ## Implemented in this branch
 
+### Assisted onboarding for additional restaurant businesses
+
+- Founder → Configuración → **Activar un nuevo cliente** provisions an organization, its locations, and a Corporate administrator together in a transaction. The Founder must first review the actual Stripe subscription, successful payment and purchased quantity; the form records that manual review. It does not validate payment through the Stripe API or use Checkout redirects as payment proof.
+- Each new organization opens its own native Tasks and team workspace. Corporate administrators can add scoped team members and generate 48-hour invitation links. Invitations are shared manually; no email is automatically sent by this onboarding flow. Existing Supabase login and MFA apply.
+- New customers get native tasks, checklists, assignments, due dates and task follow-up. Legacy integrations and workflows remain restricted to Puerto Vallarta or the Founder until those modules have per-customer setup. New users are not added to Puerto Vallarta's directory or membership.
+- Public Stripe subscriptions use US$79 per location/month plus applicable taxes. Stripe controls recurring billing; access activation and billing changes are assisted. Automatic tax collection, subscription webhooks and automatic suspension are not enabled by this change.
+- `node scripts/test-native-tasks.mjs` includes cross-organization permission and activation-input checks. The first complete invitation/MFA/production persistence flow still needs validation with an authorized new customer; no real customer payment is made by the test suite.
+
 ### Native Tasks and assignment oversight
 
 - Tasks opens with **Tasks de OpsVista**. Managers and corporate users can create, edit, duplicate, archive and reopen tasks within their authorized locations. Kitchen leadership has the same location-scoped controls; Maintenance can complete its assigned tasks.

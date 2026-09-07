@@ -9,7 +9,7 @@ function currentLocations(user: ManagedDirectoryUser) {
   const now = Date.now();
   const grants = user.locationGrants?.length
     ? user.locationGrants
-    : user.locations.map((location,index) => ({ location, type:index === 0 ? 'Primary' as const : 'Additional' as const }));
+    : user.locations.map((location,index) => ({ location, type:index === 0 ? 'Primary' as const : 'Additional' as const, expiresAt:undefined }));
   return Array.from(new Set(grants.filter(grant => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now).map(grant => grant.location)));
 }
 

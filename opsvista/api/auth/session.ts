@@ -1,5 +1,6 @@
 import { issueSession, readSession, sessionCookie, sessionForSupabaseIdentity } from '../../server/authSession.js';
 import { verifySupabaseIdentity } from '../../server/supabaseAuth.js';
+import { getOrganizationMembership } from '../../server/organizationStore.js';
 
 type ApiRequest = {
   method?: string;
@@ -19,6 +20,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (!req.method || req.method === 'GET') {
     const user = readSession(req.headers?.cookie);
     if (!user) return res.status(401).json({ authenticated: false });
+    if (user.organizationId && user.organizationId !== 'org-puerto-vallarta') {
+      try {
+        const membership = await getOrganizationMembership(user.id);
+        if (!membership || membership.organizationId !== user.organizationId) return res.status(403).json({authenticated:false});
+        return res.status(200).json({authenticated:true,user:{...user,...membership}});
+      } catch { return res.status(503).json({error:'Unable to load your organization'}); }
+    }
     return res.status(200).json({ authenticated: true, user });
   }
 

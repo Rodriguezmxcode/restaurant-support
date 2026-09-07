@@ -1,4 +1,5 @@
 import type { ServerRole, SessionUser } from './authSession.js';
+import { hasLegacyWorkspace } from '../shared/tenantAccess.js';
 
 export type ServerCapability =
   | 'ramp:read'
@@ -42,6 +43,7 @@ export function serverLocationAllowed(user: SessionUser, location?: string) {
 
 export function authorize(user: SessionUser | null, capability: ServerCapability, location?: string) {
   if (!user) return { ok: false as const, status: 401, error: 'Authentication required' };
+  if (!hasLegacyWorkspace(user)) return { ok: false as const, status: 403, error: 'This module is not enabled for your organization' };
   if (!hasCapability(user, capability)) return { ok: false as const, status: 403, error: 'Permission denied' };
   if (!serverLocationAllowed(user, location)) return { ok: false as const, status: 403, error: 'Location not authorized' };
   return { ok: true as const, user };

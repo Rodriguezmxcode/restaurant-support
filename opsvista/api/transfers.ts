@@ -1,3 +1,4 @@
+import { hasLegacyWorkspace } from '../shared/tenantAccess.js';
 import { readSession } from '../server/authSession.js';
 import { createTransfer, getTransfer, listTransfers, listTransferAudit, receiveTransfer, reconcileTransfer, type TransferItem, type TransferReceiptStatus } from '../server/transferStore.js';
 
@@ -11,6 +12,7 @@ function validItems(value:unknown):value is TransferItem[]{return Array.isArray(
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
   const user=readSession(req.headers?.cookie); if(!user)return res.status(401).json({error:'Authentication required'});
+  if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
   res.setHeader?.('Cache-Control','private, no-store');
   try{
     if(!req.method||req.method==='GET'){

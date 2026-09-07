@@ -1,3 +1,6 @@
+import { hasLegacyWorkspace, tenantWorkflowAllowed } from '../shared/tenantAccess.js';
+import { getOrganizationMembership, listOrganizations, provisionClient, addClientTeamMember } from '../server/organizationStore.js';
+import { createInvitation } from '../server/accountStore.js';
 import { clearSessionCookie, readSession } from '../server/authSession.js';
 import { createPayment, decidePayment, getPayment, issuePayment, listPayments, paymentAudit } from '../server/paymentStore.js';
 import { listSevenShiftsLogbook, listSevenShiftsManagersOnDuty, weeklyTaskCompliance } from '../server/sevenShiftsClient.js';
@@ -42,10 +45,10 @@ const projectPriorities:ProjectPriority[]=['High','Medium','Low'];
 const globalAssigneeRoles=['Founder','Corporate','HR','Administration','Maintenance'];
 const actionReceiptStatuses:ActionReceiptStatus[]=['Delivered','Seen','Accepted','In progress','Evidence submitted','Verified'];
 
-function managedLocations(user:ManagedDirectoryUser){const now=Date.now();const grants=user.locationGrants?.length?user.locationGrants:user.locations.map((location,index)=>({location,type:index===0?'Primary' as const:'Additional' as const}));return Array.from(new Set(grants.filter(grant=>!grant.expiresAt||new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));}
+function managedLocations(user:ManagedDirectoryUser){const now=Date.now();const grants=user.locationGrants?.length?user.locationGrants:user.locations.map((location,index)=>({location,type:index===0?'Primary' as const:'Additional' as const,expiresAt:undefined}));return Array.from(new Set(grants.filter(grant=>!grant.expiresAt||new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));}
 function canOwnLocation(user:ManagedDirectoryUser,location:string){return globalAssigneeRoles.includes(user.role)||managedLocations(user).includes(location);}
 async function actionAssignees(user:NonNullable<ReturnType<typeof readSession>>){const directory=await listManagedUsers();const globalRequester=globalAssigneeRoles.includes(user.role);return directory.filter(candidate=>candidate.active&&(globalRequester||candidate.id===user.id||managedLocations(candidate).some(location=>user.locations.includes(location)))).map(candidate=>({id:candidate.id,name:candidate.name,title:candidate.title,role:candidate.role,locations:managedLocations(candidate)}));}
-async function resolveActionAssignee(id:string,location:string){if(!id)return null;const assignee=await getManagedUser(id);return assignee&&assignee.active&&canOwnLocation(assignee,location)?assignee:null;}
+async function resolveActionAssignee(id:string,location:string){if(!id)return null;const assignee=await getManagedUser(id);return assignee&&assignee.active&&(assignee.role==='Founder'||(await getOrganizationMembership(assignee.id))?.organizationId==='org-puerto-vallarta')&&canOwnLocation(assignee,location)?assignee:null;}
 function safeActionSourceUrl(value:string){if(!value)return undefined;try{const url=new URL(value);return url.protocol==='https:'&&url.hostname==='app.ramp.com'?url.toString():undefined;}catch{return undefined;}}
 
 function operationalWeek(){const now=new Date();const day=now.getUTCDay();const since=(day-3+7)%7;const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-since));const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));return{start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)}}
@@ -71,7 +74,10 @@ async function taskComplianceWithFallback(start:string,end:string,scope?:string[
 
 async function nativeTasks(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  try{
-  const result=await nativeTaskRequest(req.method||'GET',req.query||{},req.body||{},user,nativeTaskRepository,locations);
+  const membership = hasLegacyWorkspace(user) ? null : await getOrganizationMembership(user.id);
+  if(!hasLegacyWorkspace(user) && (!membership || membership.organizationId !== user.organizationId))return res.status(403).json({error:'Organization unavailable'});
+  const knownLocations = hasLegacyWorkspace(user) ? locations : membership!.organizationLocations;
+  const result=await nativeTaskRequest(req.method||'GET',req.query||{},req.body||{},user,nativeTaskRepository,knownLocations);
   return res.status(result.status).json(result.body);
  }catch(error){
   if(error instanceof NativeTaskError){if(error.status===405)res.setHeader?.('Allow','GET, POST, PUT');return res.status(error.status).json({error:error.message});}
@@ -340,7 +346,7 @@ async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:Non
   if(q(req,'action')==='authorize'){
    if(!saved?.clientId||!saved.clientSecret)return res.status(400).json({error:'Save the Google OAuth client before connecting'});
    if(!res.setHeader||!res.end)return res.status(500).json({error:'Google redirect is unavailable'});
-   res.setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));res.status(302).end();return;
+   res.setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));res.status(302).end?.();return;
   }
   return res.status(200).json({provider:'google-business-profile',configured:Boolean(saved?.clientId&&saved.clientSecret),connected:Boolean(saved?.refreshToken),clientId:saved?.clientId||'',connectedEmail:saved?.connectedEmail,connectedAt:saved?.connectedAt,redirectUri});
  }
@@ -358,7 +364,7 @@ async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:Non
 }
 
 async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
- const origin=publicOrigin(req.headers||{});const redirect=(status:'connected'|'error',message?:string)=>{if(!res.setHeader||!res.end)throw new Error('Google callback redirect is unavailable');const suffix=message?`&message=${encodeURIComponent(message)}`:'';res.setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);res.status(302).end();};
+ const origin=publicOrigin(req.headers||{});const redirect=(status:'connected'|'error',message?:string)=>{if(!res.setHeader||!res.end)throw new Error('Google callback redirect is unavailable');const suffix=message?`&message=${encodeURIComponent(message)}`:'';res.setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);res.status(302).end?.();};
  try{
   if(user.role!=='Founder')throw new Error('Founder session is required to connect Google Business');
   const providerError=q(req,'error');if(providerError)throw new Error(q(req,'error_description')||providerError);
@@ -378,11 +384,30 @@ async function managementAudit(req:ApiRequest,res:ApiResponse,user:NonNullable<R
  const permission=authorize(user,'users:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
  if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
  const requestedLimit=Number(q(req,'limit')||'500');const limit=Number.isFinite(requestedLimit)?requestedLimit:500;
- res.setHeader?.('Cache-Control','private, no-store');return res.status(200).json({events:await listManagementAudit(limit)});
+ res.setHeader?.('Cache-Control','private, no-store');const visibleIds=new Set((await listManagedUsers()).map(person=>person.id));return res.status(200).json({events:(await listManagementAudit(limit)).filter(event=>visibleIds.has(event.targetUserId))});
+}
+
+
+async function clientOnboarding(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>,resource:string){
+ const founder=resource==='organizations';
+ if(founder ? user.role!=='Founder' : user.role!=='Corporate'||hasLegacyWorkspace(user))return res.status(403).json({error:'Administrator access required'});
+ try{
+  if(!req.method||req.method==='GET')return res.status(200).json(founder?{organizations:await listOrganizations()}:{users:await listManagedUsers(user.organizationId!)});
+  if(req.method!=='POST')return res.status(405).json({error:'Method not allowed'});
+  const created=founder?await provisionClient(req.body||{},user):await addClientTeamMember(req.body||{},user);
+  const target=await getManagedUser(created.userId);
+  if(!target?.email)throw new Error('Account unavailable');
+  const invitation=await createInvitation(target.id,target.email,user.id);
+  const base=(process.env.OPSVISTA_APP_URL||'https://restaurant-support.vercel.app').replace(/\/$/,'');
+  return res.status(201).json({...created,inviteUrl:`${base}/?invite=${encodeURIComponent(invitation.token)}`,email:target.email});
+ }catch(error){
+  console.error('[Client onboarding]',error instanceof Error?error.name:'Error');
+  return res.status(400).json({error:'Could not activate this account. Check the email, subscription, location count and administrator access. An email or subscription already used by another account cannot be reused.'});
+ }
 }
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
  res.setHeader?.('X-OpsVista-Workflow-Version',WORKFLOW_VERSION);
  const resource=q(req,'resource');
- try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(resource==='native_tasks')return await nativeTasks(req,res,user);if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='operational_alert_scan')return await operationalAlertScan(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='notification_preferences')return await notificationPreferences(req,res,user);if(resource==='notification_email_status')return await notificationEmailStatus(req,res,user);if(resource==='notification_test')return await notificationTest(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
+ try{if(resource==='auth_logout')return await authLogout(req,res);const user=readSession(req.headers?.cookie);if(!user)return res.status(401).json({error:'Authentication required'});res.setHeader?.('Cache-Control','private, no-store');if(!tenantWorkflowAllowed(user,resource))return res.status(403).json({error:'This module is not enabled for your organization'});if(resource==='organizations'||resource==='tenant_team')return await clientOnboarding(req,res,user,resource);if(resource==='native_tasks')return await nativeTasks(req,res,user);if(resource==='payments')return await payments(req,res,user);if(resource==='actions')return await actions(req,res,user);if(resource==='action_notifications')return await actionNotifications(req,res,user);if(resource==='action_suggestions')return await actionSuggestions(req,res,user);if(resource==='action_escalations')return await actionEscalations(req,res,user);if(resource==='operational_alert_scan')return await operationalAlertScan(req,res,user);if(resource==='mobile_devices')return await mobileDevices(req,res,user);if(resource==='notification_preferences')return await notificationPreferences(req,res,user);if(resource==='notification_email_status')return await notificationEmailStatus(req,res,user);if(resource==='notification_test')return await notificationTest(req,res,user);if(resource==='projects')return await projects(req,res,user);if(resource==='tasks')return await tasks(req,res,user);if(resource==='reviews')return await reviews(req,res,user);if(resource==='google_reviews')return await googleReviews(req,res,user);if(resource==='google_business_integration')return await googleBusinessIntegration(req,res,user);if(resource==='google_business_callback')return await googleBusinessCallback(req,res,user);if(resource==='management_audit')return await managementAudit(req,res,user);return res.status(400).json({error:'Unknown workflow resource'});}catch(error){const message=error instanceof Error?error.message:'Workflow unavailable';const reviewResource=resource==='reviews'||resource==='google_reviews';const source=resource==='tasks'?'7shifts':reviewResource?'google-business-profile':resource||'workflows';const missing=(resource==='tasks'||reviewResource)&&/not configured|credentials|not available|authorization/i.test(message);return res.status(resource==='tasks'||reviewResource?(missing?503:502):503).json({error:message,source,...(resource==='tasks'||reviewResource?{configured:!missing}:{})});}
 }

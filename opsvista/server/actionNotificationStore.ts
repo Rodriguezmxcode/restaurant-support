@@ -135,7 +135,7 @@ async function recipientsFor(userIds:string[], actor:SessionUser) {
       coalesce(p.sms_enabled,false) as sms_enabled,p.phone
     from opsvista_management_users u
     left join opsvista_notification_preferences p on p.organization_id=${organization(actor)} and p.user_id=u.id
-    where u.id in ${db(userIds)} and u.active=true`;
+    where u.id in ${db(userIds)} and u.active=true and u.organization_id=${organization(actor)}`;
 }
 
 async function sendEmail(eventKey:string,title:string,body:string,recipientRows:Record<string,unknown>[],actor:SessionUser,actionId?:string) {

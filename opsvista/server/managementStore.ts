@@ -95,6 +95,9 @@ async function ensureSchema() {
     )
   `;
   await db`alter table opsvista_management_users add column if not exists email text`;
+  // Existing records belong to the original customer. New-client provisioning
+  // always supplies an explicit organization, in the same transaction as membership.
+  await db`alter table opsvista_management_users add column if not exists organization_id text not null default 'org-puerto-vallarta'`;
   await db`
     create table if not exists opsvista_management_audit (
       id text primary key,
@@ -179,9 +182,9 @@ function normalizeAudit(row: Record<string, unknown>): StoredAuditEvent {
   };
 }
 
-export async function listManagedUsers() {
+export async function listManagedUsers(organizationId = 'org-puerto-vallarta') {
   await bootstrapInitialDirectory();
-  const rows = await sql()`select * from opsvista_management_users order by name asc, email asc nulls last`;
+  const rows = await sql()`select * from opsvista_management_users where organization_id=${organizationId} order by name asc, email asc nulls last`;
   return rows.map(row=>normalizeUser(row));
 }
 

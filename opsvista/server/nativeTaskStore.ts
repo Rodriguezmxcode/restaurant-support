@@ -73,7 +73,7 @@ export const nativeTaskRepository: NativeTaskRepository = {
   async people(user): Promise<NativeTaskPerson[]> {
     // Initialize the existing organization directory once before parallel membership reads.
     await getOrganizationMembership(user.id);
-    const candidates = (await listManagedUsers()).filter(person => person.active && nativeTaskReaders.includes(person.role));
+    const candidates = (await listManagedUsers(taskOrganization(user))).filter(person => person.active && nativeTaskReaders.includes(person.role));
     const people = await Promise.all(candidates.map(async (person): Promise<NativeTaskPerson | null> => {
       const organizationId = person.id === user.id ? taskOrganization(user) : (await getOrganizationMembership(person.id))?.organizationId;
       if (organizationId !== taskOrganization(user)) return null;

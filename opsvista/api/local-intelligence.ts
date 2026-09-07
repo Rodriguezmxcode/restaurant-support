@@ -1,3 +1,4 @@
+import { hasLegacyWorkspace } from '../shared/tenantAccess.js';
 import { readSession } from '../server/authSession.js';
 import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, localIntelligenceRadii, type LocalIntelligenceHorizonKey, type LocalIntelligenceRadiusMiles } from '../server/localIntelligence.js';
 
@@ -10,6 +11,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
   if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
+  if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
   try{
     const requested=query(req,'location');
     const horizonKey=(query(req,'horizon')||'next_14') as LocalIntelligenceHorizonKey;

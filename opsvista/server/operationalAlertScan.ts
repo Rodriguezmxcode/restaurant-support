@@ -17,7 +17,7 @@ const easternParts = () => {
 
 function userLocations(user: ManagedDirectoryUser) {
   const now = Date.now();
-  const grants = user.locationGrants?.length ? user.locationGrants : user.locations.map((location,index) => ({location,type:index === 0 ? 'Primary' as const : 'Additional' as const}));
+  const grants = user.locationGrants?.length ? user.locationGrants : user.locations.map((location,index) => ({location,type:index === 0 ? 'Primary' as const : 'Additional' as const,expiresAt:undefined}));
   return Array.from(new Set(grants.filter(grant => !grant.expiresAt || new Date(grant.expiresAt).getTime() > now).map(grant => grant.location)));
 }
 
@@ -28,7 +28,7 @@ function managerFor(location:string,directory:ManagedDirectoryUser[]) {
 function targets():Record<string,number> {
   try {
     const parsed = JSON.parse(process.env.OPSVISTA_DAILY_SALES_TARGETS_JSON || '{}') as Record<string,unknown>;
-    return Object.fromEntries(Object.entries(parsed).map(([key,value]) => [key,Number(value)]).filter(([,value]) => Number.isFinite(value) && value > 0));
+    return Object.fromEntries(Object.entries(parsed).map(([key,value]) => [key,Number(value)] as const).filter(([,value]) => Number.isFinite(value) && value > 0));
   } catch { return {}; }
 }
 

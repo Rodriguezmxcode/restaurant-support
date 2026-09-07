@@ -28,6 +28,9 @@ export type PermissionSet = {
 };
 
 export type OpsVistaUser = {
+  organizationId?: string;
+  organizationName?: string;
+  organizationLocations?: string[];
   id: string;
   name: string;
   email?: string;

@@ -263,7 +263,7 @@ function configuredEmployeeOverrides():ScheduleEmployeeOverride[]{
   try{
     const parsed=JSON.parse(raw) as unknown;
     const rows=Array.isArray(parsed)?parsed:parsed&&typeof parsed==='object'?Object.entries(parsed as Record<string,unknown>).map(([employeeName,value])=>({...((value&&typeof value==='object'?value:{}) as Record<string,unknown>),employeeName})):[];
-    return [...confirmed,...rows.flatMap(value=>{if(!value||typeof value!=='object')return[];const row=value as Record<string,unknown>,employeeName=String(row.employeeName||'').trim();if(!employeeName)return[];const hourlyWage=Number(row.hourlyWage);return[{employeeName,location:String(row.location||'').trim()||undefined,role:String(row.role||'').trim()||undefined,employmentType:row.employmentType==='salary'?'salary':row.employmentType==='hourly'?'hourly':undefined,hourlyWage:Number.isFinite(hourlyWage)&&hourlyWage>0&&hourlyWage<=250?hourlyWage:undefined}];})];
+    return [...confirmed,...rows.flatMap<ScheduleEmployeeOverride>(value=>{if(!value||typeof value!=='object')return[];const row=value as Record<string,unknown>,employeeName=String(row.employeeName||'').trim();if(!employeeName)return[];const hourlyWage=Number(row.hourlyWage);return[{employeeName,location:String(row.location||'').trim()||undefined,role:String(row.role||'').trim()||undefined,employmentType:row.employmentType==='salary'?'salary':row.employmentType==='hourly'?'hourly':undefined,hourlyWage:Number.isFinite(hourlyWage)&&hourlyWage>0&&hourlyWage<=250?hourlyWage:undefined}];})];
   }catch{return confirmed;}
 }
 function employeeIdentityMatches(configuredName:string,actualName:string){

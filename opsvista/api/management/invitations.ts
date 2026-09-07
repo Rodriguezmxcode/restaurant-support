@@ -1,7 +1,8 @@
 import { readSession } from '../../server/authSession.js';
 import { authorize } from '../../server/authorization.js';
 import { createInvitation, listInvitations } from '../../server/accountStore.js';
-import { getManagedUser } from '../../server/managementStore.js';
+import { getManagedUser, listManagedUsers } from '../../server/managementStore.js';
+import { getOrganizationMembership } from '../../server/organizationStore.js';
 
 type ApiRequest={method?:string;headers?:{cookie?:string;host?:string;'x-forwarded-proto'?:string;origin?:string};body?:{userId?:string}};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -12,11 +13,15 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
   if(!auth.ok) return res.status(auth.status).json({error:auth.error});
   res.setHeader?.('Cache-Control','private, no-store');
   try{
-    if(!req.method||req.method==='GET') return res.status(200).json({invitations:await listInvitations()});
+    if(!req.method||req.method==='GET') {
+      const allowed=new Set((await listManagedUsers()).map(user=>user.id));
+      return res.status(200).json({invitations:(await listInvitations()).filter(invitation=>allowed.has(invitation.userId))});
+    }
     if(req.method==='POST'){
       const userId=req.body?.userId?.trim();
       if(!userId) return res.status(400).json({error:'userId is required'});
       const user=await getManagedUser(userId);
+      if(user && auth.user.role!=='Founder' && (await getOrganizationMembership(user.id))?.organizationId!==auth.user.organizationId) return res.status(404).json({error:'User not found'});
       if(!user||!user.email) return res.status(404).json({error:'User with email not found'});
       if(!user.active) return res.status(400).json({error:'Cannot invite an inactive user'});
       if(user.role==='Founder'&&auth.user.role!=='Founder') return res.status(403).json({error:'Founder invitations require Founder access'});

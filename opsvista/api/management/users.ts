@@ -1,6 +1,7 @@
 import { readSession, type ServerRole } from '../../server/authSession.js';
 import { authorize } from '../../server/authorization.js';
 import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore.js';
+import { getOrganizationMembership } from '../../server/organizationStore.js';
 
 type ApiRequest = {
   method?: string;
@@ -35,6 +36,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
       if (events.some(event => event.targetUserId !== user.id)) return res.status(400).json({ error:'Audit target must match edited user' });
 
       const existing = await getManagedUser(user.id);
+      if (existing && auth.user.role !== 'Founder' && (await getOrganizationMembership(existing.id))?.organizationId !== auth.user.organizationId) return res.status(404).json({error:'User not found'});
       const actorIsFounder = auth.user.role === 'Founder';
       if (existing?.role === 'Founder' && !actorIsFounder) return res.status(403).json({ error:'Founder accounts can only be managed by a Founder' });
       if (user.role === 'Founder' && !actorIsFounder) return res.status(403).json({ error:'Only a Founder can assign Founder access' });

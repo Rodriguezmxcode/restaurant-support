@@ -15,6 +15,7 @@ export type SessionUser = {
   organizationId?: string;
   organizationName?: string;
   organizationSlug?: string;
+  organizationLocations?: string[];
   clientNumber?: number;
 };
 
@@ -73,15 +74,16 @@ function effectiveManagedLocations(user: Awaited<ReturnType<typeof getManagedUse
   return Array.from(new Set(grants.filter(grant=>!grant.expiresAt || new Date(grant.expiresAt).getTime()>now).map(grant=>grant.location)));
 }
 
-async function sessionFromManaged(record:{userId:string;email:string}, managed:NonNullable<Awaited<ReturnType<typeof getManagedUser>>>):Promise<SessionUser> {
+async function sessionFromManaged(record:{userId:string;email:string}, managed:NonNullable<Awaited<ReturnType<typeof getManagedUser>>>):Promise<SessionUser|null> {
   const membership = managed.role==='Founder' ? null : await getOrganizationMembership(managed.id);
+  if (managed.role !== 'Founder' && !membership) return null;
   return {
     id:managed.id,
     email:managed.email || record.email,
     name:managed.name,
     role:managed.role,
     title:managed.title,
-    locations:effectiveManagedLocations(managed),
+    locations:membership && membership.organizationId !== 'org-puerto-vallarta' && ['Corporate','Maintenance'].includes(managed.role) ? [] : effectiveManagedLocations(managed),
     ...(membership ?? {}),
   };
 }
@@ -124,7 +126,10 @@ export async function authenticateUser(email: string, password: string): Promise
 
 export function issueSession(user: SessionUser) {
   const now = Math.floor(Date.now() / 1000);
-  const payload: SessionPayload = { ...user, iat: now, exp: now + SESSION_TTL_SECONDS };
+  // Organization locations are fetched for the UI; do not duplicate a potentially
+  // large location catalog in the signed browser cookie.
+  const { organizationLocations: _organizationLocations, ...identity } = user;
+  const payload: SessionPayload = { ...identity, iat: now, exp: now + SESSION_TTL_SECONDS };
   const body = b64url(JSON.stringify(payload));
   return `${body}.${sign(body)}`;
 }
