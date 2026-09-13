@@ -61,10 +61,10 @@ export function isUberEatsDiscount(discount:ToastDiscount){
   return /(^|[^a-z0-9])(uber\s*eats|ubereats|uber)([^a-z0-9]|$)/i.test(discountIdentity(discount));
 }
 export function isEmployeeMealDiscount(discount:ToastDiscount){
-  // Match meal-specific names, not generic employee discounts or free-text comments.
+  // Employee discounts include the actual Toast labels supplied by operations; ignore free-text comments.
   return [discount.name,discount.externalId,discount.appliedPromoCode,discount.discountPlu,discount.discount?.externalId,discount.appliedDiscountReason?.name].some(value=>{
-    const name=String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    return /\b(employee|employees|staff|team member|emp)\s+(meal|meals|food)\b/.test(name)||/\b(meal|meals|food)\s+(for\s+)?(employee|employees|staff)\b/.test(name)||/\b(comida|comidas|alimento|alimentos)\s+(de\s+|del\s+|para\s+)?(empleado|empleados|personal)\b/.test(name)||/^(employeemeals?|staffmeals?)(discounts?)?$/.test(name);
+    const name=String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\bemplyoee\b/g,'employee').replace(/[^a-z0-9]+/g,' ').trim();
+    return /\b(employee|employees)\b.*\b(disc|discount|discounts)\b/.test(name)||/\b(employee|employees|staff|team member|emp)\s+(meal|meals|food)\b/.test(name)||/\b(meal|meals|food)\s+(for\s+)?(employee|employees|staff)\b/.test(name)||/\b(comida|comidas|alimento|alimentos)\s+(de\s+|del\s+|para\s+)?(empleado|empleados|personal)\b/.test(name)||/^(employeemeals?|staffmeals?)(discounts?)?$/.test(name);
   });
 }
 function activeDiscountAmounts(items:ToastDiscount[]|undefined){
