@@ -13,7 +13,7 @@ export const overviewMetrics: Record<OverviewMetric, MetricDefinition> = {
   labor: { label: 'Labor total', note: 'Costo por hora + asignación de salarios. El porcentaje usa las ventas netas de cada locación.', rule: 'Revisión del resumen: labor total >30%. Horarios contiene las metas por locación.' },
   tasks: { label: 'Cumplimiento de Tasks', percent: true, note: 'Tasks completadas / Tasks registradas por 7shifts para el periodo. Las que faltan por completar pueden incluir tareas todavía abiertas.', rule: 'Revisión: cumplimiento <80%. Sin tareas registradas no equivale a 0%.' },
   voids: { label: 'Voids', note: 'Monto de voids y porcentaje sobre ventas netas, según Toast.', rule: 'Revisión: voids >0.50%.' },
-  discounts: { label: 'Descuentos', note: 'Incluye todos los descuentos de Toast. El Bono semanal aplica su propia exclusión de promociones de Uber Eats.', rule: 'Revisión general: descuentos >2.00%; no determina la calificación del bono.' },
+  discounts: { label: 'Descuentos', note: 'Incluye todos los descuentos de Toast. El Bono semanal aplica su propia exclusión de promociones de Uber Eats y comida de empleados.', rule: 'Revisión general: descuentos >2.00%; no determina la calificación del bono.' },
 };
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const percent = (value: number) => `${value.toFixed(2)}%`;

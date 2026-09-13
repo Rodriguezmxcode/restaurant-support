@@ -105,12 +105,12 @@ const guides:Guide[] = [
     module:'Bono semanal', label:'Bono semanal',
     keywords:['bono','bonus','ranking','scorecard','calificado','qualified','elegibilidad','eligibility','descuento uber','uber discount'],
     es:{
-      answer:'Bono semanal muestra la calificación por Tasks, descuentos, voids, overtime, licor y liderazgo. Los descuentos corporativos de Uber Eats se excluyen de la métrica del bono.',
+      answer:'Bono semanal muestra la calificación por Tasks, descuentos, voids, overtime, licor y liderazgo. Los descuentos corporativos de Uber Eats y los de comida de empleados se excluyen de la métrica del bono.',
       recommendation:'Abre el scorecard para ver qué regla impide calificar y después entra al módulo de origen para corregirla.',
       followUps:['¿Por qué no calificó mi restaurante?','¿Qué métricas cuentan para el bono?'],
     },
     en:{
-      answer:'Weekly Bonus scores Tasks, discounts, voids, overtime, liquor, and leadership. Corporate Uber Eats discounts are excluded from the bonus discount metric.',
+      answer:'Weekly Bonus scores Tasks, discounts, voids, overtime, liquor, and leadership. Corporate Uber Eats and employee meal discounts are excluded from the bonus discount metric.',
       recommendation:'Open the scorecard to identify the failed rule, then use its source module to correct it.',
       followUps:['Why did my restaurant not qualify?','Which metrics count for the bonus?'],
     },
