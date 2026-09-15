@@ -1,0 +1,60 @@
+name: Fix bonus overtime
+on:
+  push:
+    branches: [opsvista-migration-v1]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opsvista-migration-v1
+      - name: Patch overtime bonus formula
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('opsvista/server/toastPerformance.ts')
+          s = p.read_text()
+          old = "overtimeLaborPct:hourlyLaborCost?round(overtimeLaborCost/hourlyLaborCost*100):0"
+          new = "overtimeLaborPct:(regularHours+overtimeHours)?round(overtimeHours/(regularHours+overtimeHours)*100):0"
+          if old not in s:
+              raise SystemExit('toastPerformance overtime formula not found')
+          p.write_text(s.replace(old, new))
+
+          p = Path('opsvista/api/operations/performance.ts')
+          s = p.read_text()
+          old = "overtimeLaborPct:totals.hourlyLaborCost?round(totals.overtimeLaborCost/totals.hourlyLaborCost*100):0,"
+          new = "overtimeLaborPct:totals.hourlyHours?round(totals.overtimeHours/totals.hourlyHours*100):0,"
+          if old not in s:
+              raise SystemExit('performance totals overtime formula not found')
+          s = s.replace(old, new)
+          old_note = "overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.',"
+          new_note = "overtime:'Overtime % is overtime hours divided by total hourly hours worked. Salaried hours and future scheduled exposure do not penalize the weekly bonus.',"
+          if old_note not in s:
+              raise SystemExit('performance overtime note not found')
+          p.write_text(s.replace(old_note, new_note))
+
+          p = Path('opsvista/src/bonusEngine.ts')
+          s = p.read_text()
+          old_note = "note:'15% of score · eligibility maximum 8.00% of labor'"
+          new_note = "note:'15% of score · eligibility maximum 8.00% of hourly hours worked'"
+          if old_note not in s:
+              raise SystemExit('bonus overtime note not found')
+          s = s.replace(old_note, new_note)
+          old_reason = "reasons.push(`OT ${input.overtimeLaborPct.toFixed(2)}% > 8.00% of labor`)"
+          new_reason = "reasons.push(`OT ${input.overtimeLaborPct.toFixed(2)}% > 8.00% of hourly hours`)"
+          if old_reason not in s:
+              raise SystemExit('bonus overtime reason not found')
+          p.write_text(s.replace(old_reason, new_reason))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "OpsVista Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add opsvista/server/toastPerformance.ts opsvista/api/operations/performance.ts opsvista/src/bonusEngine.ts
+          git commit -m "Align weekly bonus overtime with worked hourly hours"
+          git push origin HEAD:opsvista-migration-v1
