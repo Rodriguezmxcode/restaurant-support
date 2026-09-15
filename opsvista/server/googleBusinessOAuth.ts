@@ -62,8 +62,9 @@ export function authorizationUrl(credential: GoogleBusinessCredentials, redirect
     include_granted_scopes: 'true',
     scope: SCOPES.join(' '),
     state,
-    login_hint: process.env.GOOGLE_BUSINESS_PROFILE_OWNER_EMAIL?.trim() || 'roberto@puertovallartausa.com',
   });
+  const loginHint = process.env.GOOGLE_BUSINESS_PROFILE_OWNER_EMAIL?.trim();
+  if (loginHint) query.set('login_hint', loginHint);
   return `${AUTHORIZATION_URL}?${query}`;
 }
 
