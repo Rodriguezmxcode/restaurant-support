@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "typecheck:vercel": "tsc --noEmit -p tsconfig.vercel.json",
     "test:notification-email": "node scripts/test-notification-email.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs",
