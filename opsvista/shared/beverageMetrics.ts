@@ -112,13 +112,13 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
       matched++;
       if (invoice.amount === null || !Number.isFinite(invoice.amount)) { purchasesReady = false; issues.push('Factura seleccionada sin monto'); continue; }
       const amount = (invoice.kind === 'credit' ? -1 : 1) * Math.abs(invoice.amount);
-      if (!invoice.approved) { pending += amount; pendingCount++; continue; }
       purchases += amount;
+      if (!invoice.approved) { pending += amount; pendingCount++; }
       if (invoice.kind === 'credit') creditCount++; else invoiceCount++;
     }
   }
   if (!matched) { purchasesReady = false; issues.push('Sin compras identificadas: confirmar cobertura'); }
-  if (pendingCount) issues.push(`${pendingCount} documentos pendientes de aprobación`);
+  if (pendingCount) issues.push(`${pendingCount} documentos pendientes de aprobación de pago · ya incluidos en compras`);
   if (!salesReady && totals.unclassified !== 0) {
     issues.push('Clasificar categorías de Toast');
     issues.push(`Ventas Toast sin clasificar: $${money(Math.abs(totals.unclassified)).toFixed(2)}`);
@@ -126,10 +126,11 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   const sales = salesVisible ? money(totals.spirits + totals.beer + totals.wine + totals.alcohol) : null;
   if (sales !== null && !salesReady) issues.push('Ventas netas de alcohol provisionales: se muestran importes clasificados mientras se termina la conciliación de Toast');
   const cost = purchasesReady ? money(purchases) : null;
-  // Keep observed/classified sales visible for review, but incomplete Toast reconciliation,
-  // pending source refreshes, AP approval gaps or other unresolved evidence cannot win the ranking.
+  // A visible R365 invoice represents an incurred purchase whether or not payment has been approved.
+  // Approval controls payment timing/cash management; it does not remove the invoice from purchase cost.
+  // Stale source refreshes, incomplete Toast reconciliation or other unresolved evidence can still block ranking.
   const sourcePending = rows.some(row => row.memory?.sales.pending || row.memory?.purchases.pending);
-  const comparable = !sourcePending && salesReady && purchasesReady && sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0 && !pendingCount;
+  const comparable = !sourcePending && salesReady && purchasesReady && sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0;
   if (cost !== null && cost < 0) issues.push('Créditos superiores a compras');
   if (sales !== null && sales <= 0) issues.push('Sin ventas positivas de alcohol');
   const purchasePct = comparable ? money(cost! / sales! * 100) : null;
