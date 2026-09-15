@@ -1,0 +1,47 @@
+name: OpsVista source sync
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/opsvista-source-sync.yml']
+permissions:
+  id-token: write
+  contents: read
+concurrency:
+  group: opsvista-source-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - name: Refresh changed invoices and drain nightly work
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          // No checkout and no business data in logs. Each invocation uses an
+          // expiring GitHub identity scoped to this exact repository/workflow.
+          let failed = false;
+          for (let pass = 0; pass < 200; pass++) {
+            const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            tokenUrl.searchParams.set('audience', 'opsvista-source-sync');
+            const identity = await fetch(tokenUrl, { headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` } });
+            if (!identity.ok) throw new Error(`Identity request failed: ${identity.status}`);
+            const { value: token } = await identity.json();
+            if (!token) throw new Error('Missing workflow identity');
+            console.log(`::add-mask::${token}`);
+            const response = await fetch('https://restaurant-support.vercel.app/api/restaurant365?view=sync', {
+              method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(125000),
+            });
+            if (!response.ok) throw new Error(`OpsVista sync failed: HTTP ${response.status}`);
+            const result = await response.json();
+            if (!Number.isInteger(result.remaining)) throw new Error('Invalid sync response');
+            console.log(`Batch ${pass + 1}: processed=${result.processed || 0}; remaining=${result.remaining}; errors=${result.errors || 0}`);
+            failed ||= !result.ok || result.errors > 0;
+            if (!result.remaining) break;
+            if (pass === 199) throw new Error('Queue remains pending; next scheduled run will resume it');
+          }
+          if (failed) throw new Error('Some sources could not be refreshed; saved data was retained for the next retry');
+          JS
