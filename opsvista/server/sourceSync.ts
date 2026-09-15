@@ -2,6 +2,7 @@ import { getIntegrationSnapshot, saveIntegrationSnapshot, invalidateInvoiceSnaps
 import { getRestaurant365Changes } from './restaurant365OData.js';
 import { claimSource, executeSource, dirtyR365Sources, sourceQueueStatus, withSyncLease, registerSource } from './sourceCache.js';
 import { loadSource } from './sourceLoaders.js';
+import { prepareClosedBonusWeek } from './bonusWeek.js';
 
 type SyncState = { cursor?: string; checkedAt?: string; lastSuccessAt?: string; error?: string; schedulerSeenAt?: string };
 export async function getSourceSyncStatus(organizationId: string) {
@@ -11,6 +12,7 @@ export async function getSourceSyncStatus(organizationId: string) {
 export async function runSourceSync(organizationId = 'org-puerto-vallarta', scheduled = false) {
   return withSyncLease(organizationId, async () => {
     const begin = Date.now(), now = new Date().toISOString();
+    await prepareClosedBonusWeek(organizationId, new Date(now));
     const localMonth = new Intl.DateTimeFormat('en-CA',{ timeZone:'America/New_York',year:'numeric',month:'2-digit' }).format(new Date());
     await registerSource(organizationId,'r365-ap',{start:localMonth});
     const state = (await getIntegrationSnapshot<SyncState>(organizationId, 'source-sync', 'state'))?.payload || {};
