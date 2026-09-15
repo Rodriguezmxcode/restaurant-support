@@ -1,0 +1,32 @@
+name: Fix Integrations route
+on:
+  push:
+    branches: [opsvista-migration-v1]
+    paths: ['.github/workflows/fix-integrations-route.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opsvista-migration-v1
+      - name: Fix initial section routing expression
+        shell: python
+        run: |
+          from pathlib import Path
+          app=Path('opsvista/src/App.tsx')
+          text=app.read_text()
+          old="return (integration&&permissions.modules.includes('Integraciones')?'Integraciones':'Configuración':saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;"
+          new="return (integration?(permissions.modules.includes('Integraciones')?'Integraciones':'Configuración'):saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;"
+          if old not in text:
+              raise SystemExit('broken routing expression not found')
+          app.write_text(text.replace(old,new,1))
+      - name: Commit fix
+        run: |
+          git config user.name "OpsVista Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add opsvista/src/App.tsx
+          git commit -m "Fix Integrations module routing"
+          git push origin HEAD:opsvista-migration-v1
