@@ -1,6 +1,6 @@
 import { standardToastRequest } from './toastClient.js';
 import { resolvedToastLocationEntries } from './toastPerformance.js';
-import { addDays, money, suggestBeverageGroup, type BeverageSource } from '../shared/beverageMetrics.js';
+import { addDays, money, suggestBeverageGroup, suggestBeverageItem, type BeverageSource } from '../shared/beverageMetrics.js';
 
 type Selection = { guid?: string; displayName?: string; salesCategory?: { guid?: string }; price?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
 type Check = { deleted?: boolean; voided?: boolean; selections?: Selection[]; payments?: { refund?: { refundAmount?: number } }[]; appliedServiceCharges?: { refundDetails?: { refundAmount?: number; taxRefundAmount?: number } }[] };
@@ -42,7 +42,7 @@ export function summarizeBeverageSales(orders: Order[], start: string, end: stri
       if (Math.abs(paymentRefunds - itemRefunds - serviceRefunds) > 0.02) unallocatedRefunds++;
     }
   }
-  return { categories: [...categories.values()].map(row => ({ ...row, netSales: money(row.netSales), items: [...row.items].map(([name, netSales]) => ({name, netSales: money(netSales)})).sort((a,b) => b.netSales-a.netSales || a.name.localeCompare(b.name)) })), missingPrices, unallocatedRefunds };
+  return { categories: [...categories.values()].map(row => ({ ...row, netSales: money(row.netSales), items: [...row.items].map(([name, netSales]) => ({name, netSales: money(netSales), group: suggestBeverageItem(name, row.group)})).sort((a,b) => b.netSales-a.netSales || a.name.localeCompare(b.name)) })), missingPrices, unallocatedRefunds };
 }
 
 export async function getToastBeverageSales(location: string, start: string, end: string): Promise<BeverageSource['sales']> {

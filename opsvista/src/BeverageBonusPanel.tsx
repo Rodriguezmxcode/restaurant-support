@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
+import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
 
 const usd = (value: number | null) => value === null ? 'Sin conciliar' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const pct = (value: number | null) => value === null ? '—' : `${value.toFixed(2)}%`;
@@ -13,6 +13,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
   const [sources, setSources] = useState<BeverageSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [groups, setGroups] = useState<Record<string, BeverageGroup>>({});
+  const [itemGroups, setItemGroups] = useState<Record<string, BeverageGroup>>({});
   const [vendors, setVendors] = useState<Record<string, boolean>>({});
   const scopeKey = locations.filter(location => beverageLocations.includes(location)).join('|');
   const reportStart = windowMode === 'rolling' ? addDays(end, -55) : start;
@@ -49,7 +50,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
     return () => controller.abort();
   }, [canRead, enabled, scopeKey, chunks, refresh]);
 
-  const rows = useMemo(() => rankBeverages(scopeKey.split('|').filter(Boolean).map(location => compareBeverages(location, sources, chunks.length, groups, vendors))), [scopeKey, sources, chunks.length, groups, vendors]);
+  const rows = useMemo(() => rankBeverages(scopeKey.split('|').filter(Boolean).map(location => compareBeverages(location, sources, chunks.length, groups, vendors, itemGroups))), [scopeKey, sources, chunks.length, groups, vendors, itemGroups]);
   const categoryRows = useMemo(() => {
     const all = new Map<string, { location: string; id: string; name: string; group: BeverageGroup; netSales: number; items: Map<string, number> }>();
     for (const source of sources) for (const category of source.sales.categories) {
@@ -100,9 +101,9 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
           </tr>)}</tbody>
         </table></div>
         <details><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Desglose de ventas y clasificación de categorías ({categoryRows.length})</summary>
-          <p>Verifica las categorías de cada locación. “Beverage” u otros nombres ambiguos requieren clasificación. Los cambios afectan solamente este comparativo.</p>
+          <p>Verifica las categorías y sus productos. La clasificación por producto separa refrescos, café, cerveza y vino aunque estén dentro de Liquor. “Beverage” u otros nombres ambiguos requieren clasificación. Los cambios afectan solamente este comparativo durante esta visita.</p>
           <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Locación', 'Categoría Toast', 'Ventas netas', 'Clasificación'].map(label => <th key={label} style={cell}>{label}</th>)}</tr></thead>
-            <tbody>{categoryRows.map(row => <tr key={`${row.location}:${row.id}`}><td style={cell}>{row.location}</td><td style={cell}>{row.name}{row.items.size > 0 && <details><summary>Ver {row.items.size} productos</summary><ul>{[...row.items].sort((a,b) => b[1]-a[1]).map(([name, amount]) => <li key={name}>{name}: {usd(amount)}</li>)}</ul></details>}</td><td style={cell}>{usd(row.netSales)}</td><td style={cell}><select aria-label={`Clasificar ${row.name} de ${row.location}`} value={groups[`${row.location}:${row.id}`] ?? row.group} onChange={event => setGroups(previous => ({ ...previous, [`${row.location}:${row.id}`]: event.target.value as BeverageGroup }))}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>)}</tbody>
+            <tbody>{categoryRows.map(row => <tr key={`${row.location}:${row.id}`}><td style={cell}>{row.location}</td><td style={cell}>{row.name}{row.items.size > 0 && <details><summary>Ver {row.items.size} productos</summary><ul>{[...row.items].sort((a,b) => b[1]-a[1]).map(([name, amount]) => <li key={name} style={{marginBottom:6}}>{name}: {usd(amount)} <select aria-label={`Clasificar producto ${name} de ${row.location} en ${row.name}`} value={itemGroups[`${row.location}:${row.id}:${name}`] ?? groups[`${row.location}:${row.id}`] ?? suggestBeverageItem(name, row.group)} onChange={event => setItemGroups(previous => ({...previous, [`${row.location}:${row.id}:${name}`]:event.target.value as BeverageGroup}))}>{Object.entries(labels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></li>)}</ul></details>}</td><td style={cell}>{usd(row.netSales)}</td><td style={cell}><select aria-label={`Clasificar ${row.name} de ${row.location}`} value={groups[`${row.location}:${row.id}`] ?? row.group} onChange={event => setGroups(previous => ({ ...previous, [`${row.location}:${row.id}`]: event.target.value as BeverageGroup }))}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>)}</tbody>
           </table></div>
         </details>
         <details><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Proveedores e invoices de R365 ({invoiceRows.length})</summary>

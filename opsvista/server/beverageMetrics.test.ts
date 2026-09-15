@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beverageChunks, compareBeverages, rankBeverages, suggestBeverageGroup, validBeverageRange, type BeverageSource } from '../shared/beverageMetrics.js';
+import { beverageChunks, compareBeverages, rankBeverages, suggestBeverageGroup, suggestBeverageItem, validBeverageRange, type BeverageSource } from '../shared/beverageMetrics.js';
 import { summarizeBeverageSales, getToastBeverageSales } from './toastBeverageSales.js';
 import { getRestaurant365BeveragePurchases } from './restaurant365OData.js';
 
@@ -158,5 +158,26 @@ test('category product breakdown reconciles to net sales without customer inform
     {displayName:'Coffee',salesCategory:{guid:'drinks'},price:3},
   ]}]}], '2026-09-02','2026-09-08',new Map([['drinks','Drinks']]));
   assert.equal(result.categories[0].netSales,15);
-  assert.deepEqual(result.categories[0].items,[{name:'Cola',netSales:12},{name:'Coffee',netSales:3}]);
+  assert.deepEqual(result.categories[0].items,[{name:'Cola',netSales:12,group:'unclassified'},{name:'Coffee',netSales:3,group:'excluded'}]);
+});
+
+
+test('mixed Liquor categories split nonalcoholic products, beer, wine and cocktails', () => {
+ const data=source(); data.sales.categories=[{id:'mix',name:'Liquor',group:'spirits',netSales:135,selections:5,items:[
+  {name:'Diet Coke',netSales:20},{name:'Heineken Zero Bottle',netSales:10},{name:'Corona Bottle',netSales:25},{name:'Glass Decoy Merlot',netSales:30},{name:'Original Margarita',netSales:50},
+ ]}];
+ const result=compareBeverages('Avon',[data],1);
+ assert.equal(result.sales,105);assert.equal(result.beer,25);assert.equal(result.wine,30);assert.equal(result.spirits,50);
+ assert.equal(suggestBeverageItem('Espresso Martini','unclassified'),'spirits');
+ assert.equal(suggestBeverageItem('Espresso','spirits'),'excluded');
+ assert.equal(suggestBeverageItem('Pina Col Vrgn','spirits'),'excluded');
+ assert.equal(suggestBeverageItem('Root Beer','beer'),'excluded');
+ assert.equal(suggestBeverageItem('Lalo Medium','unclassified'),'spirits');
+});
+test('unclassified products and incomplete product totals remain unresolved', () => {
+ const data=source();data.sales.categories=[{id:'drinks',name:'Drinks',group:'unclassified',netSales:20,selections:1,items:[{name:'House Special',netSales:20}]}];
+ assert.equal(compareBeverages('Avon',[data],1).sales,null);
+ assert.equal(compareBeverages('Avon',[data],1,{}, {}, {'Avon:drinks:House Special':'spirits'}).sales,20);
+ data.sales.categories[0].netSales=30;
+ assert.equal(compareBeverages('Avon',[data],1,{}, {}, {'Avon:drinks:House Special':'spirits'}).sales,null);
 });

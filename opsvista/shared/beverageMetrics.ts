@@ -1,6 +1,6 @@
 export const beverageLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
 export type BeverageGroup = 'spirits' | 'beer' | 'wine' | 'alcohol' | 'excluded' | 'unclassified';
-export type BeverageCategory = { id: string; name: string; group: BeverageGroup; netSales: number; selections: number; items?: { name: string; netSales: number }[] };
+export type BeverageCategory = { id: string; name: string; group: BeverageGroup; netSales: number; selections: number; items?: { name: string; netSales: number; group?: BeverageGroup }[] };
 export type BeverageInvoice = { id: string; number?: string; date: string; vendor: string; approved: boolean; amount: number | null; kind: 'invoice' | 'credit'; suggested: boolean };
 export type BeverageSource = {
   location: string; start: string; end: string; fetchedAt: string;
@@ -20,6 +20,22 @@ export function suggestBeverageGroup(name: string): BeverageGroup {
   if (/^(alcohol|alcoholic beverages|bebidas alcoholicas)$/.test(value)) return 'alcohol';
   if (/^(food|comida|foods|soft drinks|soda|sodas|dessert|desserts|merchandise|retail|gift cards|non alcoholic beverages)$/.test(value)) return 'excluded';
   return 'unclassified';
+}
+const nonAlcoholicItems = new Set([
+  'diet coke','dier coke','coca cola','coca cola vidrio','coke','coke zero','sprite','fanta orange','root beer','ginger beer','ginger ale','club soda','tonic plain',
+  'ice tea','iced tea','raspberry iced tea','hot tea','pink lemonade','fresh lemonade','lemonade','jarritos','shirley temple','shirly temple',
+  'apple juice','orange juice','o j orange juice','pineapple juice','cranberry','cranberry juice','grapefruit plain','pineapple plain','tomato clamato juice',
+  'milk','chocolate milk','chololate milk','soft drinks','hot chocolate','cafe','coffee','regular coffee','employee coffee','cappuccino','cappucinno','espresso','double espresso','americano','latte','cafe mocha',
+  'saratoga','saratoga small','saratoga sparkling','saratoga sparkling water','saratoga still','saratoga still water','still water','san pelegrino lg',
+  'topochico mineral','topochico mineral small','red bull','dr pepper','arnold palmer','jugo de naranja natural',
+]);
+export function suggestBeverageItem(name: string, category: BeverageGroup): BeverageGroup {
+  const value = normalize(name).replace(/ kd$/, '');
+  if (/\b(virgin|virgen|virgyn|vrgn|non alcoholic|nonalcoholic|sin alcohol)\b/.test(value) || /\bheineken (zero|0 0)\b/.test(value) || nonAlcoholicItems.has(value)) return 'excluded';
+  if (/\b(margarita|martini|mojito|daiquiri|daquiri|cosmopolitan|tequila)\b/.test(value) || /^lalo(?: |$)/.test(value)) return 'spirits';
+  if (/\b(corona|modelo|pacifico|blue moon|heineken|stella|xx lager|xx amber|dogfish|lagunitas|two roads|budlight|bud light|coors light|miller light|michelob|amstel|victoria)\b/.test(value)) return 'beer';
+  if (/\b(cabernet|chardonnay|merlot|pinot|tempranillo|prosecco|cava|13 celsius|minimalista|chateau|cote des roses|argento|los vascos|decoy)\b/.test(value)) return 'wine';
+  return category;
 }
 const suggestedVendors = new Set([
   'Brescome Barton Inc.', 'Connecticut Distributors Inc.', 'Eder-Goodman Fine Wine and Spirits',
@@ -45,7 +61,7 @@ export type BeverageComparison = {
   unclassifiedSales: number; issues: string[]; rank: number | null;
 };
 export function compareBeverages(location: string, sources: BeverageSource[], expectedChunks: number,
-  categoryGroups: Record<string, BeverageGroup> = {}, vendors: Record<string, boolean> = {}): BeverageComparison {
+  categoryGroups: Record<string, BeverageGroup> = {}, vendors: Record<string, boolean> = {}, itemGroups: Record<string, BeverageGroup> = {}): BeverageComparison {
   const issues: string[] = [];
   const rows = [...new Map(sources.filter(row => row.location === location).map(row => [`${row.start}:${row.end}`, row])).values()];
   const complete = new Set(rows.map(row => `${row.start}:${row.end}`)).size === expectedChunks;
@@ -60,9 +76,20 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
     if (row.sales.missingPrices) { salesReady = false; issues.push(`${row.sales.missingPrices} artículos sin precio`); }
     if (row.sales.unallocatedRefunds) { salesReady = false; issues.push(`${row.sales.unallocatedRefunds} cuentas con reembolso sin conciliar`); }
     for (const category of row.sales.categories) {
-      const group = categoryGroups[`${location}:${category.id}`] ?? category.group;
-      totals[group] += category.netSales;
-      if (group === 'unclassified' && category.selections > 0) salesReady = false;
+      const categoryKey = `${location}:${category.id}`;
+      if (category.items?.length) {
+        const itemTotal = money(category.items.reduce((sum, item) => sum + item.netSales, 0));
+        if (Math.abs(itemTotal-category.netSales) > 0.02) { salesReady = false; issues.push('Desglose de productos incompleto'); }
+        for (const item of category.items) {
+          const group = itemGroups[`${categoryKey}:${item.name}`] ?? categoryGroups[categoryKey] ?? item.group ?? suggestBeverageItem(item.name, category.group);
+          totals[group] += item.netSales;
+          if (group === 'unclassified' && item.netSales !== 0) salesReady = false;
+        }
+      } else {
+        const group = categoryGroups[categoryKey] ?? category.group;
+        totals[group] += category.netSales;
+        if (group === 'unclassified' && category.netSales !== 0) salesReady = false;
+      }
     }
     for (const invoice of row.purchases.invoices) {
       if (invoice.vendor === 'Proveedor sin identificar' && vendors[invoice.vendor] === undefined) { purchasesReady = false; issues.push('Identificar proveedor de R365'); }
