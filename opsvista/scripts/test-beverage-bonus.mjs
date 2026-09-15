@@ -9,7 +9,7 @@ const output = await mkdtemp(join(tmpdir(), 'opsvista-beverages-'));
 try {
   await writeFile(join(output, 'package.json'), '{"type":"module"}\n');
   await symlink(join(root, 'node_modules'), join(output, 'node_modules'), 'dir');
-  for (const name of ['shared/beverageMetrics', 'server/toastClient', 'server/toastBeverageSales', 'server/integrationStore', 'server/restaurant365OData', 'server/beverageMetrics.test']) {
+  for (const name of ['shared/beverageMetrics', 'server/toastClient', 'server/toastPerformance', 'server/toastBeverageSales', 'server/integrationStore', 'server/restaurant365OData', 'server/beverageMetrics.test']) {
     const fileName = join(root, `${name}.ts`);
     const compiled = ts.transpileModule(await readFile(fileName, 'utf8'), { fileName, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
     const target = join(output, `${name}.js`); await mkdir(dirname(target), { recursive: true }); await writeFile(target, compiled.outputText);
