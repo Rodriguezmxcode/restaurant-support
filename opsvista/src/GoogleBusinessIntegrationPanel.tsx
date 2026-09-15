@@ -7,12 +7,13 @@ type Status = {
   connectedEmail?: string;
   connectedAt?: string;
   redirectUri: string;
+  platformManaged?: boolean;
 };
 
 const DEFAULT_CLIENT_ID = '231297259640-k8a08nq0ces7lnqr9edpc64u8kq8ljpe.apps.googleusercontent.com';
-const locations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
+const defaultLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
 
-export default function GoogleBusinessIntegrationPanel() {
+export default function GoogleBusinessIntegrationPanel({ locations = defaultLocations, customerMode = false }: { locations?: string[]; customerMode?: boolean }) {
   const [status, setStatus] = useState<Status>();
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const [clientSecret, setClientSecret] = useState('');
@@ -60,9 +61,11 @@ export default function GoogleBusinessIntegrationPanel() {
     setNotice('URL de retorno copiada.');
   };
 
+  const connect = () => window.location.assign('/api/integrations/google-business?action=authorize');
+
   return <section className="panel" style={{marginBottom:18}}>
     <div className="panel-header">
-      <div><h2>Google Business Profile</h2><p>Una sola autorización conecta automáticamente las seis locaciones administradas por la cuenta de Google.</p></div>
+      <div><h2>Google Business Profile</h2><p>Conecta la cuenta de Google que administra las locaciones de esta organización. Las credenciales y reseñas quedan aisladas por cliente.</p></div>
       <span className="count-pill">{status?.connected ? 'CONECTADO' : status?.configured ? 'LISTO PARA CONECTAR' : 'PENDIENTE'}</span>
     </div>
 
@@ -74,27 +77,36 @@ export default function GoogleBusinessIntegrationPanel() {
         {locations.map(location => <div key={location} style={{padding:'12px 14px',border:'1px solid #bbf7d0',borderRadius:10,background:'#f0fdf4'}}><strong style={{color:'#166534'}}>✓ {location}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Google Reviews conectado</div></div>)}
       </div>
       <p style={{margin:'14px 0 0',color:'#64748b'}}>Cuenta autorizada: <strong>{status.connectedEmail || 'Google Business manager'}</strong>{status.connectedAt ? ` · ${new Date(status.connectedAt).toLocaleString()}` : ''}</p>
-    </> : <div style={{display:'grid',gap:16,marginTop:14}}>
+    </> : customerMode ? <div style={{display:'grid',gap:16,marginTop:14}}>
+      {status?.platformManaged ? <div style={{padding:16,border:'1px solid #e2e8f0',borderRadius:12}}>
+        <strong>Conecta Google Business</strong>
+        <p style={{margin:'6px 0 10px',color:'#64748b'}}>OpsVista administra la configuración técnica de OAuth. Tú sólo autorizas la cuenta de Google de tu empresa; no necesitas compartir Client IDs ni secretos.</p>
+        <button disabled={!status?.configured} onClick={connect}>Conectar Google Business</button>
+      </div> : <div style={{padding:16,border:'1px solid #fde68a',borderRadius:12,background:'#fffbeb'}}>
+        <strong>Conector pendiente de configuración de plataforma</strong>
+        <p style={{margin:'6px 0 0',color:'#92400e'}}>OpsVista todavía no tiene habilitado el cliente OAuth central para esta organización. No pegues secretos de Google aquí; contacta al administrador de OpsVista.</p>
+      </div>}
+    </div> : <div style={{display:'grid',gap:16,marginTop:14}}>
       <div style={{padding:16,border:'1px solid #e2e8f0',borderRadius:12}}>
         <strong>1. Autoriza el retorno seguro de OpsVista</strong>
         <p style={{margin:'6px 0 10px',color:'#64748b'}}>Copia esta dirección en “Authorized redirect URIs” del cliente OAuth de Google.</p>
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}><input readOnly value={status?.redirectUri || ''} style={{flex:'1 1 420px',padding:10,border:'1px solid #cbd5e1',borderRadius:8}}/><button onClick={copyRedirect}>Copiar URL</button><a href="https://console.cloud.google.com/auth/clients?project=radiant-saga-506507-p2" target="_blank" rel="noreferrer" style={{alignSelf:'center'}}>Abrir Google Cloud</a></div>
       </div>
 
-      <div style={{padding:16,border:'1px solid #e2e8f0',borderRadius:12}}>
-        <strong>2. Guarda el cliente OAuth</strong>
-        <p style={{margin:'6px 0 10px',color:'#64748b'}}>El secreto se cifra en el servidor y nunca vuelve a mostrarse.</p>
+      {!status?.platformManaged && <div style={{padding:16,border:'1px solid #e2e8f0',borderRadius:12}}>
+        <strong>2. Guarda el cliente OAuth de OpsVista</strong>
+        <p style={{margin:'6px 0 10px',color:'#64748b'}}>Configuración de plataforma. El secreto se cifra en el servidor y nunca vuelve a mostrarse.</p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:8}}>
           <input aria-label="Google OAuth Client ID" value={clientId} onChange={event => setClientId(event.target.value)} placeholder="Client ID" style={{padding:10,border:'1px solid #cbd5e1',borderRadius:8}}/>
           <input aria-label="Google OAuth Client Secret" type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} placeholder={status?.configured ? 'Pega un secreto nuevo para reemplazarlo' : 'Client Secret'} autoComplete="off" style={{padding:10,border:'1px solid #cbd5e1',borderRadius:8}}/>
           <button onClick={save} disabled={saving || !clientId || !clientSecret}>{saving ? 'Guardando…' : 'Guardar'}</button>
         </div>
-      </div>
+      </div>}
 
       <div style={{padding:16,border:'1px solid #e2e8f0',borderRadius:12}}>
-        <strong>3. Conecta las seis locaciones</strong>
-        <p style={{margin:'6px 0 10px',color:'#64748b'}}>Google pedirá iniciar sesión con roberto@puertovallartausa.com una sola vez.</p>
-        <button disabled={!status?.configured} onClick={() => window.location.assign('/api/integrations/google-business?action=authorize')}>Conectar Google Business</button>
+        <strong>{status?.platformManaged ? '2' : '3'}. Conecta las locaciones</strong>
+        <p style={{margin:'6px 0 10px',color:'#64748b'}}>Google te permitirá elegir la cuenta que administra los perfiles de esta organización.</p>
+        <button disabled={!status?.configured} onClick={connect}>Conectar Google Business</button>
       </div>
     </div>}
   </section>;
