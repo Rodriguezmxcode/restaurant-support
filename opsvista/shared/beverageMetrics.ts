@@ -4,6 +4,7 @@ export type BeverageCategory = { id: string; name: string; group: BeverageGroup;
 export type BeverageInvoice = { id: string; number?: string; date: string; vendor: string; approved: boolean; amount: number | null; kind: 'invoice' | 'credit'; suggested: boolean };
 export type BeverageSource = {
   location: string; start: string; end: string; fetchedAt: string;
+  memory?: { sales: { stored: boolean; updatedAt?: string; pending: boolean; error?: string }; purchases: { stored: boolean; updatedAt?: string; pending: boolean; error?: string } };
   sales: { categories: BeverageCategory[]; missingPrices: number; unallocatedRefunds: number; error?: string };
   purchases: { invoices: BeverageInvoice[]; error?: string };
 };
@@ -72,6 +73,7 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   let purchases = 0, pending = 0, invoiceCount = 0, creditCount = 0, matched = 0, pendingCount = 0;
   const seen = new Set<string>();
   for (const row of rows) {
+    if (row.memory?.sales.pending || row.memory?.purchases.pending) issues.push('Actualización pendiente: se muestra la última copia guardada');
     if (row.sales.error) { salesReady = false; issues.push(`Toast: ${row.sales.error}`); }
     if (row.purchases.error) { purchasesReady = false; issues.push(`R365: ${row.purchases.error}`); }
     if (row.sales.missingPrices) { salesReady = false; issues.push(`${row.sales.missingPrices} artículos sin precio`); }
@@ -111,7 +113,8 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   const sales = salesReady ? money(totals.spirits + totals.beer + totals.wine + totals.alcohol) : null;
   const cost = purchasesReady ? money(purchases) : null;
   // No purchase history, pending AP, or negative net purchases cannot win the ranking.
-  const comparable = sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0 && !pendingCount;
+  const sourcePending = rows.some(row => row.memory?.sales.pending || row.memory?.purchases.pending);
+  const comparable = !sourcePending && sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0 && !pendingCount;
   if (cost !== null && cost < 0) issues.push('Créditos superiores a compras');
   if (sales !== null && sales <= 0) issues.push('Sin ventas positivas de alcohol');
   const purchasePct = comparable ? money(cost! / sales! * 100) : null;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
 
 const usd = (value: number | null) => value === null ? 'Sin conciliar' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -10,6 +10,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
   const [windowMode, setWindowMode] = useState<'selected' | 'rolling'>('rolling');
   const [enabled, setEnabled] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const lastRefresh = useRef(0);
   const [sources, setSources] = useState<BeverageSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [groups, setGroups] = useState<Record<string, BeverageGroup>>({});
@@ -24,6 +25,8 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
     setSources([]);
     if (!canRead || !enabled || !scopeKey) { setLoading(false); return; }
     const controller = new AbortController();
+    const forceRefresh = refresh > lastRefresh.current;
+    lastRefresh.current = refresh;
     let cursor = 0;
     const jobs = scopeKey.split('|').flatMap(location => chunks.map(chunk => ({ location, ...chunk })));
     setLoading(true);
@@ -33,6 +36,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
         let source: BeverageSource;
         try {
           const query = new URLSearchParams({ view: 'beverage', entity: job.location, start: job.start, end: job.end });
+          if (forceRefresh) query.set('refresh','1');
           const response = await fetch(`/api/integrations/restaurant365?${query}`, { credentials: 'include', cache: 'no-store', signal: controller.signal });
           const body = await response.json();
           if (!response.ok) throw new Error(body.error || 'Fuente no disponible');
@@ -51,6 +55,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
   }, [canRead, enabled, scopeKey, chunks, refresh]);
 
   const rows = useMemo(() => rankBeverages(scopeKey.split('|').filter(Boolean).map(location => compareBeverages(location, sources, chunks.length, groups, vendors, itemGroups))), [scopeKey, sources, chunks.length, groups, vendors, itemGroups]);
+  const weeklyRows = useMemo(()=>sources.map(source=>({start:source.start,end:source.end,...compareBeverages(source.location,[source],1,groups,vendors,itemGroups)})).sort((a,b)=>a.location.localeCompare(b.location)||a.start.localeCompare(b.start)),[sources,groups,vendors,itemGroups]);
   const categoryRows = useMemo(() => {
     const all = new Map<string, { location: string; id: string; name: string; group: BeverageGroup; netSales: number; items: Map<string, number> }>();
     for (const source of sources) for (const category of source.sales.categories) {
@@ -84,11 +89,12 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
           <option value="rolling">Últimas 8 semanas hasta la fecha seleccionada</option><option value="selected">Mismo periodo del bono</option>
         </select></label>
         <strong>{reportStart} → {end}</strong>
-        <button type="button" disabled={loading} onClick={() => { setEnabled(true); setRefresh(value => value + 1); }}>{loading ? 'Consultando fuentes…' : enabled ? 'Actualizar desglose' : 'Cargar desglose'}</button>
+        <button type="button" disabled={loading} onClick={() => { if(enabled)setRefresh(value => value + 1); else setEnabled(true); }}>{loading ? 'Abriendo datos de OpsVista…' : enabled ? 'Buscar actualizaciones ahora' : 'Abrir desglose guardado'}</button>
       </div>
+      <p style={{margin:0,color:'#475569'}}>Las consultas se guardan en OpsVista y se reutilizan al volver a entrar. La sincronización incorpora facturas nuevas y cambios de R365. Una primera consulta puede tardar mientras se recuperan los datos que aún no están guardados.</p>
       <p style={{ margin: 0, color: '#475569' }}>Ranking: menor porcentaje de compras aprobadas netas de créditos ÷ ventas netas de alcohol. La diferencia ventas − compras es un indicador de compras; la utilidad bruta requiere inventario inicial, inventario final y transferencias. Se excluyen Corporate Office y Middletown.</p>
       {enabled && <>
-        <div role="status" aria-live="polite">{loading ? `Cargando ${sources.length} de ${expected} consultas. El ranking se completa al terminar.` : `${sources.length} de ${expected} consultas terminadas.`} {sources.length > 0 && `Última consulta: ${sources.map(source => source.fetchedAt).sort().at(-1)}`}</div>
+        <div role="status" aria-live="polite">{loading ? `Abriendo ${sources.length} de ${expected} consultas. El ranking se completa al terminar.` : `${sources.length} de ${expected} consultas disponibles.`} {sources.length > 0 && `Datos verificados desde: ${new Date(sources.map(source => source.fetchedAt).sort()[0]).toLocaleString('es-MX',{timeZone:'America/New_York'})} (Connecticut).`} {sources.some(source=>source.memory?.sales.pending||source.memory?.purchases.pending) && 'Hay actualizaciones pendientes; se conserva la última copia y el ranking espera la conciliación.'}</div>
         <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
           <caption style={{ textAlign: 'left', fontWeight: 700, padding: '8px 0' }}>Ranking preliminar de compras · no modifica el bono oficial</caption>
           <thead><tr>{['Rank', 'Locación', 'Ventas de alcohol', 'Compras aprobadas − créditos', 'AP pendiente', 'Compras / ventas', 'Ventas − compras', 'Margen sobre compras', 'Estado'].map(label => <th key={label} scope="col" style={cell}>{label}</th>)}</tr></thead>
@@ -100,6 +106,13 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
             <td style={{ ...cell, maxWidth: 280, fontSize: 13 }}>{row.issues.length ? row.issues.join(' · ') : 'Comparativo disponible; verificar proveedores y cobertura de facturas'}</td>
           </tr>)}</tbody>
         </table></div>
+        <details><summary style={{cursor:'pointer',fontWeight:700}}>Compras y ventas por semana · verificar las 8 semanas</summary>
+          <p>El total principal muestra compras aprobadas menos créditos. Las pendientes se muestran por separado. “48 consultas” significa 6 locaciones × 8 periodos; revisa el estado de cada semana para confirmar la cobertura.</p>
+          <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr>{['Locación','Semana','Ventas de alcohol','Compras aprobadas netas','Pendientes netas','Aprobadas + pendientes','Facturas aprobadas / créditos','Estado'].map(label=><th key={label} style={cell}>{label}</th>)}</tr></thead>
+            <tbody>{weeklyRows.map(row=><tr key={`${row.location}:${row.start}`}><th scope="row" style={cell}>{row.location}</th><td style={cell}>{row.start} → {row.end}</td><td style={cell}>{usd(row.sales)}</td><td style={cell}>{usd(row.purchases)}</td><td style={cell}>{row.purchases===null?'Sin conciliar':usd(row.pending)}</td><td style={cell}>{row.purchases===null?'Sin conciliar':usd(row.purchases+row.pending)}</td><td style={cell}>{row.invoiceCount} / {row.creditCount}</td><td style={cell}>{row.issues.join(' · ')||'Datos disponibles; revisar proveedores'}</td></tr>)}</tbody>
+          </table></div>
+        </details>
         <details><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Desglose de ventas y clasificación de categorías ({categoryRows.length})</summary>
           <p>Verifica las categorías y sus productos. La clasificación por producto separa refrescos, café, cerveza y vino aunque estén dentro de Liquor. “Beverage” u otros nombres ambiguos requieren clasificación. Los cambios afectan solamente este comparativo durante esta visita.</p>
           <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Locación', 'Categoría Toast', 'Ventas netas', 'Clasificación'].map(label => <th key={label} style={cell}>{label}</th>)}</tr></thead>

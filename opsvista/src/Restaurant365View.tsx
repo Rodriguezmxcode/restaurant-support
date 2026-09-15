@@ -1,6 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import Restaurant365IntegrationPanel from './Restaurant365IntegrationPanel';
 import CustomDateRangePicker from './CustomDateRangePicker';
+
+function SourceSyncSummary() {
+  const [state,setState]=useState<{schedulerSeenAt?:string;lastSuccessAt?:string;error?:string;queue?:{stored:number;remaining:number;errors:number}}>();
+  useEffect(()=>{
+    const controller=new AbortController();
+    const read=()=>void fetch('/api/integrations/restaurant365?view=sync-status',{credentials:'include',signal:controller.signal})
+      .then(async response=>{if(response.ok){const value=await response.json();if(!controller.signal.aborted)setState(value);}}).catch(()=>{});
+    read(); const timer=setInterval(read,60000);
+    return()=>{controller.abort();clearInterval(timer);};
+  },[]);
+  const active=state?.schedulerSeenAt && Date.now()-Date.parse(state.schedulerSeenAt)<2*3600000;
+  return <section className="panel" style={{padding:16}} aria-label="Guardado y sincronización">
+    <strong>Facturas guardadas en OpsVista</strong>
+    <p style={{margin:'6px 0'}}>Al volver a abrir la app se reutiliza la copia guardada. R365 solo vuelve a entregar los detalles nuevos o modificados y se concilia el historial por la noche.</p>
+    <span>{active?'Sincronización automática activa · revisión aproximada cada 30 minutos':'Sincronización automática pendiente de verificación'}{state?.lastSuccessAt?` · Última revisión: ${new Date(state.lastSuccessAt).toLocaleString('es-MX',{timeZone:'America/New_York'})} (Connecticut)`:''}</span>
+    {state?.queue && <p style={{margin:'6px 0 0'}}>{state.queue.stored} consultas guardadas · {state.queue.remaining} actualizaciones en espera{state.queue.errors?` · ${state.queue.errors} fuentes requieren reintento`:''}</p>}
+    {state?.error&&<p role="status">La última revisión no se completó. Tus datos guardados siguen disponibles.</p>}
+  </section>;
+}
 import './restaurant365.css';
 
 type Tab='Resumen'|'P&L'|'Facturas y AP'|'Corporate Office'|'Vendors'|'Cuentas GL'|'Conexión';
@@ -215,7 +234,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
     const queryEntity=tab==='Corporate Office'?'Corporate Office':entity;
     const fetchWithDailyFallback=async<T,>(view:'ledger'|'ap',chunk:{start:string;end:string},index:number,total:number)=>{
       const query=(part:{start:string;end:string})=>`/api/integrations/restaurant365?view=${view}&start=${part.start}&end=${part.end}${view==='ledger'?`&entity=${encodeURIComponent(queryEntity)}`:''}`;
-      setLoadingDetail(`Cargando bloque ${index+1} de ${total} · ${rangeLabel(chunk.start,chunk.end)}`);
+      setLoadingDetail(`Abriendo datos guardados · bloque ${index+1} de ${total} · ${rangeLabel(chunk.start,chunk.end)}`);
       try{return [await requestJson<T>(query(chunk),controller.signal)];}
       catch(reason){
         const message=reason instanceof Error?reason.message:'';
@@ -237,7 +256,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
         for(let index=0;index<chunks.length;index+=1)snapshots.push(...await fetchWithDailyFallback<ApSnapshot>('ap',chunks[index],index,chunks.length));
         setAp(mergeApSnapshots(snapshots,range.start,range.end));return;
       }
-      setLoadingDetail('Leyendo el catálogo contable de Restaurant365…');
+      setLoadingDetail('Abriendo el catálogo guardado en OpsVista…');
       setCatalog(await requestJson<Catalog>(`/api/integrations/restaurant365?view=${tab==='Vendors'?'vendors':'accounts'}`,controller.signal));
     })();
     void request.catch(reason=>{if(reason instanceof DOMException&&reason.name==='AbortError')return;setError(reason instanceof Error?reason.message:'Restaurant365 no está disponible.');}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
@@ -306,14 +325,17 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
     try{await navigator.clipboard.writeText(lines.join('\n'));setCopyNotice(`Lista copiada: ${rows.length} facturas para Jonathan.`);}catch{setCopyNotice('No se pudo copiar automáticamente. Selecciona y copia la lista desde la tabla.');}
   };
 
+  const showingSavedAp = tab==='Facturas y AP' && ap?.period.start===range.start && ap.period.endExclusive===addDays(range.end,1);
   return <div className="r365-page">
+    <SourceSyncSummary/>
+    {loading && showingSavedAp && <p role="status">Buscando la última copia guardada; tus facturas siguen disponibles.</p>}
     <section className="panel r365-tabs" role="tablist" aria-label="Secciones de Restaurant365">{tabs.map(item=><button key={item} type="button" role="tab" aria-selected={tab===item} className={tab===item?'active':''} onClick={()=>setTab(item)}>{item}</button>)}</section>
-    {showPeriod&&<section className="panel r365-controls"><label><span>PERIODO CONTABLE</span><select value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}>{periodOptions.map(option=><option value={option.key} key={option.key}>{option.label}</option>)}</select></label><CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={easternToday()} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo contable de Restaurant365"/>{tab==='P&L'&&<label><span>LOCACIÓN</span><select value={entity} onChange={event=>setEntity(event.target.value)}>{entities.map(item=><option key={item}>{item}</option>)}</select></label>}<div><strong>{range.label} · {rangeLabel(range.start,range.end)}</strong><span>{tab==='Corporate Office'?'Centro de costos de oficina':tab==='Facturas y AP'?'Facturas AP de las siete locaciones':'Ledger aprobado por locación'} · carga segmentada automática</span></div></section>}
+    {showPeriod&&<section className="panel r365-controls"><label><span>PERIODO CONTABLE</span><select value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}>{periodOptions.map(option=><option value={option.key} key={option.key}>{option.label}</option>)}</select></label><CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={easternToday()} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo contable de Restaurant365"/>{tab==='P&L'&&<label><span>LOCACIÓN</span><select value={entity} onChange={event=>setEntity(event.target.value)}>{entities.map(item=><option key={item}>{item}</option>)}</select></label>}<div><strong>{range.label} · {rangeLabel(range.start,range.end)}</strong><span>{tab==='Corporate Office'?'Centro de costos de oficina':tab==='Facturas y AP'?'Facturas AP de las siete locaciones':'Ledger aprobado por locación'} · copia guardada en OpsVista</span></div></section>}
 
     {tab==='Conexión'?<Restaurant365IntegrationPanel canManage={canManageIntegrations}/>:tab==='Resumen'?<>
       {error&&<ErrorState message={error} onRetry={retry}/>}<div className="r365-metrics-grid"><Metric label="Conexión" value={status?.connected?'Activa':'Pendiente'} note="Restaurant365 OData · solo lectura" tone={status?.connected?'good':'warn'}/><Metric label="Restaurantes" value={`${status?.mappedRestaurantCount??'—'} / 6`} note="Locaciones operativas" tone={status?.mappedRestaurantCount===6?'good':'warn'}/><Metric label="Corporate Office" value={status?.corporateMapped?'Mapeada':'Pendiente'} note="Centro de costos" tone={status?.corporateMapped?'good':'warn'}/><Metric label="Cuentas GL" value={status?.probes.glAccounts?'Detectadas':'Pendiente'} note="Clasificación contable" tone={status?.probes.glAccounts?'good':'warn'}/><Metric label="Transacciones" value={status?.probes.transactions?'Detectadas':'Pendiente'} note="Encabezados financieros" tone={status?.probes.transactions?'good':'warn'}/></div>
       <section className="panel r365-card"><header><div><h2>Flujo contable verificable</h2><p>Las cifras avanzan por etapas y no se publican como P&L definitivo hasta completar la conciliación.</p></div><span className="count-pill">{rangeLabel(range.start,range.end).toUpperCase()}</span></header><div className="r365-roadmap"><button onClick={()=>setTab('P&L')}><span>01</span><strong>Ledger y clasificación</strong><p>Débitos, créditos y cuentas GL por locación.</p></button><button onClick={()=>setTab('Corporate Office')}><span>02</span><strong>Corporate Office</strong><p>Gastos directos separados de los restaurantes.</p></button><button onClick={()=>setTab('Facturas y AP')}><span>03</span><strong>Facturas AP</strong><p>Aprobación, vendor, locación y responsable.</p></button><button onClick={()=>setTab('Cuentas GL')}><span>04</span><strong>Conciliación</strong><p>Comparación contra el P&L oficial de R365.</p></button></div></section>
-    </>:loading?<Loading detail={loadingDetail}/>:error?<ErrorState message={error} onRetry={retry}/>:tab==='P&L'&&activeLedger?<>
+    </>:loading&&!showingSavedAp?<Loading detail={loadingDetail}/>:error?<ErrorState message={error} onRetry={retry}/>:tab==='P&L'&&activeLedger?<>
       <div className="r365-metrics-grid"><Metric label="Ingresos clasificados" value={money.format(activeLedger.totals.revenue+activeLedger.totals.otherIncome)} note="Créditos menos débitos"/><Metric label="COGS" value={money.format(activeLedger.totals.cogs)} note="Costo identificado en R365"/><Metric label="Labor" value={money.format(activeLedger.totals.labor)} note="Cuentas de nómina y labor"/><Metric label="Gastos operativos" value={money.format(activeLedger.totals.operatingExpense+activeLedger.totals.otherExpense)} note="Excluye balance general"/><Metric label="Resultado clasificado" value={money.format(activeLedger.totals.classifiedResult)} note="Preliminar, pendiente de conciliación" tone={activeLedger.quality.status==='ready-for-reconciliation'?'good':'warn'}/></div><QualityBanner ledger={activeLedger}/><GroupBars ledger={activeLedger}/><AccountTable ledger={activeLedger}/><LedgerTable ledger={activeLedger}/><SourceNote fetchedAt={activeLedger.fetchedAt} caveats={activeLedger.caveats}/>
     </>:tab==='Corporate Office'&&activeLedger?<>
       <div className="r365-metrics-grid"><Metric label="Gasto corporativo identificado" value={money.format(corporateSpend)} note="Sin distribución automática"/><Metric label="Facturas AP" value={String(activeLedger.totals.apInvoices)} note="Aprobadas en el periodo"/><Metric label="Transacciones aprobadas" value={String(activeLedger.totals.approvedTransactions)} note={`${activeLedger.totals.transactions} encabezados totales`}/><Metric label="Líneas contables" value={String(activeLedger.totals.detailRows)} note="Detalle GL recuperado"/><Metric label="Cobertura" value={activeLedger.quality.transactionDetailCoveragePct===null?'—':`${activeLedger.quality.transactionDetailCoveragePct}%`} note="Encabezados con detalle" tone={activeLedger.quality.status==='ready-for-reconciliation'?'good':'warn'}/></div><QualityBanner ledger={activeLedger}/><GroupBars ledger={activeLedger} corporate/><AccountTable ledger={activeLedger} corporate/><LedgerTable ledger={activeLedger} expensesOnly/><SourceNote fetchedAt={activeLedger.fetchedAt} caveats={activeLedger.caveats}/>

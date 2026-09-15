@@ -2,11 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { beverageChunks, compareBeverages, rankBeverages, suggestBeverageGroup, suggestBeverageItem, validBeverageRange, type BeverageSource } from '../shared/beverageMetrics.js';
 import { summarizeBeverageSales, getToastBeverageSales } from './toastBeverageSales.js';
-import { getRestaurant365BeveragePurchases } from './restaurant365OData.js';
+import { getRestaurant365BeveragePurchases, invoiceFingerprint, invoiceNeedsRefresh } from './restaurant365OData.js';
 
 const source = (overrides: Partial<BeverageSource> = {}): BeverageSource => ({ location: 'Avon', start: '2026-09-02', end: '2026-09-08', fetchedAt: '2026-09-15T00:00:00Z',
   sales: { categories: [{ id: 'beer', name: 'Beer', group: 'beer', netSales: 1000, selections: 40 }], missingPrices: 0, unallocatedRefunds: 0 },
   purchases: { invoices: [{ id: 'inv1', number: '1', date: '2026-09-02', vendor: 'Example distributor', approved: true, amount: 300, kind: 'invoice', suggested: true }] }, ...overrides });
+
+test('unchanged invoice details are reused; new, modified, missing and expired details refresh',()=>{
+  const now=Date.now(), row={transactionId:'synthetic',isApproved:false,modifiedOn:'2026-09-01T00:00:00Z'};
+  const cached={fingerprint:invoiceFingerprint(row),checkedAt:new Date(now).toISOString(),invoice:source().purchases.invoices[0]};
+  assert.equal(invoiceNeedsRefresh(cached,row,now),false);
+  assert.equal(invoiceNeedsRefresh(undefined,row,now),true);
+  assert.equal(invoiceNeedsRefresh(cached,{...row,isApproved:true},now),true);
+  assert.equal(invoiceNeedsRefresh(cached,{...row,modifiedOn:'2026-09-02T00:00:00Z'},now),true);
+  assert.equal(invoiceNeedsRefresh({...cached,invoice:{...cached.invoice,amount:null}},row,now),true);
+  assert.equal(invoiceNeedsRefresh(cached,row,now+86400000),true);
+});
+test('saved stale sources retain visible amounts while waiting for ranking reconciliation',()=>{
+  const data=source();data.memory={sales:{stored:true,pending:false},purchases:{stored:true,pending:true,error:'R365 unavailable'}};
+  const result=compareBeverages('Avon',[data],1);
+  assert.equal(result.sales,1000);assert.equal(result.purchases,300);assert.equal(result.purchasePct,null);
+  assert.ok(result.issues.some(issue=>issue.includes('Actualización pendiente')));
+});
 
 test('approved purchases less credits, margin and ratio are reconciled in cents', () => {
   const data = source(); data.purchases.invoices.push({ ...data.purchases.invoices[0], id: 'credit1', amount: 50, kind: 'credit' });

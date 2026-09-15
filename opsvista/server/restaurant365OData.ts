@@ -14,6 +14,7 @@ export type Restaurant365TransactionRow = {
   id: string;
   date: string;
   createdOn?: string;
+  modifiedOn?: string;
   number?: string;
   name: string;
   type: string;
@@ -158,6 +159,7 @@ function normalized(value: string) {
 
 function mappedLocation(name: string) {
   const candidate = normalized(name);
+  if (!candidate) return undefined;
   return opsVistaLocations.find(location => {
     const expected = normalized(location);
     return candidate === expected || candidate.includes(expected) || expected.includes(candidate);
@@ -231,7 +233,7 @@ function monthPeriod(month: string):Restaurant365Period {
   return { month, start: start.toISOString().slice(0,10), endExclusive: end.toISOString().slice(0,10) };
 }
 
-function requestedPeriod(startOrMonth:string,end?:string) {
+export function requestedPeriod(startOrMonth:string,end?:string) {
   return end?datePeriod(startOrMonth,end):monthPeriod(startOrMonth);
 }
 
@@ -609,7 +611,7 @@ async function companyCatalog(credentials: Restaurant365Credentials) {
 async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string, requireComplete=false) {
   const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
   const rows = await odataAll(credentials,'Transaction',{
-    '$select':'transactionId,locationId,locationName,date,createdOn,transactionNumber,name,type,isApproved,companyId,createdBy',
+    '$select':'transactionId,locationId,locationName,date,createdOn,modifiedOn,transactionNumber,name,type,isApproved,companyId,createdBy',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
   },10_000,50,requireComplete);
   return {period,...uniqueRows(rows,['transactionId','id'])};
@@ -736,35 +738,18 @@ export async function getRestaurant365Ledger(organizationId:string, startOrMonth
 export async function getRestaurant365Ap(organizationId:string,startOrMonth:string,end?:string):Promise<Restaurant365ApSnapshot> {
   const credentials = await requiredCredentials(organizationId);
   const period=requestedPeriod(startOrMonth,end);
-  const snapshotKey=`ap:${period.start}:${period.endExclusive}`;
-  let cached:Restaurant365ApSnapshot|undefined;
-  try{cached=(await getIntegrationSnapshot<Restaurant365ApSnapshot>(organizationId,'restaurant365-odata',snapshotKey))?.payload;}catch{/* R365 remains available if snapshot storage is temporarily unavailable. */}
-  let transactionResult:Awaited<ReturnType<typeof periodTransactionRows>>;
-  try{transactionResult=await periodTransactionRows(credentials,period);}
-  catch(error){
-    if(cached)return {...cached,caveats:[...cached.caveats,'Restaurant365 no respondió en esta actualización; se muestra la última copia verificada guardada en OpsVista.']};
-    throw error;
-  }
+  const transactionResult=await periodTransactionRows(credentials,period,undefined,true);
   const apSourceRows=transactionResult.rows.filter(row=>/ap\s*invoice/i.test(stringValue(row,['type'])));
-  const cachedById=new Map((cached?.transactions||[]).map(row=>[row.id.toLowerCase(),row]));
-  const hydrateRows=apSourceRows.filter(row=>{
-    const id=transactionIdentifier(row),previous=cachedById.get(id);
-    return !previous||!booleanValue(row,['isApproved'])||previous.amount===null;
-  });
-  const [companies,detailResult]=await Promise.all([companiesForTransactions(credentials,hydrateRows),transactionDetails(credentials,hydrateRows.map(row=>stringValue(row,['transactionId','id'])))]);
-  const amounts=invoiceAmounts(detailResult.rows);
-  const liveTransactions=apSourceRows.map(row=>{
-    const transaction=transactionFromRow(row,companies),previous=cachedById.get(transaction.id.toLowerCase());
-    if(transaction.approved&&previous?.amount!==null&&previous?.amount!==undefined)return {...transaction,createdOn:transaction.createdOn||previous.createdOn,vendor:previous.vendor||transaction.vendor,createdBy:transaction.createdBy||previous.createdBy,amount:previous.amount};
-    return {...transaction,createdOn:transaction.createdOn||previous?.createdOn,vendor:transaction.vendor||previous?.vendor,createdBy:transaction.createdBy||previous?.createdBy,amount:amounts.get(transaction.id.toLowerCase())??previous?.amount??null};
-  }).filter(row=>Boolean(row.entity));
-  const liveIds=new Set(liveTransactions.map(row=>row.id.toLowerCase()));
-  const archivedApproved=(cached?.transactions||[]).filter(row=>row.approved&&!liveIds.has(row.id.toLowerCase()));
-  const transactions=[...liveTransactions,...archivedApproved].sort((left,right)=>left.date.localeCompare(right.date)||left.createdOn?.localeCompare(right.createdOn||'')||0);
+  const invoices=await persistentInvoices(organizationId,credentials,apSourceRows);
+  const invoiceMap=new Map(invoices.map(invoice=>[invoice.id,invoice]));
+  const transactions=apSourceRows.map(row=>{
+    const transaction=transactionFromRow(row,new Map());
+    const invoice=invoiceMap.get(transaction.id.toLowerCase())!;
+    return {...transaction,vendor:invoice.vendor,amount:invoice.amount,modifiedOn:stringValue(row,['modifiedOn'])};
+  }).filter(row=>Boolean(row.entity)).sort((a,b)=>a.date.localeCompare(b.date));
   const snapshot:Restaurant365ApSnapshot={provider:'restaurant365-odata',period:transactionResult.period,fetchedAt:new Date().toISOString(),transactions,
     totals:{invoices:transactions.length,approved:transactions.filter(row=>row.approved).length,pending:transactions.filter(row=>!row.approved).length,vendors:new Set(transactions.map(row=>row.vendor).filter(Boolean)).size,locations:new Set(transactions.map(row=>row.entity).filter(Boolean)).size,amount:money(transactions.reduce((sum,row)=>sum+(row.amount||0),0)),approvedAmount:money(transactions.filter(row=>row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),pendingAmount:money(transactions.filter(row=>!row.approved).reduce((sum,row)=>sum+(row.amount||0),0)),invoicesWithoutAmount:transactions.filter(row=>row.amount===null).length},
-    caveats:['Las facturas aprobadas se conservan como copia histórica en OpsVista; cada actualización consulta el estado actual y vuelve a hidratar las pendientes o nuevas.','El monto se recupera de TransactionDetail y se valida contra sus débitos y créditos.','Las facturas sin detalle contable se marcan como “sin monto”; nunca se cuentan como $0.','Aprobada en R365 no significa necesariamente pagada.','El estado exacto de pago y el archivo del recibo requieren una fuente adicional verificable de R365.',...(archivedApproved.length?[`${archivedApproved.length} facturas aprobadas históricas permanecen en la copia de OpsVista aunque R365 no las incluyó en esta lectura.`]:[])]};
-  try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',snapshotKey,snapshot);}catch{/* Do not block the live accounting view if backup persistence fails. */}
+    caveats:['Las facturas se guardan en OpsVista. Se actualizan las nuevas, modificadas y pendientes; una factura retirada de R365 deja de sumarse.','El monto se recupera de TransactionDetail y se valida contra sus débitos y créditos.','Las facturas sin detalle se muestran sin monto; nunca como $0.','Aprobada en R365 no significa necesariamente pagada.','El archivo del recibo y el estado exacto de pago requieren una fuente adicional.']};
   return snapshot;
 }
 
@@ -809,8 +794,53 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
 }
 
 
-// Separate from the historical AP screen: ranking reads current transactions,
-// rehydrates approved invoices, includes credits, and never restores vanished AP.
+type StoredInvoice = { fingerprint: string; checkedAt: string; invoice: BeverageSource['purchases']['invoices'][number] };
+export function invoiceFingerprint(row: Record<string, unknown>) {
+  return JSON.stringify(['transactionId','date','locationId','companyId','type','isApproved','modifiedOn','transactionNumber','name'].map(key => stringValue(row, [key])));
+}
+export function invoiceNeedsRefresh(cached: StoredInvoice | undefined, row: Record<string, unknown>, now = Date.now()) {
+  return !cached || cached.fingerprint !== invoiceFingerprint(row) || cached.invoice.amount === null
+    || !Number.isFinite(Date.parse(cached.checkedAt)) || now - Date.parse(cached.checkedAt) >= 86_400_000;
+}
+async function persistentInvoices(organizationId: string, credentials: Restaurant365Credentials, rows: ODataRow[]) {
+  const cached = new Map<string, StoredInvoice>();
+  await parallelMap(rows, 8, async row => {
+    const id = transactionIdentifier(row);
+    const stored = await getIntegrationSnapshot<StoredInvoice>(organizationId, 'restaurant365-odata', `invoice-v1:${id}`);
+    if (stored) cached.set(id, stored.payload);
+  });
+  const hydrate = rows.filter(row => invoiceNeedsRefresh(cached.get(transactionIdentifier(row)), row));
+  const [companies, details] = await Promise.all([
+    companiesForTransactions(credentials, hydrate), transactionDetails(credentials, hydrate.map(transactionIdentifier), true),
+  ]);
+  const amounts = invoiceAmounts(details.rows);
+  await parallelMap(hydrate, 6, async row => {
+    const transaction = transactionFromRow(row, companies), id = transaction.id.toLowerCase();
+    const vendor = transaction.vendor || 'Proveedor sin identificar';
+    const stored: StoredInvoice = { fingerprint: invoiceFingerprint(row), checkedAt: new Date().toISOString(), invoice: {
+      id, number: transaction.number, date: transaction.date.slice(0,10), vendor, approved: transaction.approved,
+      amount: amounts.get(id) ?? null, kind: /credit/i.test(transaction.type) ? 'credit' : 'invoice', suggested: suggestBeverageVendor(vendor),
+    } };
+    await saveIntegrationSnapshot(organizationId, 'restaurant365-odata', `invoice-v1:${id}`, stored);
+    cached.set(id, stored);
+  });
+  // Membership comes exclusively from the complete live header list. A removed,
+  // voided or moved invoice remains in history, but never returns to the ranking.
+  return rows.map(row => cached.get(transactionIdentifier(row))!.invoice);
+}
+
+export async function getRestaurant365Changes(organizationId: string, since: string, until: string) {
+  const credentials = await requiredCredentials(organizationId);
+  const filter = `modifiedOn ge ${since} and modifiedOn le ${until}`;
+  const [headers, details] = await Promise.all([
+    odataAll(credentials, 'Transaction', { '$select':'transactionId,modifiedOn', '$filter':filter, '$orderby':'modifiedOn,transactionId' }, 10000, 100, true),
+    odataAll(credentials, 'TransactionDetail', { '$select':'transactionId,modifiedOn', '$filter':filter, '$orderby':'modifiedOn,transactionDetailAutoId' }, 20000, 250, true),
+  ]);
+  return [...new Set([...headers, ...details].map(transactionIdentifier).filter(Boolean))];
+}
+
+// Reads current headers, but downloads detail only for changed or unverified
+// documents. All dates and locations reuse the same durable invoice record.
 export async function getRestaurant365BeveragePurchases(organizationId:string, start:string, end:string, entity:string):Promise<BeverageSource['purchases']> {
   if (!restaurantLocations.includes(entity)) throw new Error('Locación no válida para el bono');
   const credentials = await requiredCredentials(organizationId);
@@ -820,16 +850,5 @@ export async function getRestaurant365BeveragePurchases(organizationId:string, s
   const result = await periodTransactionRows(credentials, period, locations[0].id, true);
   if (result.rows.some(row => mappedLocation(stringValue(row, ['locationName'])) !== entity)) throw new Error('R365 devolvió transacciones de otra locación o sin correspondencia');
   const sourceRows = result.rows.filter(row => /^ap\s*(invoice|credit(?:\s*memo)?)$/i.test(stringValue(row, ['type']).trim()));
-  const [companies, details] = await Promise.all([
-    companiesForTransactions(credentials, sourceRows),
-    transactionDetails(credentials, sourceRows.map(row => stringValue(row, ['transactionId', 'id'])), true),
-  ]);
-  const amounts = invoiceAmounts(details.rows);
-  return { invoices: sourceRows.map(row => {
-    const transaction = transactionFromRow(row, companies);
-    const vendor = transaction.vendor || 'Proveedor sin identificar';
-    return { id: transaction.id.toLowerCase(), number: transaction.number, date: transaction.date.slice(0, 10), vendor,
-      approved: transaction.approved, amount: amounts.get(transaction.id.toLowerCase()) ?? null,
-      kind: /credit/i.test(transaction.type) ? 'credit' as const : 'invoice' as const, suggested: suggestBeverageVendor(vendor) };
-  }) };
+  return { invoices: await persistentInvoices(organizationId, credentials, sourceRows) };
 }
