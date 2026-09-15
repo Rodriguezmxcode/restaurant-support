@@ -10,7 +10,12 @@ export function hasLegacyWorkspace(user: TenantIdentity) {
 export function tenantWorkflowAllowed(user: TenantIdentity, resource: string) {
   if (resource === 'organizations') return user.role === 'Founder';
   if (hasLegacyWorkspace(user)) return true;
-  return Boolean(user.organizationId) && ['native_tasks', 'tenant_team'].includes(resource);
+  if (!user.organizationId) return false;
+  if (resource === 'native_tasks') return true;
+  if (user.role === 'Corporate') {
+    return ['tenant_team','google_business_integration','google_business_callback','google_reviews'].includes(resource);
+  }
+  return false;
 }
 
 export function parseClientSetup(body: Record<string, unknown>) {
