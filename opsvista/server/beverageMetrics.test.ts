@@ -149,3 +149,14 @@ test('beverage sales use Toast partner discovery when the configured location ma
   try { const result = await getToastBeverageSales('Avon', '2026-09-02', '2026-09-02'); assert.equal(discovered, true); assert.equal(ordered, true); assert.deepEqual(result.categories, []); }
   finally { globalThis.fetch = originalFetch; keys.forEach((key, index) => { if (saved[index] === undefined) delete process.env[key]; else process.env[key] = saved[index]; }); }
 });
+
+
+test('category product breakdown reconciles to net sales without customer information', () => {
+  const result = summarizeBeverageSales([{businessDate:20260902, checks:[{selections:[
+    {displayName:'Cola',salesCategory:{guid:'drinks'},price:8},
+    {displayName:'Cola',salesCategory:{guid:'drinks'},price:4},
+    {displayName:'Coffee',salesCategory:{guid:'drinks'},price:3},
+  ]}]}], '2026-09-02','2026-09-08',new Map([['drinks','Drinks']]));
+  assert.equal(result.categories[0].netSales,15);
+  assert.deepEqual(result.categories[0].items,[{name:'Cola',netSales:12},{name:'Coffee',netSales:3}]);
+});

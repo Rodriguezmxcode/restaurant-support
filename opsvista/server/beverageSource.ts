@@ -4,7 +4,7 @@ import { getToastBeverageSales } from './toastBeverageSales.js';
 import type { BeverageSource } from '../shared/beverageMetrics.js';
 
 export async function getBeverageSource(organizationId: string, location: string, start: string, end: string): Promise<BeverageSource> {
-  const key = `beverage-v1:${location}:${start}:${end}`;
+  const key = `beverage-v2:${location}:${start}:${end}`;
   try {
     const cached = (await getIntegrationSnapshot<BeverageSource>(organizationId, 'restaurant365-odata', key))?.payload;
     if (cached && Date.now() - Date.parse(cached.fetchedAt) < 300_000) return cached;
