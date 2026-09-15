@@ -8,7 +8,7 @@ export type BeverageScoreRow = Pick<BeverageComparison, 'location' | 'sales' | '
 };
 export type BeverageScoreResponse = {
   start: string; end: string; rows: BeverageScoreRow[];
-  readyCount: number; expectedCount: number; provisional: boolean; updatedAt?: string; error?: string;
+  readyCount: number; expectedCount: number; provisional: boolean; periodOpen?: boolean; updatedAt?: string; error?: string;
 };
 
 // Rank the fixed restaurant cohort before applying any user's location filter.

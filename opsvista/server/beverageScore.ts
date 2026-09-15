@@ -33,5 +33,8 @@ export async function getBeverageScore(organizationId: string, start: string, en
     });
   }
   const score = scoreBeverages(beverageLocations.map(location => compareBeverages(location, sources, chunks.length)));
-  return { start, end, ...score, updatedAt: sources.map(source => source.fetchedAt).filter(Boolean).sort()[0] };
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const periodOpen = end >= today;
+  return { start, end, ...score, periodOpen, provisional: score.provisional || periodOpen,
+    updatedAt: sources.map(source => source.fetchedAt).filter(Boolean).sort()[0] };
 }

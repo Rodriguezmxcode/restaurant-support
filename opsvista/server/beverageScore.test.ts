@@ -57,6 +57,13 @@ test('a single comparable restaurant cannot award itself five points', () => {
   const row = comparisons([100, 200, 300, 400, 500, 600])[0];
   assert.equal(scoreBeverages([row]).rows[0].points, null);
 });
+test('a restaurant with no orders cannot win by appearing to have zero purchases', () => {
+  const data = source('Stamford', 0); data.purchases.invoices = [];
+  const rows = comparisons([100, 200, 300, 400, 500, 600]);
+  rows[0] = compareBeverages('Stamford', [data], 1);
+  const result = scoreBeverages(rows).rows.find(row => row.location === 'Stamford')!;
+  assert.equal(result.purchasePct, null); assert.equal(result.points, null); assert.equal(result.rank, null);
+});
 test('the fixed cohort excludes Corporate Office and filtering never changes a manager rank', () => {
   const base = comparisons([100, 200, 300, 400, 500, 600]);
   const score = { start, end, ...scoreBeverages([...base, { ...base[0], location: 'Corporate Office', purchasePct: 0 }]) };
