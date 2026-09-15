@@ -8,6 +8,8 @@ import { loadSource } from '../server/sourceLoaders.js';
 import { authorizedSourceSync } from '../server/sourceSyncAuth.js';
 import { getSourceSyncStatus, runSourceSync } from '../server/sourceSync.js';
 import { requestedPeriod, getRestaurant365Status } from '../server/restaurant365OData.js';
+import { parseProviImport } from '../shared/proviReports.js';
+import { getProviReports, saveProviReports } from '../server/proviReports.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -36,6 +38,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'restaurant365:read');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const view=query(req,'view');
+      if(view==='provi')return res.status(200).json({reports:await getProviReports(organizationId),canImport:authorize(user,'integrations:manage').ok});
       if(view==='sync-status') return res.status(200).json(await getSourceSyncStatus(organizationId));
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
       const start=query(req,'start'),end=query(req,'end'),month=query(req,'month')||'2026-08';
@@ -70,6 +73,15 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'integrations:manage');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const action=text(req.body?.action);
+      if(action==='import-provi'){
+        if(!String(req.headers?.['content-type']||'').toLowerCase().startsWith('application/json'))return res.status(415).json({error:'Usa un archivo de importación válido.'});
+        let reports;
+        try{
+          if(JSON.stringify(req.body?.data).length>2_000_000)throw new Error('El archivo excede el tamaño máximo de 2 MB.');
+          reports=parseProviImport(req.body?.data);
+        }catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Archivo inválido.'});}
+        return res.status(200).json(await saveProviReports(organizationId,user.id,reports));
+      }
       if(action==='sync-now')return res.status(200).json(await runSourceSync(organizationId));
       if(action==='save'){
         const domain=text(req.body?.domain),username=text(req.body?.username),password=typeof req.body?.password==='string'?req.body.password:'';

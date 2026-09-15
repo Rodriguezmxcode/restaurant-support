@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Restaurant365IntegrationPanel from './Restaurant365IntegrationPanel';
 import CustomDateRangePicker from './CustomDateRangePicker';
+import ProviReportsPanel from './ProviReportsPanel';
 
 function SourceSyncSummary() {
   const [state,setState]=useState<{schedulerSeenAt?:string;lastSuccessAt?:string;error?:string;queue?:{stored:number;remaining:number;errors:number}}>();
@@ -22,7 +23,7 @@ function SourceSyncSummary() {
 }
 import './restaurant365.css';
 
-type Tab='Resumen'|'P&L'|'Facturas y AP'|'Corporate Office'|'Vendors'|'Cuentas GL'|'Conexión';
+type Tab='Resumen'|'P&L'|'Facturas y AP'|'Compras Provi'|'Corporate Office'|'Vendors'|'Cuentas GL'|'Conexión';
 type PeriodKey='today'|'yesterday'|'this-week'|'prior-week'|'this-month'|'prior-month'|'last-30'|'custom';
 type InvoiceStatusFilter='all'|'approved'|'pending';
 type InvoiceSort='oldest'|'newest'|'created-oldest'|'created-newest'|'highest'|'lowest'|'vendor'|'invoice'|'location'|'status';
@@ -49,7 +50,7 @@ type Ledger={
 type ApSnapshot={period:{month:string;start:string;endExclusive:string};fetchedAt:string;transactions:Transaction[];totals:{invoices:number;approved:number;pending:number;vendors:number;locations:number;amount:number;approvedAmount:number;pendingAmount:number;invoicesWithoutAmount:number};caveats:string[]};
 type Catalog={fetchedAt:string;vendors?:Array<{id:string;number?:string;name:string;comment?:string}>;accounts?:Account[];caveats?:string[]};
 
-const tabs:Tab[]=['Resumen','P&L','Facturas y AP','Corporate Office','Vendors','Cuentas GL','Conexión'];
+const tabs:Tab[]=['Resumen','P&L','Facturas y AP','Compras Provi','Corporate Office','Vendors','Cuentas GL','Conexión'];
 const entities=['Stamford','Orange','Fairfield','Danbury','Avon','Southington','Corporate Office'];
 const classLabels:Record<Classification,string>={Revenue:'Ingresos',COGS:'COGS',Labor:'Labor','Operating Expense':'Gastos operativos','Other Income':'Otros ingresos','Other Expense':'Otros gastos','Balance Sheet':'Balance general',Unclassified:'Sin clasificar'};
 const pnlSectionOrder:PnlSection[]=['Sales','Cost of Sales','Labor','Operating Expenses','Occupancy','Non-operating / Extraordinary','Balance Sheet','Review'];
@@ -229,7 +230,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
 
   useEffect(()=>{void requestJson<Status>('/api/integrations/restaurant365').then(body=>{setStatus(body);setError(body.error||'');}).catch(reason=>setError(reason instanceof Error?reason.message:'Restaurant365 no está disponible.'));},[reload]);
   useEffect(()=>{
-    if(['Resumen','Conexión'].includes(tab))return;
+    if(['Resumen','Conexión','Compras Provi'].includes(tab))return;
     const controller=new AbortController();setLoading(true);setError('');setSearch('');setSelectedInvoiceIds([]);setCopyNotice('');
     const queryEntity=tab==='Corporate Office'?'Corporate Office':entity;
     const fetchWithDailyFallback=async<T,>(view:'ledger'|'ap',chunk:{start:string;end:string},index:number,total:number)=>{
@@ -332,7 +333,7 @@ export default function Restaurant365View({canManageIntegrations}:{canManageInte
     <section className="panel r365-tabs" role="tablist" aria-label="Secciones de Restaurant365">{tabs.map(item=><button key={item} type="button" role="tab" aria-selected={tab===item} className={tab===item?'active':''} onClick={()=>setTab(item)}>{item}</button>)}</section>
     {showPeriod&&<section className="panel r365-controls"><label><span>PERIODO CONTABLE</span><select value={period} onChange={event=>setPeriod(event.target.value as PeriodKey)}>{periodOptions.map(option=><option value={option.key} key={option.key}>{option.label}</option>)}</select></label><CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={easternToday()} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo contable de Restaurant365"/>{tab==='P&L'&&<label><span>LOCACIÓN</span><select value={entity} onChange={event=>setEntity(event.target.value)}>{entities.map(item=><option key={item}>{item}</option>)}</select></label>}<div><strong>{range.label} · {rangeLabel(range.start,range.end)}</strong><span>{tab==='Corporate Office'?'Centro de costos de oficina':tab==='Facturas y AP'?'Facturas AP de las siete locaciones':'Ledger aprobado por locación'} · copia guardada en OpsVista</span></div></section>}
 
-    {tab==='Conexión'?<Restaurant365IntegrationPanel canManage={canManageIntegrations}/>:tab==='Resumen'?<>
+    {tab==='Compras Provi'?<ProviReportsPanel allowImport={canManageIntegrations}/>:tab==='Conexión'?<Restaurant365IntegrationPanel canManage={canManageIntegrations}/>:tab==='Resumen'?<>
       {error&&<ErrorState message={error} onRetry={retry}/>}<div className="r365-metrics-grid"><Metric label="Conexión" value={status?.connected?'Activa':'Pendiente'} note="Restaurant365 OData · solo lectura" tone={status?.connected?'good':'warn'}/><Metric label="Restaurantes" value={`${status?.mappedRestaurantCount??'—'} / 6`} note="Locaciones operativas" tone={status?.mappedRestaurantCount===6?'good':'warn'}/><Metric label="Corporate Office" value={status?.corporateMapped?'Mapeada':'Pendiente'} note="Centro de costos" tone={status?.corporateMapped?'good':'warn'}/><Metric label="Cuentas GL" value={status?.probes.glAccounts?'Detectadas':'Pendiente'} note="Clasificación contable" tone={status?.probes.glAccounts?'good':'warn'}/><Metric label="Transacciones" value={status?.probes.transactions?'Detectadas':'Pendiente'} note="Encabezados financieros" tone={status?.probes.transactions?'good':'warn'}/></div>
       <section className="panel r365-card"><header><div><h2>Flujo contable verificable</h2><p>Las cifras avanzan por etapas y no se publican como P&L definitivo hasta completar la conciliación.</p></div><span className="count-pill">{rangeLabel(range.start,range.end).toUpperCase()}</span></header><div className="r365-roadmap"><button onClick={()=>setTab('P&L')}><span>01</span><strong>Ledger y clasificación</strong><p>Débitos, créditos y cuentas GL por locación.</p></button><button onClick={()=>setTab('Corporate Office')}><span>02</span><strong>Corporate Office</strong><p>Gastos directos separados de los restaurantes.</p></button><button onClick={()=>setTab('Facturas y AP')}><span>03</span><strong>Facturas AP</strong><p>Aprobación, vendor, locación y responsable.</p></button><button onClick={()=>setTab('Cuentas GL')}><span>04</span><strong>Conciliación</strong><p>Comparación contra el P&L oficial de R365.</p></button></div></section>
     </>:loading&&!showingSavedAp?<Loading detail={loadingDetail}/>:error?<ErrorState message={error} onRetry={retry}/>:tab==='P&L'&&activeLedger?<>
