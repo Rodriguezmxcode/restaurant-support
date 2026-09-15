@@ -19,7 +19,8 @@
     "react": "latest",
     "react-dom": "latest",
     "typescript": "5.9.3",
-    "vite": "latest"
+    "vite": "latest",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
