@@ -108,6 +108,15 @@ export async function saveIntegrationSnapshot<T>(organizationId:string,provider:
   `;
 }
 
+export async function invalidateInvoiceSnapshots(organizationId: string, ids: string[]) {
+  if (!ids.length) return;
+  await ensureSchema();
+  await sql()`update opsvista_integration_snapshots
+    set payload=jsonb_set(payload,'{checkedAt}','"1970-01-01T00:00:00.000Z"'::jsonb)
+    where organization_id=${organizationId} and provider='restaurant365-odata'
+      and snapshot_key in ${sql()(ids.map(id => `invoice-v1:${id.toLowerCase()}`))}`;
+}
+
 export async function getGoogleBusinessCredentials(organizationId: string): Promise<GoogleBusinessCredentials | null> {
   await ensureSchema();
   const rows = await sql()`

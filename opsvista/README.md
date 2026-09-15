@@ -88,3 +88,36 @@ The Action Center metrics and alerts in this branch are representative demo valu
 ## Safety
 
 This work lives on `opsvista-migration-v1` and does not replace the current production Site. Production should only be switched after live integrations, authentication, permissions, and regression checks are completed.
+# Persistent source synchronization
+
+R365 AP, ledger, catalogs and beverage comparisons now read durable PostgreSQL
+snapshots. Opening a previously loaded period does not call the external source.
+Existing AP/beverage snapshots are migrated on first access without downloading
+them again. A new period is registered for background refresh; failed refreshes
+retain the last successful payload and disclose pending status.
+
+Invoice detail is shared across periods by organization and R365 transaction ID.
+New/modified headers, modified detail records, missing amounts and the nightly
+reconciliation cause detail refresh. Complete live header membership prevents
+removed/moved invoices from reappearing in current totals. The old record remains
+in storage. Pending source data never receives a beverage ranking position.
+
+`.github/workflows/opsvista-source-sync.yml` must be present on the default `main`
+branch. It runs approximately every 30 minutes (GitHub schedules may be delayed),
+with nightly refresh due at 07:30 UTC: 03:30 EDT / 02:30 EST. The persistent queue
+resumes after timeouts and retries source failures in 30 minutes. It also tracks
+the current AP month before anyone opens it. The OData change cursor advances only
+after complete header and detail feeds and durable invalidation succeed.
+
+The worker authenticates using a short-lived GitHub OIDC token, validating its
+signature, issuer, audience, immutable repository/owner IDs, branch, workflow,
+subject, event and expiry. No deployment or R365 secrets belong in GitHub. Its
+response contains queue counters only. Production remains on the migration
+branch; adding the scheduler to `main` does not merge the application there.
+
+Verification: `npm run test:source-sync` uses PostgreSQL via PGlite and synthetic
+data to check persistence, cache reuse, tenant isolation, migration, failed
+refreshes, retries and leases; it also verifies scheduler signatures/claims.
+`npm run test:beverage-bonus` covers invoice updates, credits and ranking gates.
+`GET /api/restaurant365?view=sync-status` requires existing R365 access and exposes
+last successful detection, scheduler heartbeat, backlog and error counts.

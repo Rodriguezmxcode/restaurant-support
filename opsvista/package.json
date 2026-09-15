@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test:notification-email": "node scripts/test-notification-email.mjs",
     "preview": "vite preview --host 0.0.0.0",
-    "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs"
+    "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs",
+    "test:source-sync": "node scripts/test-source-sync.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -21,6 +22,8 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^24.13.4",
     "@types/react": "latest",
     "@types/react-dom": "latest"
   }
