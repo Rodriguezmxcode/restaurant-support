@@ -63,13 +63,13 @@ export function suggestCorporateClassification(description:string,vendor=''):{se
   if(/budget|presupuesto|forecast/.test(all))return{section:'Review',category:'Budget / Forecast (excluded)',includeInPnl:false,confidence:'review'};
   if(/corporate office.*rent|rent.*corporate|renta corporativa/.test(all))return{section:'Occupancy',category:'Corporate Office Rent',includeInPnl:true,confidence:'auto'};
   if(/rent|lease|occupancy|common area|\bcam\b/.test(all))return{section:'Occupancy',category:'Other Occupancy',includeInPnl:true,confidence:'auto'};
+  if(/toast.*service|payroll processing|servicio toast|saas fee/.test(all))return{section:'Operating Expenses',category:'Payroll Processing',includeInPnl:true,confidence:'auto'};
   if(/employer tax|payroll tax|impuestos patronales|\ber\b.*tax/.test(all))return{section:'Labor',category:'Employer Payroll Taxes',includeInPnl:true,confidence:'auto'};
   if(/wage|salary|gross pay|sueldos brutos/.test(all))return{section:'Labor',category:'Wages & Salaries',includeInPnl:true,confidence:'auto'};
   if(/payroll|nomina|nómina|tax collect/.test(all))return{section:'Labor',category:'Payroll / Labor',includeInPnl:true,confidence:'auto'};
-  if(/toast.*service|payroll processing|servicio toast/.test(all))return{section:'Operating Expenses',category:'Payroll Processing',includeInPnl:true,confidence:'auto'};
   if(/food|produce|seafood|meat|grocery|kitchen|chef warehouse|performance food|sysco/.test(all))return{section:'COGS',category:'Food COGS',includeInPnl:true,confidence:'auto'};
   if(/liquor|alcohol|beer|wine|beverage|provi/.test(all))return{section:'COGS',category:'Alcohol / Beverage COGS',includeInPnl:true,confidence:'auto'};
-  if(/at and t|at&t|telecom|telephone|internet|comcast|optimum|cox communication/.test(all))return{section:'Operating Expenses',category:'Telecommunications',includeInPnl:true,confidence:'auto'};
+  if(/\batt\b|at and t|at&t|telecom|telephone|internet|comcast|optimum|cox communication/.test(all))return{section:'Operating Expenses',category:'Telecommunications',includeInPnl:true,confidence:'auto'};
   if(/bank fee|service charge|comision bancaria|comisión bancaria|chase fee/.test(all))return{section:'Operating Expenses',category:'Bank Fees',includeInPnl:true,confidence:'auto'};
   if(/toast|jolt|resy|zendesk|software|technology|\bpos\b/.test(all))return{section:'Operating Expenses',category:'Technology / Software',includeInPnl:true,confidence:'auto'};
   if(/bookkeep|accounting|\bcpa\b|contador/.test(all))return{section:'Operating Expenses',category:'Accounting / Bookkeeping',includeInPnl:true,confidence:'auto'};
