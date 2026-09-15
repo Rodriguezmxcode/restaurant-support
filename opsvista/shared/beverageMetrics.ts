@@ -29,11 +29,20 @@ const nonAlcoholicItems = new Set([
   'milk','chocolate milk','chololate milk','soft drinks','hot chocolate','cafe','coffee','regular coffee','employee coffee','cappuccino','cappucinno','espresso','double espresso','americano','latte','cafe mocha',
   'saratoga','saratoga small','saratoga sparkling','saratoga sparkling water','saratoga still','saratoga still water','still water','san pelegrino lg',
   'topochico mineral','topochico mineral small','red bull','dr pepper','arnold palmer','jugo de naranja natural',
+  'decaf','pelegrino','pelegrino lg','water still','still saratoga','jugo de naraja','topocchico mineral tall','odouls',
+  'side ground beef','tortilla chips','3 estrellados well','botella clase azul vacia','cantarito glass','glass',
 ]);
 export function suggestBeverageItem(name: string, category: BeverageGroup): BeverageGroup {
   if (category === 'excluded') return 'excluded';
   const value = normalize(name).replace(/ kd$/, '');
-  if (/\b(virgin|virgen|virgyn|vrgn|non alcoholic|nonalcoholic|sin alcohol)\b/.test(value) || /\bheineken (zero|0 0)\b/.test(value) || nonAlcoholicItems.has(value)) return 'excluded';
+  if (/\b(virgin|virgen|virgyn|virgyin|vrgn|vrng|vgrn|mocktail|mocktails|non alcoholic|nonalcoholic|sin alcohol)\b/.test(value) || /\bheineken (zero|0 0)\b/.test(value) || nonAlcoholicItems.has(value)) return 'excluded';
+  if (['mudslide','titos sour','clase azul plata','blue hawaian','frenchmartini','caipirihna'].includes(value)) return 'spirits';
+  if (value==='mimosa') return 'wine';
+  if (value==='high noon') return 'alcohol';
+  // Alcohol content confirmed by the operator; combined until the recipe's
+  // spirits/wine breakdown is verified.
+  if (['all dragons','oasis','miami b','tita','cristalino 50'].includes(value)) return 'alcohol';
+  if (['tecate','beer','cheladas'].includes(value)) return 'beer';
   if (/\b(margarita|martini|mojito|daiquiri|daquiri|cosmopolitan|tequila)\b/.test(value) || /^lalo(?: |$)/.test(value)) return 'spirits';
   if (/\b(corona|modelo|pacifico|blue moon|heineken|stella|xx lager|xx amber|dogfish|lagunitas|two roads|budlight|bud light|coors light|miller light|michelob|amstel|victoria)\b/.test(value)) return 'beer';
   if (/\b(cabernet|chardonnay|merlot|pinot|tempranillo|prosecco|cava|13 celsius|minimalista|chateau|cote des roses|argento|los vascos|decoy)\b/.test(value)) return 'wine';
@@ -42,6 +51,7 @@ export function suggestBeverageItem(name: string, category: BeverageGroup): Beve
 const suggestedVendors = new Set([
   'Brescome Barton Inc.', 'Connecticut Distributors Inc.', 'Eder-Goodman Fine Wine and Spirits',
   'Martignetti Companies - CT', 'Northeast Beverage of Connecticut', 'Star Distributors Inc. - Connecticut',
+  'Allan S Goodman Inc', 'Hartford Distributors, Inc.', 'Dichello Distributors Inc',
 ].map(normalize));
 export const suggestBeverageVendor = (name: string) => suggestedVendors.has(normalize(name));
 export function addDays(day: string, amount: number) {
@@ -98,7 +108,7 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
       if (invoice.vendor === 'Proveedor sin identificar' && vendors[invoice.vendor] === undefined) { purchasesReady = false; issues.push('Identificar proveedor de R365'); }
       if (seen.has(invoice.id)) continue;
       seen.add(invoice.id);
-      if (!(vendors[invoice.vendor] ?? invoice.suggested)) continue;
+      if (!(vendors[invoice.vendor] ?? (invoice.suggested || suggestBeverageVendor(invoice.vendor)))) continue;
       matched++;
       if (invoice.amount === null || !Number.isFinite(invoice.amount)) { purchasesReady = false; issues.push('Factura seleccionada sin monto'); continue; }
       const amount = (invoice.kind === 'credit' ? -1 : 1) * Math.abs(invoice.amount);

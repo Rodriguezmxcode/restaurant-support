@@ -18,6 +18,19 @@ test('unchanged invoice details are reused; new, modified, missing and expired d
   assert.equal(invoiceNeedsRefresh({...cached,invoice:{...cached.invoice,amount:null}},row,now),true);
   assert.equal(invoiceNeedsRefresh(cached,row,now+86400000),true);
 });
+test('saved invoices include newly recognized distributors without redownloading history',()=>{
+  const data=source();data.purchases.invoices=[{...data.purchases.invoices[0],vendor:'Allan S Goodman Inc',suggested:false}];
+  assert.equal(compareBeverages('Avon',[data],1).purchases,300);
+  assert.equal(compareBeverages('Avon',[data],1,{}, {'Allan S Goodman Inc':false}).purchases,null);
+});
+test('known products in mixed Drinks are classified while ambiguous menu names remain unresolved',()=>{
+  for(const item of ['Decaf','Pelegrino Lg','Botella Clase Azul Vacia','Tortilla Chips','Pina Col Vrng','Mangonada Mocktail'])assert.equal(suggestBeverageItem(item,'unclassified'),'excluded');
+  assert.equal(suggestBeverageItem('Tecate','unclassified'),'beer');
+  assert.equal(suggestBeverageItem('Mudslide','unclassified'),'spirits');
+  assert.equal(suggestBeverageItem('Oasis','unclassified'),'alcohol');
+  assert.equal(suggestBeverageItem('All.dragons','unclassified'),'alcohol');
+  assert.equal(suggestBeverageItem('Unidentified house special','unclassified'),'unclassified');
+});
 test('saved stale sources retain visible amounts while waiting for ranking reconciliation',()=>{
   const data=source();data.memory={sales:{stored:true,pending:false},purchases:{stored:true,pending:true,error:'R365 unavailable'}};
   const result=compareBeverages('Avon',[data],1);

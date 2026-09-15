@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
+import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, suggestBeverageVendor, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
 
 const usd = (value: number | null) => value === null ? 'Sin conciliar' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const pct = (value: number | null) => value === null ? '—' : `${value.toFixed(2)}%`;
@@ -68,7 +68,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
   }, [sources]);
   const invoiceRows = useMemo(() => {
     const all = new Map<string, BeverageSource['purchases']['invoices'][number] & { location: string }>();
-    for (const source of sources) for (const invoice of source.purchases.invoices) all.set(`${source.location}:${invoice.id}`, { ...invoice, location: source.location });
+    for (const source of sources) for (const invoice of source.purchases.invoices) all.set(`${source.location}:${invoice.id}`, { ...invoice, suggested: invoice.suggested || suggestBeverageVendor(invoice.vendor), location: source.location });
     return [...all.values()].sort((a, b) => a.location.localeCompare(b.location) || a.date.localeCompare(b.date));
   }, [sources]);
   const vendorRows = useMemo(() => {
