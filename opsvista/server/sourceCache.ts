@@ -81,6 +81,11 @@ export async function dirtyR365Sources(organizationId: string) {
   await db()`update opsvista_source_cache set dirty_at=now(),next_refresh_at=now()
     where organization_id=${organizationId} and provider like 'r365-%'`;
 }
+export async function queueSourceRefresh(organizationId: string, key: string) {
+  await schema();
+  await db()`update opsvista_source_cache set dirty_at=now(),next_refresh_at=now()
+    where organization_id=${organizationId} and source_key=${key}`;
+}
 export async function sourceQueueStatus(organizationId: string) {
   await schema(); const [row] = await db()`select count(*)::int as tracked,
     count(*) filter (where payload is not null)::int as stored,

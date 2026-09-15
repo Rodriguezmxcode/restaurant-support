@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { beverageLocations, compareBeverages, type BeverageSource } from '../shared/beverageMetrics.js';
 import { scoreBeverages } from '../shared/beverageScore.js';
+import { closedBonusWeek, scheduledBonusWeek } from '../shared/bonusWeek.js';
 import { calculateWeeklyBonus } from '../src/bonusEngine.js';
 import { authorize } from './authorization.js';
 import type { SessionUser } from './authSession.js';
@@ -17,6 +18,7 @@ mock.module('postgres', { defaultExport: () => sql });
 process.env.OPSVISTA_DATABASE_URL = 'postgres://synthetic-test';
 const { getBeverageScore, visibleBeverageScore } = await import('./beverageScore.js');
 const cache = await import('./sourceCache.js');
+const { prepareClosedBonusWeek } = await import('./bonusWeek.js');
 const start = '2026-01-07', end = '2026-01-13';
 function source(location: string, amount: number): BeverageSource {
   return { location, start, end, fetchedAt: '2026-01-14T12:00:00Z',
@@ -63,6 +65,29 @@ test('a restaurant with no orders cannot win by appearing to have zero purchases
   rows[0] = compareBeverages('Stamford', [data], 1);
   const result = scoreBeverages(rows).rows.find(row => row.location === 'Stamford')!;
   assert.equal(result.purchasePct, null); assert.equal(result.points, null); assert.equal(result.rank, null);
+});
+test('weekly cutoff waits until Wednesday in Connecticut and the scheduler honors DST', () => {
+  assert.deepEqual(closedBonusWeek(new Date('2026-09-16T03:59:00Z')), { start: '2026-09-02', end: '2026-09-08' });
+  assert.deepEqual(closedBonusWeek(new Date('2026-09-16T04:00:00Z')), { start: '2026-09-09', end: '2026-09-15' });
+  assert.equal(scheduledBonusWeek(new Date('2026-09-16T07:29:00Z')), undefined);
+  assert.deepEqual(scheduledBonusWeek(new Date('2026-09-16T07:30:00Z')), { start: '2026-09-09', end: '2026-09-15' });
+  assert.equal(scheduledBonusWeek(new Date('2026-11-04T08:29:00Z')), undefined);
+  assert.deepEqual(scheduledBonusWeek(new Date('2026-11-04T08:30:00Z')), { start: '2026-10-28', end: '2026-11-03' });
+});
+test('Wednesday prepares both sources for six locations once; Thursday keeps the same week open for updates', async () => {
+  await prepareClosedBonusWeek('weekly-test', new Date('2026-09-16T07:29:00Z'));
+  assert.equal((await cache.readSavedSources('weekly-test', 'r365-beverage')).length, 0);
+  await prepareClosedBonusWeek('weekly-test', new Date('2026-09-16T07:37:00Z'));
+  const saved = await cache.readSavedSources('weekly-test', 'r365-beverage');
+  assert.equal(saved.length, 6); assert.equal((await cache.readSavedSources('weekly-test', 'toast-beverage')).length, 6);
+  assert.ok(saved.every(job => job.params.start === '2026-09-09' && job.params.end === '2026-09-15'));
+  const claimed = await cache.claimSource('weekly-test', saved[0].key); assert.ok(claimed);
+  await cache.finishSource(claimed!, { invoices: [] }, new Date().toISOString());
+  await prepareClosedBonusWeek('weekly-test', new Date('2026-09-17T12:00:00Z'));
+  assert.equal((await cache.readSavedSources('weekly-test', 'r365-beverage')).find(job => job.key === saved[0].key)?.due, false);
+  // A user-requested update can still enqueue the completed week on Thursday.
+  await cache.queueSourceRefresh('weekly-test', saved[0].key);
+  assert.equal((await cache.readSavedSources('weekly-test', 'r365-beverage')).find(job => job.key === saved[0].key)?.due, true);
 });
 test('the fixed cohort excludes Corporate Office and filtering never changes a manager rank', () => {
   const base = comparisons([100, 200, 300, 400, 500, 600]);
