@@ -52,7 +52,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   },
   Corporate: {
     modules: allModules,
-    allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: false,
+    allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: true,
     canRunAutomation: true, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
   },

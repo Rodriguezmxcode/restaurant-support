@@ -366,7 +366,7 @@ async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:Non
 async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  const origin=publicOrigin(req.headers||{});const redirect=(status:'connected'|'error',message?:string)=>{if(!res.setHeader||!res.end)throw new Error('Google callback redirect is unavailable');const suffix=message?`&message=${encodeURIComponent(message)}`:'';res.setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);res.status(302).end?.();};
  try{
-  if(user.role!=='Founder')throw new Error('Founder session is required to connect Google Business');
+  if(!['Founder','Corporate'].includes(user.role))throw new Error('Founder or Corporate session is required to connect Google Business');
   const providerError=q(req,'error');if(providerError)throw new Error(q(req,'error_description')||providerError);
   const state=verifyOAuthState(q(req,'state'));if(state.userId!==user.id)throw new Error('Google authorization belongs to a different OpsVista session');
   const credential=await getGoogleBusinessCredentials(state.organizationId);if(!credential)throw new Error('Google OAuth client is not saved in OpsVista');
