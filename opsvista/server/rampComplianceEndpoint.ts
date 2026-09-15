@@ -235,7 +235,9 @@ export async function getRampCompliancePayload(
   const normalized = transactions
     .map(tx => {
       const user = usersById.get(transactionUserId(tx) || '');
-      const rampUserReferences = user ? userReferences(user) : {};
+      const rampUserReferences: ReturnType<typeof userReferences> = user
+        ? userReferences(user)
+        : { cardholder: undefined, role: undefined, department: undefined, location: undefined, entity: undefined };
       const transactionDepartment = asObject(tx.department);
       const transactionLocation = asObject(tx.location);
       const userDepartment = asObject(user?.department);
@@ -284,49 +286,40 @@ export async function getRampCompliancePayload(
         enrichedTx,
         memo,
         receipt,
-        rampUserReferences,
+        {
+          cardholder: rampUserReferences.cardholder,
+          role: rampUserReferences.role,
+          department: officialDepartment,
+          location: officialLocation,
+          entity: rampUserReferences.entity,
+        },
       );
-      const managed = transactionEmails(tx).map(email => managedByEmail.get(email)).find(Boolean)
+      const directoryUser = transactionEmails(tx).map(email => managedByEmail.get(email)).find(Boolean)
         || managedByName.get(normalizeIdentity(initial.cardholder));
-      if (!managed) return initial;
+      if (!directoryUser) return initial;
       directoryMatchedTransactions += 1;
-      return normalizeRampTransaction(enrichedTx, memo, receipt, {
-        cardholder: initial.cardholder || managed.name,
-        role: initial.role || managedRole(managed),
-        department: initial.department || managedDepartment(managed),
-        location: initial.restaurant || managedLocation(managed),
-        entity: initial.entity,
-      });
+      return {
+        ...initial,
+        cardholder: directoryUser.name || initial.cardholder,
+        role: managedRole(directoryUser) || initial.role,
+        department: managedDepartment(directoryUser) || initial.department,
+        verifiedRestaurant: managedLocation(directoryUser) || initial.verifiedRestaurant,
+      };
     })
-    .filter(tx => tx.id && tx.date >= range.fromDate && tx.date <= range.toDate);
+    .filter(tx => tx.date >= range.fromDate && tx.date <= range.toDate);
 
-  const allowedLocationNames = Array.from(new Set((access?.allowedLocations ?? []).map(location=>location.trim()).filter(Boolean)));
-  const scopedTransactions = access?.locationScoped
-    ? scopeRampTransactionsForLocations(normalized,allowedLocationNames)
-    : normalized;
-  const scopedCardholders = new Set(scopedTransactions.map(tx=>tx.cardholder?.trim()).filter(Boolean));
-  const responseTransactions = access?.locationScoped ? scopedTransactions.map(managerSafeTransaction) : scopedTransactions;
+  const scoped = scopeRampTransactionsForLocations(
+    normalized,
+    access?.allowedLocations || [],
+    Boolean(access?.locationScoped),
+  );
 
   return {
-    source: 'live' as const,
-    fetchedAt: new Date().toISOString(),
-    fromDate: range.fromDate,
-    toDate: range.toDate,
-    serverVersion: 'ramp-live-v6-reference-scope',
-    rawTransactionCount: access?.locationScoped ? scopedTransactions.length : transactions.length,
-    accessScope: {
-      mode: access?.locationScoped ? 'location' as const : 'portfolio' as const,
-      locations: access?.locationScoped ? allowedLocationNames : [],
-      verifiedLocationOnly: Boolean(access?.locationScoped),
-    },
-    userEnrichment: {
-      available: users.length > 0,
-      userCount: access?.locationScoped ? scopedCardholders.size : users.length,
-      matchedTransactions: scopedTransactions.filter(tx => Boolean(tx.cardholder)).length,
-      directoryMatchedTransactions: access?.locationScoped ? undefined : directoryMatchedTransactions,
-      warning: access?.locationScoped ? undefined : userEnrichmentWarning,
-    },
-    warning: access?.locationScoped ? undefined : userEnrichmentWarning,
-    transactions: responseTransactions,
+    source:'Ramp',
+    range,
+    transactions:access?.locationScoped ? scoped.map(managerSafeTransaction) : scoped,
+    transactionCount:scoped.length,
+    directoryMatchedTransactions,
+    userEnrichmentWarning,
   };
 }
