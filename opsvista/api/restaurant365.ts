@@ -1,3 +1,5 @@
+import { beverageLocations, validBeverageRange } from '../shared/beverageMetrics.js';
+import { getBeverageSource } from '../server/beverageSource.js';
 import { readSession } from '../server/authSession.js';
 import { authorize } from '../server/authorization.js';
 import { disconnectRestaurant365, saveRestaurant365Credentials } from '../server/integrationStore.js';
@@ -28,6 +30,11 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
       const start=query(req,'start'),end=query(req,'end'),month=query(req,'month')||'2026-08';
       if(Boolean(start)!==Boolean(end))return res.status(400).json({error:'Selecciona una fecha inicial y final para Restaurant365.',requestId});
+      if(view==='beverage') {
+        const entity=query(req,'entity');
+        if(!validBeverageRange(start,end)||!beverageLocations.includes(entity)) return res.status(400).json({error:'Selecciona una locación y un periodo válido de hasta siete días.',requestId});
+        return res.status(200).json(await getBeverageSource(organizationId,entity,start,end));
+      }
       if(view==='ledger')return res.status(200).json(await getRestaurant365Ledger(organizationId,start||month,query(req,'entity')||'Corporate Office',start?end:undefined));
       if(view==='ap')return res.status(200).json(await getRestaurant365Ap(organizationId,start||month,start?end:undefined));
       if(view==='vendors'||view==='accounts')return res.status(200).json(await getRestaurant365Catalog(organizationId,view));

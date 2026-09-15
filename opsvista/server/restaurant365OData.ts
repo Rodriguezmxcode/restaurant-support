@@ -1,3 +1,4 @@
+import { suggestBeverageVendor, type BeverageSource } from '../shared/beverageMetrics.js';
 import { getIntegrationSnapshot, getRestaurant365Credentials, saveIntegrationSnapshot, type Restaurant365Credentials } from './integrationStore.js';
 
 const DEFAULT_BASE_URL = 'https://odata.restaurant365.net/api/v2/views';
@@ -266,14 +267,15 @@ async function odata(credentials: Restaurant365Credentials, view: ODataView, par
   return responseRows(await response.json());
 }
 
-async function odataAll(credentials: Restaurant365Credentials, view: ODataView, params: Record<string, string>, maxRows = 10_000, requestedPageSize = 500) {
+async function odataAll(credentials: Restaurant365Credentials, view: ODataView, params: Record<string, string>, maxRows = 10_000, requestedPageSize = 500, requireComplete = false) {
   const pageSize = Math.max(1,Math.min(500,requestedPageSize));
   const rows: ODataRow[] = [];
   for (let skip = 0; skip < maxRows; skip += pageSize) {
     const page = await odata(credentials, view, { ...params, '$top': String(Math.min(pageSize,maxRows-skip)), '$skip': String(skip) });
     rows.push(...page);
-    if (page.length < pageSize) break;
+    if (page.length < pageSize) return rows;
   }
+  if (requireComplete) throw new Error(`${view}: lectura incompleta por límite de paginación`);
   return rows;
 }
 
@@ -449,7 +451,7 @@ async function companiesForTransactions(credentials:Restaurant365Credentials,row
     '$select':'companyId,name',
     '$filter':batch.map(id=>`companyId eq ${id}`).join(' or '),
   },200,50));
-  return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
+  return new Map(pages.flat().map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])] as const).filter(([id,name])=>id&&name));
 }
 
 const glAccountFields='glAccountAutoId,glAccountId,glAccountNumber,name,glType,operationalCategory,locationName';
@@ -600,26 +602,26 @@ async function locationCatalog(credentials: Restaurant365Credentials) {
 
 async function companyCatalog(credentials: Restaurant365Credentials) {
   const rows = await odataAll(credentials,'Company',{'$select':'companyId,companyNumber,name,comment','$orderby':'name,companyId'},10_000,250);
-  const companies = new Map(rows.map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])]).filter(([id,name])=>id&&name));
+  const companies = new Map(rows.map(row=>[stringValue(row,['companyId','id']).toLowerCase(),stringValue(row,['name'])] as const).filter(([id,name])=>id&&name));
   return {rows,companies};
 }
 
-async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string) {
+async function periodTransactionRows(credentials: Restaurant365Credentials, period:Restaurant365Period, locationId?:string, requireComplete=false) {
   const locationFilter = locationId ? ` and locationId eq ${locationId}` : '';
   const rows = await odataAll(credentials,'Transaction',{
     '$select':'transactionId,locationId,locationName,date,createdOn,transactionNumber,name,type,isApproved,companyId,createdBy',
     '$filter':`date ge ${period.start}T00:00:00Z and date lt ${period.endExclusive}T00:00:00Z${locationFilter}`,
-  },10_000,50);
+  },10_000,50,requireComplete);
   return {period,...uniqueRows(rows,['transactionId','id'])};
 }
 
-async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[]) {
+async function transactionDetails(credentials: Restaurant365Credentials, transactionIds:string[], requireComplete=false) {
   const ids=Array.from(new Set(transactionIds.map(odataIdentifier).filter(Boolean)));
   const batches = chunks(ids,10);
   const pages = await parallelMap(batches,1,batch=>odataAll(credentials,'TransactionDetail',{
     '$select':'transactionDetailAutoId,transactionDetailId,transactionId,glAccountId,credit,debit,amount,comment',
     '$filter':batch.map(id=>`transactionId eq ${id}`).join(' or '),
-  },2_000,100));
+  },2_000,100,requireComplete));
   const batchRows=pages.flat();
   const recoveredIds=new Set(batchRows.map(transactionIdentifier).filter(Boolean));
   const missingIds=ids.filter(id=>!recoveredIds.has(id.toLowerCase()));
@@ -629,7 +631,7 @@ async function transactionDetails(credentials: Restaurant365Credentials, transac
   // invoices with the documented single-ID request and the full response schema.
   const fallbackPages=await parallelMap(missingIds,6,id=>odataAll(credentials,'TransactionDetail',{
     '$filter':`transactionId eq ${id}`,
-  },1_000,250));
+  },1_000,250,requireComplete));
   return uniqueRows([...batchRows,...fallbackPages.flat()],['transactionDetailAutoId','transactionDetailId']);
 }
 
@@ -804,4 +806,30 @@ export async function getRestaurant365Catalog(organizationId:string,kind:'vendor
   const snapshot:Restaurant365CatalogSnapshot={provider:'restaurant365-odata',fetchedAt:new Date().toISOString(),accounts,caveats};
   if(accounts.length)try{await saveIntegrationSnapshot(organizationId,'restaurant365-odata',snapshotKey,snapshot);}catch{/* Keep the live view available if backup persistence fails. */}
   return snapshot;
+}
+
+
+// Separate from the historical AP screen: ranking reads current transactions,
+// rehydrates approved invoices, includes credits, and never restores vanished AP.
+export async function getRestaurant365BeveragePurchases(organizationId:string, start:string, end:string, entity:string):Promise<BeverageSource['purchases']> {
+  if (!restaurantLocations.includes(entity)) throw new Error('Locación no válida para el bono');
+  const credentials = await requiredCredentials(organizationId);
+  const locations = (await odataAll(credentials, 'Location', {}, 500, 100, true)).map(locationFromRow).filter(row => row.opsVistaLocation === entity);
+  if (locations.length !== 1) throw new Error(`R365: correspondencia de ${entity} no es única`);
+  const period = requestedPeriod(start, end);
+  const result = await periodTransactionRows(credentials, period, locations[0].id, true);
+  if (result.rows.some(row => mappedLocation(stringValue(row, ['locationName'])) !== entity)) throw new Error('R365 devolvió transacciones de otra locación o sin correspondencia');
+  const sourceRows = result.rows.filter(row => /^ap\s*(invoice|credit(?:\s*memo)?)$/i.test(stringValue(row, ['type']).trim()));
+  const [companies, details] = await Promise.all([
+    companiesForTransactions(credentials, sourceRows),
+    transactionDetails(credentials, sourceRows.map(row => stringValue(row, ['transactionId', 'id'])), true),
+  ]);
+  const amounts = invoiceAmounts(details.rows);
+  return { invoices: sourceRows.map(row => {
+    const transaction = transactionFromRow(row, companies);
+    const vendor = transaction.vendor || 'Proveedor sin identificar';
+    return { id: transaction.id.toLowerCase(), number: transaction.number, date: transaction.date.slice(0, 10), vendor,
+      approved: transaction.approved, amount: amounts.get(transaction.id.toLowerCase()) ?? null,
+      kind: /credit/i.test(transaction.type) ? 'credit' as const : 'invoice' as const, suggested: suggestBeverageVendor(vendor) };
+  }) };
 }

@@ -8,7 +8,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test:notification-email": "node scripts/test-notification-email.mjs",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
