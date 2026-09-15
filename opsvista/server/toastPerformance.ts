@@ -214,7 +214,7 @@ async function discoverToastLocations():Promise<Record<string,string>>{
   return locations;
 }
 
-async function resolvedToastLocationEntries(requestedLocations?:string[]){
+export async function resolvedToastLocationEntries(requestedLocations?:string[]){
   if(!standardToastConfigured())throw new Error('Toast Standard API is not configured in OpsVista');
   let locationMap=toastLocations();
   if(!Object.keys(locationMap).length)locationMap=await discoverToastLocations();

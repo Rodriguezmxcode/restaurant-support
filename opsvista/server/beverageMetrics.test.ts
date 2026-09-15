@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { beverageChunks, compareBeverages, rankBeverages, suggestBeverageGroup, validBeverageRange, type BeverageSource } from '../shared/beverageMetrics.js';
-import { summarizeBeverageSales } from './toastBeverageSales.js';
+import { summarizeBeverageSales, getToastBeverageSales } from './toastBeverageSales.js';
 import { getRestaurant365BeveragePurchases } from './restaurant365OData.js';
 
 const source = (overrides: Partial<BeverageSource> = {}): BeverageSource => ({ location: 'Avon', start: '2026-09-02', end: '2026-09-08', fetchedAt: '2026-09-15T00:00:00Z',
@@ -130,4 +130,22 @@ test('R365 reads current approved amounts, credits and pending invoices without 
     globalThis.fetch = originalFetch;
     keys.forEach((key, index) => { if (saved[index] === undefined) delete process.env[key]; else process.env[key] = saved[index]; });
   }
+});
+
+
+test('beverage sales use Toast partner discovery when the configured location map is empty', async () => {
+  const keys = ['TOAST_API_HOST', 'TOAST_CLIENT_ID', 'TOAST_CLIENT_SECRET', 'TOAST_LOCATION_GUIDS_JSON'];
+  const saved = keys.map(key => process.env[key]);
+  process.env.TOAST_API_HOST = 'https://synthetic.toast.invalid'; process.env.TOAST_CLIENT_ID = 'synthetic'; process.env.TOAST_CLIENT_SECRET = 'synthetic-test-only'; process.env.TOAST_LOCATION_GUIDS_JSON = '{}';
+  const originalFetch = globalThis.fetch;
+  let discovered = false, ordered = false;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/authentication/login')) return new Response(JSON.stringify({token:{accessToken:'synthetic-test-only',expiresIn:300}}));
+    if (url.pathname === '/partners/v1/restaurants') { discovered = true; return new Response(JSON.stringify([{restaurantGuid:'00000000-0000-0000-0000-000000000001',restaurantName:'Puerto Vallarta Avon'}])); }
+    if (url.pathname === '/orders/v2/ordersBulk') { ordered = true; assert.equal((init?.headers as Record<string,string>)['Toast-Restaurant-External-ID'], '00000000-0000-0000-0000-000000000001'); return new Response('[]'); }
+    throw new Error('Unexpected synthetic Toast request');
+  };
+  try { const result = await getToastBeverageSales('Avon', '2026-09-02', '2026-09-02'); assert.equal(discovered, true); assert.equal(ordered, true); assert.deepEqual(result.categories, []); }
+  finally { globalThis.fetch = originalFetch; keys.forEach((key, index) => { if (saved[index] === undefined) delete process.env[key]; else process.env[key] = saved[index]; }); }
 });

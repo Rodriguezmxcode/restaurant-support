@@ -1,4 +1,5 @@
-import { standardToastRequest, toastLocations } from './toastClient.js';
+import { standardToastRequest } from './toastClient.js';
+import { resolvedToastLocationEntries } from './toastPerformance.js';
 import { addDays, money, suggestBeverageGroup, type BeverageSource } from '../shared/beverageMetrics.js';
 
 type Selection = { guid?: string; salesCategory?: { guid?: string }; price?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
@@ -43,7 +44,7 @@ export function summarizeBeverageSales(orders: Order[], start: string, end: stri
 }
 
 export async function getToastBeverageSales(location: string, start: string, end: string): Promise<BeverageSource['sales']> {
-  const matches = Object.entries(toastLocations()).filter(([name]) => new RegExp(`(^|[^a-z])${location.toLowerCase()}([^a-z]|$)`).test(name.toLowerCase()));
+  const matches = await resolvedToastLocationEntries([location]);
   if (matches.length !== 1) throw new Error(`Toast: correspondencia de ${location} no es única`);
   const guid = matches[0][1], orders: Order[] = [];
   for (let day = start; day <= end; day = addDays(day, 1)) {
