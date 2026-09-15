@@ -2,14 +2,14 @@ import { standardToastRequest } from './toastClient.js';
 import { resolvedToastLocationEntries } from './toastPerformance.js';
 import { addDays, money, suggestBeverageGroup, type BeverageSource } from '../shared/beverageMetrics.js';
 
-type Selection = { guid?: string; salesCategory?: { guid?: string }; price?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
+type Selection = { guid?: string; displayName?: string; salesCategory?: { guid?: string }; price?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
 type Check = { deleted?: boolean; voided?: boolean; selections?: Selection[]; payments?: { refund?: { refundAmount?: number } }[]; appliedServiceCharges?: { refundDetails?: { refundAmount?: number; taxRefundAmount?: number } }[] };
 type Order = { guid?: string; businessDate?: number; deleted?: boolean; voided?: boolean; excessFood?: boolean; checks?: Check[] };
 type Category = { guid?: string; name?: string };
 const active = (selection: Selection) => !selection.deleted && !selection.voided && !selection.deferred && !['HOUSE_ACCOUNT_PAY_BALANCE', 'TOAST_CARD_SELL', 'TOAST_CARD_RELOAD'].includes(selection.selectionType || '');
 
 export function summarizeBeverageSales(orders: Order[], start: string, end: string, names: Map<string, string>): BeverageSource['sales'] {
-  const categories = new Map<string, { id: string; name: string; group: ReturnType<typeof suggestBeverageGroup>; netSales: number; selections: number }>();
+  const categories = new Map<string, { id: string; name: string; group: ReturnType<typeof suggestBeverageGroup>; netSales: number; selections: number; items: Map<string, number> }>();
   let missingPrices = 0, unallocatedRefunds = 0;
   const seen = new Set<string>();
   for (const order of orders) {
@@ -24,12 +24,14 @@ export function summarizeBeverageSales(orders: Order[], start: string, end: stri
         if (!active(selection)) continue;
         const id = selection.salesCategory?.guid || 'unassigned';
         const name = names.get(id) || 'Categoría sin identificar';
-        const category = categories.get(id) || { id, name, group: suggestBeverageGroup(name), netSales: 0, selections: 0 };
+        const category = categories.get(id) || { id, name, group: suggestBeverageGroup(name), netSales: 0, selections: 0, items: new Map<string, number>() };
         if (typeof selection.price !== 'number' || !Number.isFinite(selection.price)) { missingPrices++; continue; }
         const refund = Number(selection.refundDetails?.refundAmount || 0);
         // Toast price already includes quantity, modifiers and check/item discounts.
         // RefundDetails includes nested modifier refunds. Never multiply or add them again.
         category.netSales += selection.price - refund; category.selections++;
+        const itemName = selection.displayName || 'Artículo sin nombre';
+        category.items.set(itemName, (category.items.get(itemName) || 0) + selection.price - refund);
         itemRefunds += refund + Number(selection.refundDetails?.taxRefundAmount || 0);
         categories.set(id, category);
       }
@@ -40,7 +42,7 @@ export function summarizeBeverageSales(orders: Order[], start: string, end: stri
       if (Math.abs(paymentRefunds - itemRefunds - serviceRefunds) > 0.02) unallocatedRefunds++;
     }
   }
-  return { categories: [...categories.values()].map(row => ({ ...row, netSales: money(row.netSales) })), missingPrices, unallocatedRefunds };
+  return { categories: [...categories.values()].map(row => ({ ...row, netSales: money(row.netSales), items: [...row.items].map(([name, netSales]) => ({name, netSales: money(netSales)})).sort((a,b) => b.netSales-a.netSales || a.name.localeCompare(b.name)) })), missingPrices, unallocatedRefunds };
 }
 
 export async function getToastBeverageSales(location: string, start: string, end: string): Promise<BeverageSource['sales']> {

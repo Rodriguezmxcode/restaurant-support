@@ -1,6 +1,6 @@
 export const beverageLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
 export type BeverageGroup = 'spirits' | 'beer' | 'wine' | 'alcohol' | 'excluded' | 'unclassified';
-export type BeverageCategory = { id: string; name: string; group: BeverageGroup; netSales: number; selections: number };
+export type BeverageCategory = { id: string; name: string; group: BeverageGroup; netSales: number; selections: number; items?: { name: string; netSales: number }[] };
 export type BeverageInvoice = { id: string; number?: string; date: string; vendor: string; approved: boolean; amount: number | null; kind: 'invoice' | 'credit'; suggested: boolean };
 export type BeverageSource = {
   location: string; start: string; end: string; fetchedAt: string;
@@ -57,7 +57,8 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   for (const row of rows) {
     if (row.sales.error) { salesReady = false; issues.push(`Toast: ${row.sales.error}`); }
     if (row.purchases.error) { purchasesReady = false; issues.push(`R365: ${row.purchases.error}`); }
-    if (row.sales.missingPrices || row.sales.unallocatedRefunds) { salesReady = false; issues.push('Precios o reembolsos sin conciliar'); }
+    if (row.sales.missingPrices) { salesReady = false; issues.push(`${row.sales.missingPrices} artículos sin precio`); }
+    if (row.sales.unallocatedRefunds) { salesReady = false; issues.push(`${row.sales.unallocatedRefunds} cuentas con reembolso sin conciliar`); }
     for (const category of row.sales.categories) {
       const group = categoryGroups[`${location}:${category.id}`] ?? category.group;
       totals[group] += category.netSales;
