@@ -43,6 +43,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const managed = await getManagedUser(session.id);
     if (!managed || !managed.active || !managed.email) return res.status(403).json({ error: 'Account is unavailable' });
+    const managedEmail = managed.email.toLowerCase();
 
     const salt = randomBytes(16).toString('hex');
     const hash = scryptSync(newPassword, salt, 64).toString('hex');
@@ -52,7 +53,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       await db.begin(async tx => {
         await tx`
           update opsvista_auth_credentials
-          set email=${managed.email.toLowerCase()}, password_salt=${salt}, password_hash=${hash}, password_set_at=now(), updated_at=now()
+          set email=${managedEmail}, password_salt=${salt}, password_hash=${hash}, password_set_at=now(), updated_at=now()
           where user_id=${managed.id}
         `;
         await tx`
