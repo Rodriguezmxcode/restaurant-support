@@ -78,13 +78,13 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   const rows = [...new Map(sources.filter(row => row.location === location).map(row => [`${row.start}:${row.end}`, row])).values()];
   const complete = new Set(rows.map(row => `${row.start}:${row.end}`)).size === expectedChunks;
   if (!complete) issues.push('Periodo incompleto');
-  let salesReady = complete, purchasesReady = complete;
+  let salesReady = complete, salesVisible = complete, purchasesReady = complete;
   const totals = { spirits: 0, beer: 0, wine: 0, alcohol: 0, unclassified: 0, excluded: 0 };
   let purchases = 0, pending = 0, invoiceCount = 0, creditCount = 0, matched = 0, pendingCount = 0;
   const seen = new Set<string>();
   for (const row of rows) {
     if (row.memory?.sales.pending || row.memory?.purchases.pending) issues.push('Actualización pendiente: se muestra la última copia guardada');
-    if (row.sales.error) { salesReady = false; issues.push(`Toast: ${row.sales.error}`); }
+    if (row.sales.error) { salesReady = false; salesVisible = false; issues.push(`Toast: ${row.sales.error}`); }
     if (row.purchases.error) { purchasesReady = false; issues.push(`R365: ${row.purchases.error}`); }
     if (row.sales.missingPrices) { salesReady = false; issues.push(`${row.sales.missingPrices} artículos sin precio`); }
     if (row.sales.unallocatedRefunds) { salesReady = false; issues.push(`${row.sales.unallocatedRefunds} cuentas con reembolso sin conciliar`); }
@@ -119,12 +119,17 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
   }
   if (!matched) { purchasesReady = false; issues.push('Sin compras identificadas: confirmar cobertura'); }
   if (pendingCount) issues.push(`${pendingCount} documentos pendientes de aprobación`);
-  if (!salesReady && totals.unclassified !== 0) issues.push('Clasificar categorías de Toast');
-  const sales = salesReady ? money(totals.spirits + totals.beer + totals.wine + totals.alcohol) : null;
+  if (!salesReady && totals.unclassified !== 0) {
+    issues.push('Clasificar categorías de Toast');
+    issues.push(`Ventas Toast sin clasificar: $${money(Math.abs(totals.unclassified)).toFixed(2)}`);
+  }
+  const sales = salesVisible ? money(totals.spirits + totals.beer + totals.wine + totals.alcohol) : null;
+  if (sales !== null && !salesReady) issues.push('Ventas netas de alcohol provisionales: se muestran importes clasificados mientras se termina la conciliación de Toast');
   const cost = purchasesReady ? money(purchases) : null;
-  // No purchase history, pending AP, or negative net purchases cannot win the ranking.
+  // Keep observed/classified sales visible for review, but incomplete Toast reconciliation,
+  // pending source refreshes, AP approval gaps or other unresolved evidence cannot win the ranking.
   const sourcePending = rows.some(row => row.memory?.sales.pending || row.memory?.purchases.pending);
-  const comparable = !sourcePending && sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0 && !pendingCount;
+  const comparable = !sourcePending && salesReady && purchasesReady && sales !== null && sales > 0 && cost !== null && cost >= 0 && invoiceCount > 0 && !pendingCount;
   if (cost !== null && cost < 0) issues.push('Créditos superiores a compras');
   if (sales !== null && sales <= 0) issues.push('Sin ventas positivas de alcohol');
   const purchasePct = comparable ? money(cost! / sales! * 100) : null;
