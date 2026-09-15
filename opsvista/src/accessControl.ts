@@ -2,7 +2,7 @@ export type OpsVistaRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitch
 
 export type OpsVistaModule =
   | 'Resumen' | 'Locaciones' | 'Ventas' | 'Google Reviews' | 'Local Intelligence' | 'Finanzas' | 'Gastos'
-  | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Configuración';
+  | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';
 
 export type LocationAccessGrant = {
   location: string;
@@ -41,7 +41,7 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
-const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Finanzas','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365','Configuración'];
+const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Finanzas','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
@@ -75,7 +75,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   Administration: {
-    modules: ['Resumen','Finanzas','Gastos','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Configuración'],
+    modules: ['Resumen','Finanzas','Gastos','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
