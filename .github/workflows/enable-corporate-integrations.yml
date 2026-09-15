@@ -1,4 +1,4 @@
-name: Enable Corporate integration management
+name: Finalize tenant-safe Google integration routing
 on:
   push:
     branches: [opsvista-migration-v1]
@@ -12,38 +12,52 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: opsvista-migration-v1
-      - name: Allow Corporate to manage Google integrations
+      - name: Add platform OAuth fallback
         shell: python
         run: |
           from pathlib import Path
 
-          access = Path('opsvista/src/accessControl.ts')
-          text = access.read_text()
-          old = "allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: false,"
-          new = "allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: true,"
-          if old not in text:
-              raise SystemExit('Corporate frontend permission pattern not found')
-          access.write_text(text.replace(old, new, 1))
-
-          auth = Path('opsvista/server/authorization.ts')
-          text = auth.read_text()
-          old = "Corporate: [...operational,'restaurant365:read','bonus:read'],"
-          new = "Corporate: [...operational,'restaurant365:read','bonus:read','integrations:manage'],"
-          if old not in text:
-              raise SystemExit('Corporate server permission pattern not found')
-          auth.write_text(text.replace(old, new, 1))
-
-          workflows = Path('opsvista/api/workflows.ts')
-          text = workflows.read_text()
-          old = "if(user.role!=='Founder')throw new Error('Founder session is required to connect Google Business');"
-          new = "if(!['Founder','Corporate'].includes(user.role))throw new Error('Founder or Corporate session is required to connect Google Business');"
-          if old not in text:
-              raise SystemExit('Google callback role pattern not found')
-          workflows.write_text(text.replace(old, new, 1))
-      - name: Commit patch
+          path = Path('opsvista/api/workflows.ts')
+          text = path.read_text()
+          start = text.index('async function googleBusinessIntegration(')
+          end = text.index('\nasync function googleBusinessCallback(', start)
+          replacement = r'''async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
+ const permission=authorize(user,'integrations:manage');if(!permission.ok)return res.status(permission.status).json({error:permission.error});
+ const organizationId=userOrganization(user);
+ const platformClientId=process.env.GOOGLE_BUSINESS_PROFILE_CLIENT_ID?.trim()||'';
+ const platformClientSecret=process.env.GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET?.trim()||'';
+ const platformManaged=Boolean(platformClientId&&platformClientSecret);
+ let saved=await getGoogleBusinessCredentials(organizationId);
+ if(!req.method||req.method==='GET'){
+  const redirectUri=googleBusinessRedirectUri(req.headers||{});
+  if(q(req,'action')==='authorize'){
+   if((!saved?.clientId||!saved.clientSecret)&&platformManaged){await saveGoogleBusinessClient(organizationId,platformClientId,platformClientSecret);saved=await getGoogleBusinessCredentials(organizationId);}
+   if(!saved?.clientId||!saved.clientSecret)return res.status(400).json({error:'Google OAuth client is not configured for OpsVista'});
+   if(!res.setHeader||!res.end)return res.status(500).json({error:'Google redirect is unavailable'});
+   res.setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));res.status(302).end?.();return;
+  }
+  return res.status(200).json({provider:'google-business-profile',configured:Boolean((saved?.clientId&&saved.clientSecret)||platformManaged),connected:Boolean(saved?.refreshToken),clientId:saved?.clientId||platformClientId,connectedEmail:saved?.connectedEmail,connectedAt:saved?.connectedAt,redirectUri,platformManaged});
+ }
+ if(req.method==='POST'){
+  const action=text(req.body?.action);
+  if(action==='save'){
+   if(!hasLegacyWorkspace(user))return res.status(403).json({error:'Google OAuth client configuration is managed by OpsVista for customer organizations'});
+   const clientId=text(req.body?.clientId),clientSecret=text(req.body?.clientSecret);
+   if(!clientId.endsWith('.apps.googleusercontent.com')||!clientSecret.startsWith('GOCSPX-'))return res.status(400).json({error:'A valid Google OAuth Client ID and Client Secret are required'});
+   await saveGoogleBusinessClient(organizationId,clientId,clientSecret);return res.status(200).json({saved:true});
+  }
+  if(action==='disconnect'){await disconnectGoogleBusiness(organizationId);return res.status(200).json({disconnected:true});}
+  return res.status(400).json({error:'Unknown integration action'});
+ }
+ res.setHeader?.('Allow','GET, POST');return res.status(405).json({error:'Method not allowed'});
+}
+'''
+          path.write_text(text[:start] + replacement + text[end:])
+      - name: Remove temporary workflow and commit
         run: |
           git config user.name "OpsVista Automation"
           git config user.email "actions@users.noreply.github.com"
-          git add opsvista/src/accessControl.ts opsvista/server/authorization.ts opsvista/api/workflows.ts
-          git commit -m "Allow Corporate to manage Google Business integration"
+          git rm .github/workflows/enable-corporate-integrations.yml
+          git add opsvista/api/workflows.ts
+          git commit -m "Support tenant-managed Google Business connections"
           git push origin HEAD:opsvista-migration-v1
