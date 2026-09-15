@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import ProviReportsPanel from './ProviReportsPanel';
 import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, suggestBeverageVendor, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
 
 const usd = (value: number | null) => value === null ? 'Sin conciliar' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -127,6 +128,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
           </table></div>
         </details>
       </>}
+      <ProviReportsPanel locations={locations}/>
     </>}
   </section>;
 }
