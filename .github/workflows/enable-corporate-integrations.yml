@@ -1,0 +1,49 @@
+name: Enable Corporate integration management
+on:
+  push:
+    branches: [opsvista-migration-v1]
+    paths: ['.github/workflows/enable-corporate-integrations.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opsvista-migration-v1
+      - name: Allow Corporate to manage Google integrations
+        shell: python
+        run: |
+          from pathlib import Path
+
+          access = Path('opsvista/src/accessControl.ts')
+          text = access.read_text()
+          old = "allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: false,"
+          new = "allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: true,"
+          if old not in text:
+              raise SystemExit('Corporate frontend permission pattern not found')
+          access.write_text(text.replace(old, new, 1))
+
+          auth = Path('opsvista/server/authorization.ts')
+          text = auth.read_text()
+          old = "Corporate: [...operational,'restaurant365:read','bonus:read'],"
+          new = "Corporate: [...operational,'restaurant365:read','bonus:read','integrations:manage'],"
+          if old not in text:
+              raise SystemExit('Corporate server permission pattern not found')
+          auth.write_text(text.replace(old, new, 1))
+
+          workflows = Path('opsvista/api/workflows.ts')
+          text = workflows.read_text()
+          old = "if(user.role!=='Founder')throw new Error('Founder session is required to connect Google Business');"
+          new = "if(!['Founder','Corporate'].includes(user.role))throw new Error('Founder or Corporate session is required to connect Google Business');"
+          if old not in text:
+              raise SystemExit('Google callback role pattern not found')
+          workflows.write_text(text.replace(old, new, 1))
+      - name: Commit patch
+        run: |
+          git config user.name "OpsVista Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add opsvista/src/accessControl.ts opsvista/server/authorization.ts opsvista/api/workflows.ts
+          git commit -m "Allow Corporate to manage Google Business integration"
+          git push origin HEAD:opsvista-migration-v1
