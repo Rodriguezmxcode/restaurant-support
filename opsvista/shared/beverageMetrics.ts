@@ -30,6 +30,7 @@ const nonAlcoholicItems = new Set([
   'topochico mineral','topochico mineral small','red bull','dr pepper','arnold palmer','jugo de naranja natural',
 ]);
 export function suggestBeverageItem(name: string, category: BeverageGroup): BeverageGroup {
+  if (category === 'excluded') return 'excluded';
   const value = normalize(name).replace(/ kd$/, '');
   if (/\b(virgin|virgen|virgyn|vrgn|non alcoholic|nonalcoholic|sin alcohol)\b/.test(value) || /\bheineken (zero|0 0)\b/.test(value) || nonAlcoholicItems.has(value)) return 'excluded';
   if (/\b(margarita|martini|mojito|daiquiri|daquiri|cosmopolitan|tequila)\b/.test(value) || /^lalo(?: |$)/.test(value)) return 'spirits';
@@ -81,7 +82,7 @@ export function compareBeverages(location: string, sources: BeverageSource[], ex
         const itemTotal = money(category.items.reduce((sum, item) => sum + item.netSales, 0));
         if (Math.abs(itemTotal-category.netSales) > 0.02) { salesReady = false; issues.push('Desglose de productos incompleto'); }
         for (const item of category.items) {
-          const group = itemGroups[`${categoryKey}:${item.name}`] ?? categoryGroups[categoryKey] ?? item.group ?? suggestBeverageItem(item.name, category.group);
+          const group = itemGroups[`${categoryKey}:${item.name}`] ?? categoryGroups[categoryKey] ?? suggestBeverageItem(item.name, category.group);
           totals[group] += item.netSales;
           if (group === 'unclassified' && item.netSales !== 0) salesReady = false;
         }

@@ -181,3 +181,9 @@ test('unclassified products and incomplete product totals remain unresolved', ()
  data.sales.categories[0].netSales=30;
  assert.equal(compareBeverages('Avon',[data],1,{}, {}, {'Avon:drinks:House Special':'spirits'}).sales,null);
 });
+
+
+test('food names containing alcohol terms remain excluded from beverage sales', () => {
+ assert.equal(suggestBeverageItem('Tequila Shrimp','excluded'),'excluded');
+ assert.equal(suggestBeverageItem('Margarita Pizza','excluded'),'excluded');
+});
