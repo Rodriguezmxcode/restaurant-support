@@ -23,14 +23,25 @@ const rowsOf=(book:XLSX.WorkBook,name:string)=>book.Sheets[name]?XLSX.utils.shee
 const sheetName=(book:XLSX.WorkBook,wanted:string)=>book.SheetNames.find(name=>norm(name)===norm(wanted));
 const makeRow=(input:Omit<CorporateExpenseRow,'key'>):CorporateExpenseRow=>({...input,key:stableCorporateRowKey(input)});
 
-function payrollRows(book:XLSX.WorkBook,fileName:string){
+function bankStatementMonths(book:XLSX.WorkBook){
+  const name=sheetName(book,'Detalle bancario'); if(!name)return new Set<string>();
+  const sheet=rowsOf(book,name),header=sheet.findIndex(row=>norm(row[0])==='fecha'&&norm(row[1])==='tipo'&&norm(row[2]).includes('contraparte'));
+  const months=new Set<string>(); if(header<0)return months;
+  for(let index=header+1;index<sheet.length;index++){
+    const date=asDate(sheet[index]?.[0]),type=norm(sheet[index]?.[1]);
+    if(date&&(type==='entrada'||type==='salida'))months.add(date.slice(0,7));
+  }
+  return months;
+}
+
+function payrollRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
   const name=sheetName(book,'Detalle nómina'); if(!name)return {rows:[] as CorporateExpenseRow[],months:new Set<string>()};
   const sheet=rowsOf(book,name), find=(label:string)=>sheet.findIndex(row=>norm(row[0])===norm(label));
   const check=find('Check Date del reporte'),gross=find('Sueldos brutos'),er=find('Impuestos patronales'),service=find('Servicio Toast e impuesto del servicio');
   if(check<0||gross<0||er<0||service<0)return {rows:[] as CorporateExpenseRow[],months:new Set<string>()};
   const result:CorporateExpenseRow[]=[],months=new Set<string>();
   for(let col=1;col<sheet[check].length;col++){
-    const date=asDate(sheet[check][col]); if(!date)continue; const month=date.slice(0,7); months.add(month);
+    const date=asDate(sheet[check][col]); if(!date)continue; const month=date.slice(0,7); if(allowedMonths.size&&!allowedMonths.has(month))continue; months.add(month);
     const specs:[number,string,CorporatePnlSection,string][]=[
       [gross,'Sueldos brutos','Labor','Wages & Salaries'],[er,'Impuestos patronales (ER)','Labor','Employer Payroll Taxes'],[service,'Servicio Toast e impuesto','Operating Expenses','Payroll Processing'],
     ];
@@ -56,26 +67,26 @@ function bankRows(book:XLSX.WorkBook,fileName:string,detailedPayrollMonths:Set<s
   return result;
 }
 
-function rentRows(book:XLSX.WorkBook,fileName:string){
+function rentRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
   const name=sheetName(book,'Detalle bancario'); if(!name)return [] as CorporateExpenseRow[];
   const sheet=rowsOf(book,name),header=sheet.findIndex(row=>norm(row[0])==='mes asignado'&&norm(row[1]).includes('renta'));
   if(header<0)return [];
   const result:CorporateExpenseRow[]=[];
   for(let index=header+1;index<sheet.length;index++){
-    const date=asDate(sheet[index]?.[0]),amount=asNumber(sheet[index]?.[1]); if(!date||!amount)break;
+    const date=asDate(sheet[index]?.[0]),amount=asNumber(sheet[index]?.[1]); if(!date||!amount)break; if(allowedMonths.size&&!allowedMonths.has(date.slice(0,7)))continue;
     const payer=String(sheet[index]?.[2]??''),beneficiary=String(sheet[index]?.[3]??''),check=String(sheet[index]?.[4]??'');
     result.push(makeRow({date,description:`Renta corporativa completa${payer?` · pagada por ${payer}`:''}${check?` · cheque ${check}`:''}`,vendor:beneficiary||'325 Boston Post Rd LLC',amount,section:'Occupancy',category:'Corporate Office Rent',includeInPnl:true,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:String(sheet[index]?.[7]??'')||undefined,confidence:'auto'}));
   }
   return result;
 }
 
-function budgetRows(book:XLSX.WorkBook,fileName:string){
+function budgetRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
   const name=sheetName(book,'Gastos corporativos'); if(!name)return [] as CorporateExpenseRow[];
   const sheet=rowsOf(book,name),index=sheet.findIndex(row=>norm(row[0])==='ramp mensual presupuestado'&&[1,2,3,4].every(col=>asNumber(row[col])>0));
   if(index<0)return [];
   let header=-1;for(let cursor=index-1;cursor>=Math.max(0,index-7);cursor--){if([1,2,3,4].every(col=>Boolean(asDate(sheet[cursor]?.[col])))){header=cursor;break;}}
   if(header<0)return [];
-  return [1,2,3,4].map(col=>{const date=asDate(sheet[header][col]),amount=asNumber(sheet[index][col]);return makeRow({date,description:'Ramp mensual presupuestado',vendor:'Ramp',amount,section:'Review',category:'Budget / Forecast (excluded)',includeInPnl:false,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:'Presupuesto, no gasto real conciliado. Se excluye del P&L hasta sustituirse por cargos reales.',confidence:'review'});}).filter(row=>row.date&&row.amount);
+  return [1,2,3,4].map(col=>{const date=asDate(sheet[header][col]),amount=asNumber(sheet[index][col]);return makeRow({date,description:'Ramp mensual presupuestado',vendor:'Ramp',amount,section:'Review',category:'Budget / Forecast (excluded)',includeInPnl:false,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:'Presupuesto, no gasto real conciliado. Se excluye del P&L hasta sustituirse por cargos reales.',confidence:'review'});}).filter(row=>row.date&&row.amount&&(!allowedMonths.size||allowedMonths.has(row.date.slice(0,7))));
 }
 
 function genericRows(book:XLSX.WorkBook,fileName:string){
@@ -92,7 +103,7 @@ function genericRows(book:XLSX.WorkBook,fileName:string){
 }
 
 function parseWorkbook(book:XLSX.WorkBook,fileName:string){
-  const payroll=payrollRows(book,fileName); const known=[...bankRows(book,fileName,payroll.months),...payroll.rows,...rentRows(book,fileName),...budgetRows(book,fileName)];
+  const coveredMonths=bankStatementMonths(book); const payroll=payrollRows(book,fileName,coveredMonths); const known=[...bankRows(book,fileName,payroll.months),...payroll.rows,...rentRows(book,fileName,coveredMonths),...budgetRows(book,fileName,coveredMonths)];
   const rows=known.length?known:genericRows(book,fileName);
   const unique=new Map<string,CorporateExpenseRow>();for(const row of rows)unique.set(row.key,row);
   if(!unique.size)throw new Error('No encontré una tabla de gastos reconocible. Usa columnas de fecha, concepto/description e importe/amount, o el formato corporativo actual.');
