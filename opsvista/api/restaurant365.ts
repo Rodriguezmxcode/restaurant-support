@@ -1,5 +1,6 @@
 import { beverageLocations, validBeverageRange } from '../shared/beverageMetrics.js';
 import { getBeverageSource } from '../server/beverageSource.js';
+import { getBeverageScore, visibleBeverageScore } from '../server/beverageScore.js';
 import { readSession } from '../server/authSession.js';
 import { authorize } from '../server/authorization.js';
 import { disconnectRestaurant365, saveRestaurant365Credentials, getIntegrationSnapshot } from '../server/integrationStore.js';
@@ -35,6 +36,14 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
     const organizationId=user.organizationId||'org-puerto-vallarta';
 
     if(!req.method||req.method==='GET'){
+      if(query(req,'view')==='beverage-score') {
+        const access=authorize(user,'bonus:read');
+        if(!access.ok)return res.status(access.status).json({error:access.error,requestId});
+        const start=query(req,'start'),end=query(req,'end');
+        if(!validBeverageRange(start,end,31))return res.status(400).json({error:'Selecciona un período válido de hasta 31 días.',requestId});
+        const score=await getBeverageScore(organizationId,start,end);
+        return res.status(200).json(visibleBeverageScore(score,user));
+      }
       const permission=authorize(user,'restaurant365:read');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const view=query(req,'view');

@@ -46,9 +46,11 @@ export async function registerSource(organizationId: string, provider: SourcePro
     on conflict (organization_id,source_key) do update set requested_at=now() returning *`;
   return job(rows[0]);
 }
-export async function readSavedSources(organizationId: string, provider: SourceProvider): Promise<SourceJob[]> {
+export async function readSavedSources(organizationId: string, provider: SourceProvider, keys?: string[]): Promise<SourceJob[]> {
   await schema();
-  const rows = await db()`select * from opsvista_source_cache where organization_id=${organizationId} and provider=${provider}`;
+  const rows = keys
+    ? await db()`select * from opsvista_source_cache where organization_id=${organizationId} and provider=${provider} and source_key=any(${keys}::text[])`
+    : await db()`select * from opsvista_source_cache where organization_id=${organizationId} and provider=${provider}`;
   return rows.map(job);
 }
 export async function claimSource(organizationId: string, key?: string): Promise<SourceJob | null> {
