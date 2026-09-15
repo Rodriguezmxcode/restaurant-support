@@ -22,6 +22,6 @@ export default function ClientWorkspace({ user }: { user: OpsVistaUser }) {
       {user.role === 'Corporate' && <button aria-pressed={tab === 'integrations'} onClick={() => setTab('integrations')}>Integrations / Integraciones</button>}
       <a href="tel:+12032850281">Support / Soporte</a>
     </nav>
-    {tab === 'team' ? <ClientOnboardingPanel currentUser={user}/> : tab === 'integrations' ? <GoogleBusinessIntegrationPanel locations={locations}/> : <NativeTasksPanel currentUser={user} allowedLocations={locations} readOnly={false}/>}
+    {tab === 'team' ? <ClientOnboardingPanel currentUser={user}/> : tab === 'integrations' ? <GoogleBusinessIntegrationPanel locations={locations} customerMode/> : <NativeTasksPanel currentUser={user} allowedLocations={locations} readOnly={false}/>}
   </main>;
 }
