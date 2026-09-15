@@ -189,7 +189,7 @@ function summarizeLabor(entries:TimeEntry[]){
     overtimeLaborCost+=overtime*rate*1.5;
   }
   const hourlyLaborCost=regularLaborCost+overtimeLaborCost;
-  return {hourlyHours:round(regularHours+overtimeHours),overtimeHours:round(overtimeHours),regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),hourlyLaborCost:round(hourlyLaborCost),overtimeLaborPct:hourlyLaborCost?round(overtimeLaborCost/hourlyLaborCost*100):0};
+  return {hourlyHours:round(regularHours+overtimeHours),overtimeHours:round(overtimeHours),regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),hourlyLaborCost:round(hourlyLaborCost),overtimeLaborPct:(regularHours+overtimeHours)?round(overtimeHours/(regularHours+overtimeHours)*100):0};
 }
 
 function accessibleRestaurantList(payload:unknown):AccessibleRestaurant[]{

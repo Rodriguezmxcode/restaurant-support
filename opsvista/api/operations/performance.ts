@@ -93,13 +93,13 @@ export default async function handler(req:Req,res:Res){
         hourlyLaborPct:totals.netSales?round(totals.hourlyLaborCost/totals.netSales*100):0,
         salaryLaborPct:totals.netSales?round(totals.salaryLaborCost/totals.netSales*100):0,
         totalLaborPct:totals.netSales?round(totals.totalLaborCost/totals.netSales*100):0,
-        overtimeLaborPct:totals.hourlyLaborCost?round(totals.overtimeLaborCost/totals.hourlyLaborCost*100):0,
+        overtimeLaborPct:totals.hourlyHours?round(totals.overtimeHours/totals.hourlyHours*100):0,
         splh:totals.hourlyHours?round(totals.netSales/totals.hourlyHours):null
       },
       notes:{
         salaryLabor:salary.configured?'Weekly salaries allocated proportionally across the selected date range.':'Configure OPSVISTA_WEEKLY_SALARY_LABOR_JSON with the real weekly salary cost by location.',
         tasks:'Tasks require the 7shifts production feed.',
-        overtime:'Overtime labor % is overtime labor cost divided by hourly labor cost.',
+        overtime:'Overtime % is overtime hours divided by total hourly hours worked. Salaried hours and future scheduled exposure do not penalize the weekly bonus.',
         bonusDiscounts:'Weekly Bonus excludes applied Toast discounts identified as Uber Eats or employee meals. Total discounts remain unchanged in Sales and other modules.'
       }
     });
