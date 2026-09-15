@@ -6,6 +6,7 @@ import AuthGate from './AuthGate';
 import './styles.css';
 import './maxDataTheme.css';
 import './rampComplianceOverdue.css';
+import './corporateImportBootstrap';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
