@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import ProviReportsPanel from './ProviReportsPanel';
 import { addDays, beverageChunks, beverageLocations, compareBeverages, rankBeverages, suggestBeverageItem, suggestBeverageVendor, type BeverageGroup, type BeverageSource } from '../shared/beverageMetrics';
 
 const usd = (value: number | null) => value === null ? 'Sin conciliar' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -8,8 +7,8 @@ const labels: Record<BeverageGroup, string> = { spirits: 'Destilados y cócteles
 const cell = { padding: 10, borderBottom: '1px solid #e2e8f0', textAlign: 'left' as const };
 
 export default function BeverageBonusPanel({ start, end, locations, canRead }: { start: string; end: string; locations: string[]; canRead: boolean }) {
-  const [windowMode, setWindowMode] = useState<'selected' | 'rolling'>('rolling');
-  const [enabled, setEnabled] = useState(false);
+  const [windowMode, setWindowMode] = useState<'selected' | 'rolling'>('selected');
+  const [enabled, setEnabled] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const lastRefresh = useRef(0);
   const [sources, setSources] = useState<BeverageSource[]>([]);
@@ -82,12 +81,12 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
   }, [invoiceRows]);
 
   return <section id="beverage-bonus" aria-labelledby="beverage-bonus-title" style={{ border: '1px solid #cbd5e1', borderRadius: 12, padding: 16, display: 'grid', gap: 14 }}>
-    <div><h3 id="beverage-bonus-title" style={{ margin: '0 0 8px' }}>Alcohol · compras frente a ventas</h3>
-      <p style={{ margin: 0 }}>R365 + Toast · Comparativo preliminar por locación. Los 5 puntos de Liquor siguen pendientes de una regla de puntuación confirmada.</p></div>
+    <div><h3 id="beverage-bonus-title" style={{ margin: '0 0 8px' }}>Alcohol · conciliación</h3>
+      <p style={{ margin: 0 }}>R365 + Toast · Revisa las compras, ventas y excepciones que alimentan el Bono semanal.</p></div>
     {!canRead ? <p>El desglose de facturas está disponible para los perfiles con acceso a Restaurant365.</p> : <>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label>Periodo de alcohol <select value={windowMode} onChange={event => setWindowMode(event.target.value as 'selected' | 'rolling')}>
-          <option value="rolling">Últimas 8 semanas hasta la fecha seleccionada</option><option value="selected">Mismo periodo del bono</option>
+        <label>Período de conciliación de alcohol <select value={windowMode} onChange={event => setWindowMode(event.target.value as 'selected' | 'rolling')}>
+          <option value="rolling">Últimas 8 semanas hasta la fecha seleccionada</option><option value="selected">Período contable seleccionado</option>
         </select></label>
         <strong>{reportStart} → {end}</strong>
         <button type="button" disabled={loading} onClick={() => { if(enabled)setRefresh(value => value + 1); else setEnabled(true); }}>{loading ? 'Abriendo datos de OpsVista…' : enabled ? 'Buscar actualizaciones ahora' : 'Abrir desglose guardado'}</button>
@@ -97,7 +96,7 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
       {enabled && <>
         <div role="status" aria-live="polite">{loading ? `Abriendo ${sources.length} de ${expected} consultas. El ranking se completa al terminar.` : `${sources.length} de ${expected} consultas disponibles.`} {sources.length > 0 && `Datos verificados desde: ${new Date(sources.map(source => source.fetchedAt).sort()[0]).toLocaleString('es-MX',{timeZone:'America/New_York'})} (Connecticut).`} {sources.some(source=>source.memory?.sales.pending||source.memory?.purchases.pending) && 'Hay actualizaciones pendientes; se conserva la última copia y el ranking espera la conciliación.'}</div>
         <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
-          <caption style={{ textAlign: 'left', fontWeight: 700, padding: '8px 0' }}>Ranking preliminar de compras · no modifica el bono oficial</caption>
+          <caption style={{ textAlign: 'left', fontWeight: 700, padding: '8px 0' }}>Conciliación de compras y ventas por locación</caption>
           <thead><tr>{['Rank', 'Locación', 'Ventas de alcohol', 'Compras aprobadas − créditos', 'AP pendiente', 'Compras / ventas', 'Ventas − compras', 'Margen sobre compras', 'Estado'].map(label => <th key={label} scope="col" style={cell}>{label}</th>)}</tr></thead>
           <tbody>{rows.map(row => <tr key={row.location}>
             <td style={cell}>{loading || row.rank === null ? '—' : `#${row.rank}`}</td><th scope="row" style={cell}>{row.location}</th>
@@ -128,7 +127,6 @@ export default function BeverageBonusPanel({ start, end, locations, canRead }: {
           </table></div>
         </details>
       </>}
-      <ProviReportsPanel locations={locations}/>
     </>}
   </section>;
 }
