@@ -65,9 +65,11 @@ async function googleBusinessIntegration(req:ApiRequest,res:ApiResponse,user:Ses
         saved=await getGoogleBusinessCredentials(organizationId);
       }
       if(!saved?.clientId||!saved.clientSecret)return res.status(400).json({error:'Google OAuth client is not configured for OpsVista'});
-      if(!res.setHeader||!res.end)return res.status(500).json({error:'Google redirect is unavailable'});
-      res.setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));
-      res.status(302).end();
+      const setHeader=res.setHeader,end=res.end;
+      if(!setHeader||!end)return res.status(500).json({error:'Google redirect is unavailable'});
+      setHeader('Location',authorizationUrl(saved,redirectUri,createOAuthState(organizationId,user.id)));
+      res.status(302);
+      end();
       return;
     }
     return res.status(200).json({provider:'google-business-profile',configured:Boolean((saved?.clientId&&saved.clientSecret)||platformManaged),connected:Boolean(saved?.refreshToken),clientId:saved?.clientId||platformClientId,connectedEmail:saved?.connectedEmail,connectedAt:saved?.connectedAt,redirectUri,platformManaged});
@@ -97,10 +99,12 @@ async function googleBusinessCallback(req:ApiRequest,res:ApiResponse,user:Sessio
   if(!permission.ok)return res.status(permission.status).json({error:permission.error});
   const origin=publicOrigin(req.headers||{});
   const redirect=(status:'connected'|'error',message?:string)=>{
-    if(!res.setHeader||!res.end)throw new Error('Google callback redirect is unavailable');
+    const setHeader=res.setHeader,end=res.end;
+    if(!setHeader||!end)throw new Error('Google callback redirect is unavailable');
     const suffix=message?`&message=${encodeURIComponent(message)}`:'';
-    res.setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);
-    res.status(302).end();
+    setHeader('Location',`${origin}/?integration=google-business&status=${status}${suffix}`);
+    res.status(302);
+    end();
   };
   try{
     const providerError=queryValue(req,'error');
