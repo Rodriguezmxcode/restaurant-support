@@ -1,0 +1,53 @@
+name: Add Integrations module
+on:
+  push:
+    branches: [opsvista-migration-v1]
+    paths: ['.github/workflows/add-integrations-module.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opsvista-migration-v1
+      - name: Add first-class Integrations module
+        shell: python
+        run: |
+          from pathlib import Path
+
+          access = Path('opsvista/src/accessControl.ts')
+          text = access.read_text()
+          text = text.replace("| 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Configuración';",
+                              "| 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';")
+          text = text.replace("'Transferencias','Restaurant365','Configuración']", "'Transferencias','Restaurant365','Integraciones','Configuración']")
+          access.write_text(text)
+
+          app = Path('opsvista/src/App.tsx')
+          text = app.read_text()
+          text = text.replace("Restaurant365:'R',Configuración:'⚙'", "Restaurant365:'R',Integraciones:'⛓',Configuración:'⚙'")
+          text = text.replace("{section:'Restaurant365',label:'Restaurant365',description:'P&L, facturas AP, vendors y cuentas GL',keywords:['r365','restaurant365','p&l','pnl','accounting','contabilidad','invoice','facturas','vendors','gl']},\n  {section:'Configuración'",
+                              "{section:'Restaurant365',label:'Restaurant365',description:'P&L, facturas AP, vendors y cuentas GL',keywords:['r365','restaurant365','p&l','pnl','accounting','contabilidad','invoice','facturas','vendors','gl']},\n  {section:'Integraciones',label:'Integraciones',description:'Conecta Google Business, Toast, 7shifts y otras fuentes',keywords:['integrations','integraciones','google','toast','7shifts','r365','connect','conectar']},\n  {section:'Configuración'")
+          text = text.replace("permissions.modules.includes('Configuración')?'Configuración'", "permissions.modules.includes('Integraciones')?'Integraciones':'Configuración'")
+          text = text.replace("const isRestaurant365=section==='Restaurant365';\n  const isSettings=section==='Configuración';",
+                              "const isRestaurant365=section==='Restaurant365';\n  const isIntegrations=section==='Integraciones';\n  const isSettings=section==='Configuración';")
+          text = text.replace("isRestaurant365?'ACCOUNTING INTELLIGENCE':isSettings?'ACCESS & SECURITY'",
+                              "isRestaurant365?'ACCOUNTING INTELLIGENCE':isIntegrations?'CONNECTED SYSTEMS':isSettings?'ACCESS & SECURITY'")
+          text = text.replace("isRestaurant365?'Restaurant365 · Accounting Intelligence':isSettings?'Configuración · Roles & Permissions'",
+                              "isRestaurant365?'Restaurant365 · Accounting Intelligence':isIntegrations?'Integraciones · Connected Systems':isSettings?'Configuración · Roles & Permissions'")
+          text = text.replace("isRestaurant365?'P&L, facturas AP, vendors, cuentas GL y salud de sincronización, separados del trabajo diario de los managers.':isSettings?'Controla acceso, credenciales, usuarios y permisos.'",
+                              "isRestaurant365?'P&L, facturas AP, vendors, cuentas GL y salud de sincronización, separados del trabajo diario de los managers.':isIntegrations?'Conecta y administra las fuentes externas que alimentan OpsVista.':isSettings?'Controla acceso, usuarios y permisos.'")
+          old = "isRestaurant365?<Restaurant365View canManageIntegrations={!previewUser&&permissions.canManageIntegrations}/>:isSettings?<>{currentUser.role==='Founder'&&!previewUser&&<ClientOnboardingPanel currentUser={currentUser} founder/>}{permissions.canManageIntegrations&&<GoogleBusinessIntegrationPanel/>}<ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onPreviewUser={previewUser?undefined:startUserPreview}/></>"
+          new = "isRestaurant365?<Restaurant365View canManageIntegrations={!previewUser&&permissions.canManageIntegrations}/>:isIntegrations?(!previewUser&&permissions.canManageIntegrations?<GoogleBusinessIntegrationPanel/>:<section className=\"panel\"><div className=\"panel-header\"><div><h2>Integraciones</h2><p>No tienes permiso para administrar conexiones externas.</p></div></div></section>):isSettings?<>{currentUser.role==='Founder'&&!previewUser&&<ClientOnboardingPanel currentUser={currentUser} founder/>}<ChangePasswordPanel/><InvitationManager currentUser={currentUser}/><AccessControlPanel currentUser={currentUser} onPreviewUser={previewUser?undefined:startUserPreview}/></>"
+          if old not in text:
+              raise SystemExit('Settings render pattern not found')
+          text = text.replace(old,new,1)
+          app.write_text(text)
+      - name: Commit module
+        run: |
+          git config user.name "OpsVista Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add opsvista/src/accessControl.ts opsvista/src/App.tsx
+          git commit -m "Add dedicated Integrations module"
+          git push origin HEAD:opsvista-migration-v1
