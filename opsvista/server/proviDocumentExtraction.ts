@@ -1,4 +1,5 @@
 import { parseProviSourceFiles } from './proviEvidence.js';
+import { extractProviTextPdfPurchases } from './proviPdfText.js';
 
 const extractionSchema = {
   type: 'object', additionalProperties: false, required: ['purchases'], properties: {
@@ -18,10 +19,9 @@ const extractionSchema = {
   },
 };
 
-export async function extractProviEvidence(filesInput: unknown) {
-  const files = parseProviSourceFiles(filesInput);
+async function extractVisualEvidence(files: ReturnType<typeof parseProviSourceFiles>) {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Configura OPENAI_API_KEY para leer automáticamente fotos y PDF de Provi.');
+  if (!apiKey) throw new Error('La lectura visual de fotos y PDF escaneados no está activa. Usa un PDF con texto o JSON.');
   const content: Record<string, unknown>[] = [{
     type: 'input_text',
     text: 'Extract Provi alcohol/beverage purchase evidence. Split the result into one purchase per distributor/vendor when a document contains multiple vendor orders. Use only what is visible in the files; never invent amounts, dates, order numbers, vendors, products, or locations. Allowed Puerto Vallarta locations are Stamford, Orange, Fairfield, Danbury, Avon, Southington. If the location is not visible, return null so the user can select it. orderDate and deliveryDate must be YYYY-MM-DD when visible. orderedAmount is the total for that vendor purchase. Preserve product names, distributor, quantity and line spend when visible. Explain uncertainty briefly in sourceNote.',
@@ -44,12 +44,24 @@ export async function extractProviEvidence(filesInput: unknown) {
     }),
   });
   const body = await response.json() as any;
-  if (!response.ok) throw new Error(body?.error?.message || 'No se pudo leer la evidencia de Provi.');
+  if (!response.ok) {
+    const message = String(body?.error?.message || 'No se pudo leer la evidencia de Provi.');
+    if (/quota|credit|billing|insufficient/i.test(message)) throw new Error('La lectura visual de fotos/PDF escaneados no tiene créditos disponibles. Los PDF con texto y JSON siguen funcionando sin usar la API.');
+    throw new Error(message);
+  }
   const outputText = typeof body.output_text === 'string'
     ? body.output_text
     : body.output?.flatMap((item: any) => item.content || []).find((item: any) => item.type === 'output_text')?.text;
-  if (!outputText) throw new Error('El lector de documentos no devolvió datos utilizables.');
+  if (!outputText) throw new Error('El lector visual no devolvió datos utilizables.');
   const raw = JSON.parse(outputText) as { purchases?: Record<string, unknown>[] };
   if (!Array.isArray(raw.purchases) || !raw.purchases.length) throw new Error('No se identificó ninguna compra en la evidencia.');
-  return { purchases: raw.purchases, fileCount: files.length };
+  return { purchases: raw.purchases, fileCount: files.length, extractionMode: 'visual-api' as const };
+}
+
+export async function extractProviEvidence(filesInput: unknown) {
+  const files = parseProviSourceFiles(filesInput);
+  const allPdf = files.every(file => file.mime === 'application/pdf');
+  if (allPdf) return extractProviTextPdfPurchases(files);
+  if (files.some(file => file.mime === 'application/pdf')) throw new Error('Para evitar cargos innecesarios, sube los PDF y las fotos por separado. Los PDF con texto se leen localmente sin usar créditos.');
+  return extractVisualEvidence(files);
 }
