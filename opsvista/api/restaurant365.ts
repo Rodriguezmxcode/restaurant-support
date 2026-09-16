@@ -13,6 +13,7 @@ import { parseProviImport } from '../shared/proviReports.js';
 import { getProviReports, saveProviReports } from '../server/proviReports.js';
 import { extractProviEvidence } from '../server/proviDocumentExtraction.js';
 import { getProviEvidence, saveProviEvidence } from '../server/proviEvidence.js';
+import { getPriceWatch } from '../server/priceWatch.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -61,6 +62,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
       const start=query(req,'start'),end=query(req,'end'),month=query(req,'month')||'2026-08';
       if(Boolean(start)!==Boolean(end))return res.status(400).json({error:'Selecciona una fecha inicial y final para Restaurant365.',requestId});
+      if(view==='price-watch') return res.status(200).json(await getPriceWatch(organizationId,start,end,query(req,'refresh')==='1'));
       if(view==='beverage') {
         const entity=query(req,'entity');
         if(!validBeverageRange(start,end)||!beverageLocations.includes(entity)) return res.status(400).json({error:'Selecciona una locación y un periodo válido de hasta siete días.',requestId});

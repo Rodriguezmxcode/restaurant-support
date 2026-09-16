@@ -7,6 +7,7 @@ import './styles.css';
 import './maxDataTheme.css';
 import './rampComplianceOverdue.css';
 import './corporateImportBootstrap';
+import './priceWatchBootstrap';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
