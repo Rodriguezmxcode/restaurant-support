@@ -111,7 +111,10 @@ const numberKey = (value?: string | null) => normalize(value || '').replace(/\s+
 const dayDistance = (left: string, right: string) => Math.abs(Date.parse(left) - Date.parse(right)) / 86400000;
 
 export function proviEvidenceKey(row: Pick<ProviEvidenceDraft, 'location' | 'orderDate' | 'vendor' | 'orderNumber' | 'orderedAmount'>) {
-  return JSON.stringify([row.location, row.orderDate, normalize(row.vendor), numberKey(row.orderNumber), money(row.orderedAmount)]);
+  const vendor = normalize(row.vendor), order = numberKey(row.orderNumber);
+  return order
+    ? JSON.stringify([row.location, vendor, order])
+    : JSON.stringify([row.location, row.orderDate, vendor, money(row.orderedAmount)]);
 }
 
 export function reconcileProviEvidence(evidence: ProviEvidenceDraft, invoices: BeverageInvoice[]): ProviEvidenceMatch {
