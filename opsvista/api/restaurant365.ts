@@ -11,6 +11,8 @@ import { getSourceSyncStatus, runSourceSync } from '../server/sourceSync.js';
 import { requestedPeriod, getRestaurant365Status } from '../server/restaurant365OData.js';
 import { parseProviImport } from '../shared/proviReports.js';
 import { getProviReports, saveProviReports } from '../server/proviReports.js';
+import { extractProviEvidence } from '../server/proviDocumentExtraction.js';
+import { getProviEvidence, saveProviEvidence } from '../server/proviEvidence.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -47,7 +49,12 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'restaurant365:read');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const view=query(req,'view');
-      if(view==='provi')return res.status(200).json({reports:await getProviReports(organizationId),canImport:authorize(user,'integrations:manage').ok});
+      if(view==='provi')return res.status(200).json({
+        reports:await getProviReports(organizationId),
+        evidence:await getProviEvidence(organizationId),
+        canImport:authorize(user,'integrations:manage').ok,
+        documentExtractionReady:Boolean(process.env.OPENAI_API_KEY),
+      });
       if(view==='sync-status') return res.status(200).json(await getSourceSyncStatus(organizationId));
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
       const start=query(req,'start'),end=query(req,'end'),month=query(req,'month')||'2026-08';
@@ -82,6 +89,14 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'integrations:manage');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const action=text(req.body?.action);
+      if(action==='extract-provi-evidence'){
+        try{return res.status(200).json(await extractProviEvidence(req.body?.files));}
+        catch(error){return res.status(process.env.OPENAI_API_KEY?400:503).json({error:error instanceof Error?error.message:'No se pudo leer la evidencia.'});}
+      }
+      if(action==='save-provi-evidence'){
+        try{return res.status(200).json(await saveProviEvidence(organizationId,user.id,req.body?.files,req.body?.purchases));}
+        catch(error){return res.status(400).json({error:error instanceof Error?error.message:'No se pudo guardar la evidencia.'});}
+      }
       if(action==='import-provi'){
         if(!String(req.headers?.['content-type']||'').toLowerCase().startsWith('application/json'))return res.status(415).json({error:'Usa un archivo de importación válido.'});
         let reports;
