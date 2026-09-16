@@ -108,7 +108,7 @@ export function extractEmbeddedPdfText(data: string) {
       } else if (/\/Filter\b/.test(dict)) { cursor = end + 9; continue; }
       const text = textFromContentStream(stream.toString('latin1'));
       if (text) chunks.push(text);
-    } catch { /* A damaged/unsupported stream should not block other text streams. */ }
+    } catch { /* Unsupported stream: continue with other text streams. */ }
     cursor = end + 9;
   }
   const direct = textFromContentStream(source);
@@ -188,29 +188,21 @@ function locationFromText(text: string) {
   return beverageLocations.find(location => new RegExp(`\\b${normalized(location)}\\b`).test(key)) || null;
 }
 
-function parseTextPurchase(text: string, vendor: string | null, vendorSegment?: string): PdfTextPurchase {
-  const source = vendorSegment || text;
+function parseTextPurchase(text: string, vendor: string | null, suppressTotal = false, extraNote = ''): PdfTextPurchase {
   const location = locationFromText(text);
   const orderDate = findLabeledDate(text, /(?:order(?:ed)?\s+date|date\s+ordered|order\s+placed|placed\s+on|purchase\s+date|fecha\s+de\s+orden)/i)
     || parseDate(text.match(/(?:20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?[,]?\s+20\d{2})/)?.[0]);
   const deliveryDate = findLabeledDate(text, /(?:delivery\s+date|deliver(?:y|ed)\s+on|expected\s+delivery|fecha\s+de\s+entrega)/i);
-  const total = findTotal(source);
-  const orderNumber = findOrderNumber(source) || findOrderNumber(text);
-  const actualVendor = vendor || labeledVendor(source) || labeledVendor(text);
+  const total = suppressTotal ? { value: null, inferred: false } : findTotal(text);
+  const orderNumber = findOrderNumber(text);
+  const actualVendor = vendor || labeledVendor(text);
   const score = Math.min(0.9, 0.15 + (location ? 0.15 : 0) + (orderDate ? 0.2 : 0) + (actualVendor ? 0.2 : 0) + (total.value !== null ? 0.25 : 0) + (orderNumber ? 0.05 : 0));
   const missing = [!location && 'locación', !orderDate && 'fecha', !actualVendor && 'distribuidor', total.value === null && 'total'].filter(Boolean).join(', ');
   const notes = ['PDF leído localmente sin usar créditos de API.'];
   if (total.inferred) notes.push('El total se estimó usando el importe monetario más alto visible; confirma el valor.');
+  if (extraNote) notes.push(extraNote);
   if (missing) notes.push(`Completa o confirma: ${missing}.`);
   return { location, orderDate, deliveryDate, vendor: actualVendor, orderNumber, orderedAmount: total.value, items: [], sourceNote: notes.join(' '), confidence: money(score) };
-}
-
-function segmentsForVendors(text: string, vendors: readonly string[]) {
-  if (vendors.length <= 1) return vendors.map(vendor => ({ vendor, text }));
-  const lower = normalized(text);
-  const points = vendors.map(vendor => ({ vendor, at: lower.indexOf(normalized(vendor).replace(/\b(?:inc|ct|connecticut|companies)\b/g, '').replace(/\s+/g, ' ').trim()) })).filter(row => row.at >= 0).sort((a, b) => a.at - b.at);
-  if (points.length !== vendors.length) return vendors.map(vendor => ({ vendor, text }));
-  return points.map((point, index) => ({ vendor: point.vendor, text: lower.slice(point.at, points[index + 1]?.at ?? lower.length) }));
 }
 
 export function extractProviTextPdfPurchases(files: ProviSourceFile[]) {
@@ -222,7 +214,7 @@ export function extractProviTextPdfPurchases(files: ProviSourceFile[]) {
     if (text.replace(/\s/g, '').length < 24) throw new Error(`${file.name}: este PDF parece escaneado como imagen o usa una codificación que no contiene texto legible. Para este archivo usa JSON o el lector visual cuando esté activo.`);
     const vendors = detectedVendors(text);
     if (vendors.length > 1) {
-      for (const segment of segmentsForVendors(text, vendors)) purchases.push(parseTextPurchase(text, segment.vendor, segment.text));
+      for (const vendor of vendors) purchases.push(parseTextPurchase(text, vendor, true, 'Se detectaron varios distribuidores en el mismo PDF. Confirma manualmente el total correspondiente a este distribuidor para evitar duplicar el total general.'));
     } else purchases.push(parseTextPurchase(text, vendors[0] || null));
   }
   return { purchases, fileCount: pdfs.length, extractionMode: 'pdf-text' as const };
