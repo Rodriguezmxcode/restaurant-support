@@ -22,6 +22,7 @@ async function schema() {
       evidence_key text not null, payload jsonb not null, imported_by text not null,
       created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
       primary key (organization_id, evidence_id), unique (organization_id, document_id, evidence_key))`;
+    await db()`create index if not exists opsvista_provi_evidence_lookup on opsvista_provi_evidence(organization_id,evidence_key)`;
   })().catch(error => { ready = undefined; throw error; });
   await ready;
 }
@@ -65,7 +66,8 @@ export async function saveProviEvidence(organizationId: string, actor: string, f
   for (const draft of drafts) {
     const evidenceId = randomUUID(), key = proviEvidenceKey(draft);
     const rows = await db()`insert into opsvista_provi_evidence (organization_id,evidence_id,document_id,evidence_key,payload,imported_by)
-      values (${organizationId},${evidenceId},${documentId},${key},${db().json(draft as never)},${actor})
+      select ${organizationId},${evidenceId},${documentId},${key},${db().json(draft as never)},${actor}
+      where not exists (select 1 from opsvista_provi_evidence where organization_id=${organizationId} and evidence_key=${key})
       on conflict (organization_id,document_id,evidence_key) do nothing returning evidence_id`;
     if (rows.length) {
       saved++;
