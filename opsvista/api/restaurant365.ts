@@ -53,7 +53,9 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
         reports:await getProviReports(organizationId),
         evidence:await getProviEvidence(organizationId),
         canImport:authorize(user,'integrations:manage').ok,
-        documentExtractionReady:Boolean(process.env.OPENAI_API_KEY),
+        pdfTextExtractionReady:true,
+        visualExtractionConfigured:Boolean(process.env.OPENAI_API_KEY),
+        documentExtractionReady:true,
       });
       if(view==='sync-status') return res.status(200).json(await getSourceSyncStatus(organizationId));
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
@@ -91,7 +93,11 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const action=text(req.body?.action);
       if(action==='extract-provi-evidence'){
         try{return res.status(200).json(await extractProviEvidence(req.body?.files));}
-        catch(error){return res.status(process.env.OPENAI_API_KEY?400:503).json({error:error instanceof Error?error.message:'No se pudo leer la evidencia.'});}
+        catch(error){
+          const message=error instanceof Error?error.message:'No se pudo leer la evidencia.';
+          const paymentRequired=/créditos|credits|quota|billing/i.test(message);
+          return res.status(paymentRequired?402:400).json({error:message});
+        }
       }
       if(action==='save-provi-evidence'){
         try{return res.status(200).json(await saveProviEvidence(organizationId,user.id,req.body?.files,req.body?.purchases));}
