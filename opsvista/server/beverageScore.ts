@@ -3,6 +3,7 @@ import { scoreBeverages, type BeverageScoreResponse } from '../shared/beverageSc
 import { readSavedSources, registerSource, sourceKey, sourceMemory } from './sourceCache.js';
 import { authorize, serverLocationAllowed } from './authorization.js';
 import type { SessionUser } from './authSession.js';
+import { applyProviEvidenceToSources } from './proviEvidence.js';
 
 export function visibleBeverageScore(score: BeverageScoreResponse, user: SessionUser): BeverageScoreResponse {
   const canSeeAmounts = authorize(user, 'restaurant365:read').ok;
@@ -32,9 +33,10 @@ export async function getBeverageScore(organizationId: string, start: string, en
       memory: { sales: sales ? sourceMemory(sales) : { stored: false, pending: true }, purchases: purchases ? sourceMemory(purchases) : { stored: false, pending: true } },
     });
   }
-  const score = scoreBeverages(beverageLocations.map(location => compareBeverages(location, sources, chunks.length)));
+  const effectiveSources = await applyProviEvidenceToSources(organizationId, start, end, sources);
+  const score = scoreBeverages(beverageLocations.map(location => compareBeverages(location, effectiveSources, chunks.length)));
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const periodOpen = end >= today;
   return { start, end, ...score, periodOpen, provisional: score.provisional || periodOpen,
-    updatedAt: sources.map(source => source.fetchedAt).filter(Boolean).sort()[0] };
+    updatedAt: effectiveSources.map(source => source.fetchedAt).filter(Boolean).sort()[0] };
 }
