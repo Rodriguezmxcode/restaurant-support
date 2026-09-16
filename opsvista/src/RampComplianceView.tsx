@@ -45,6 +45,7 @@ type Props = {
 };
 type RampSourceState = 'loading' | 'live' | 'error';
 type RampPeriod = 'today' | 'yesterday' | 'this_week' | 'prior_week' | 'last_30' | 'custom';
+type RampSpendView = 'total' | 'exposed';
 
 const periodLabels: Record<RampPeriod, string> = {
   today: 'Today',
@@ -157,6 +158,7 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   const [assignment, setAssignment] = useState<{transaction:RampComplianceResult;ownerId:string;dueAt:string}|null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assignmentError, setAssignmentError] = useState('');
+  const [spendView, setSpendView] = useState<RampSpendView>('exposed');
 
   const refresh = async () => {
     if (rangeError) {
@@ -203,6 +205,18 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
   const summary = useMemo(() => rampComplianceSummary(results), [results]);
   const cardholderRows = useMemo(() => groupRampCompliance(results, 'cardholder'), [results]);
   const locationRows = useMemo(() => groupRampCompliance(results, 'department'), [results]);
+  const spendReconciliation = useMemo(() => {
+    const unassigned = locationRows.find(row => row.key === 'Unassigned')?.totalSpend || 0;
+    const assigned = locationRows.filter(row => row.key !== 'Unassigned').reduce((sum, row) => sum + row.totalSpend, 0);
+    const difference = Math.round((summary.totalSpend - assigned - unassigned) * 100) / 100;
+    return { assigned, unassigned, difference };
+  }, [locationRows, summary.totalSpend]);
+  const spendInsightRows = useMemo(() => locationRows.map(row => ({
+    location: row.key === 'Unassigned' ? 'Unassigned / Needs classification' : row.key,
+    primary: spendView === 'total' ? row.totalSpend : row.exposedSpend,
+    secondary: row.score,
+    status: row.key === 'Unassigned' && row.totalSpend > 0 ? 'bad' as const : row.score < 70 ? 'bad' as const : row.score < 90 ? 'watch' as const : 'good' as const,
+  })), [locationRows, spendView]);
   const overdueRows = useMemo(() => results.filter(tx => tx.overdue), [results]);
   const restaurantOptions = useMemo(() => [...new Set(results.map(tx => tx.restaurant || tx.department).filter(Boolean) as string[])].sort(), [results]);
   const roleOptions = useMemo(() => [...new Set(results.map(tx => tx.role).filter(Boolean) as string[])].sort(), [results]);
@@ -286,7 +300,13 @@ export default function RampComplianceView({ onEscalate, allowedLocations, manag
       <article className="ramp-summary-card"><span>MISSING MEMOS</span><strong>{summary.missingMemos}</strong><p>Purpose of spend incomplete</p></article>
     </section>
 
-    {!managerMode&&!!locationRows.length&&<MaxDataInsights title="Gasto expuesto y cumplimiento" subtitle="Comparación por restaurante o departamento; los filtros cruzados revelan dónde falta evidencia y cuánto gasto está en riesgo." rows={locationRows.map(row=>({location:row.key,primary:row.exposedSpend,secondary:row.score,status:row.score<70?'bad':row.score<90?'watch':'good'}))} primaryLabel="Gasto expuesto" secondaryLabel="Compliance score" primaryFormat={value=>money(value)} secondaryFormat={value=>`${value.toFixed(0)} / 100`} conclusion={filtered=>{if(!filtered.length)return['Sin gastos para este filtro.'];const exposure=[...filtered].sort((a,b)=>b.primary-a.primary);const compliance=[...filtered].sort((a,b)=>(a.secondary??100)-(b.secondary??100));const alerts=filtered.filter(row=>row.status!=='good');return[`${exposure[0].location} concentra ${money(exposure[0].primary)} de gasto expuesto.`,`${compliance[0].location} tiene el menor compliance score: ${(compliance[0].secondary??0).toFixed(0)} / 100.`,alerts.length?`Solicita recibos y memos en ${alerts.map(row=>row.location).join(', ')}.`:'Todas las unidades visibles alcanzan 90 puntos o más.'];}}/>}
+    {!managerMode&&!!locationRows.length&&<>
+      <section className="ramp-spend-audit">
+        <div className="ramp-spend-audit-head"><div><span>RAMP SPEND AUDIT</span><strong>Conciliación por locación / departamento</strong><small>El gasto total siempre debe quedar explicado entre asignado y sin asignar.</small></div><div className="ramp-spend-toggle" role="group" aria-label="Vista de gasto Ramp"><button type="button" className={spendView==='total'?'active':''} onClick={()=>setSpendView('total')}>Total Spend</button><button type="button" className={spendView==='exposed'?'active':''} onClick={()=>setSpendView('exposed')}>Exposed Spend</button></div></div>
+        <div className="ramp-spend-reconciliation"><article><span>RAMP TOTAL</span><strong>{money(summary.totalSpend)}</strong><small>100% del periodo seleccionado</small></article><article><span>ASSIGNED</span><strong>{money(spendReconciliation.assigned)}</strong><small>Restaurantes / departamentos identificados</small></article><article className={spendReconciliation.unassigned>0?'needs-classification':''}><span>UNASSIGNED</span><strong>{money(spendReconciliation.unassigned)}</strong><small>{spendReconciliation.unassigned>0?'Needs classification':'Todo el gasto tiene asignación'}</small></article><article className={Math.abs(spendReconciliation.difference)>0.01?'out-of-balance':'balanced'}><span>DIFFERENCE</span><strong>{money(spendReconciliation.difference)}</strong><small>{Math.abs(spendReconciliation.difference)<=0.01?'Conciliado ✓':'Revisar agrupación'}</small></article></div>
+      </section>
+      <MaxDataInsights title={spendView==='total'?'Gasto total por locación / departamento':'Gasto con excepciones de compliance'} subtitle={spendView==='total'?'Distribución del 100% del gasto Ramp; Unassigned identifica transacciones que todavía necesitan clasificación.':'Solo muestra transacciones con alguna excepción de compliance; no representa el gasto total de Ramp.'} rows={spendInsightRows} primaryLabel={spendView==='total'?'Total Spend':'Gasto con excepciones'} secondaryLabel="Compliance score" primaryFormat={value=>money(value)} secondaryFormat={value=>`${value.toFixed(0)} / 100`} conclusion={filtered=>{if(!filtered.length)return['Sin gastos para este filtro.'];const ranked=[...filtered].sort((a,b)=>b.primary-a.primary);const compliance=[...filtered].sort((a,b)=>(a.secondary??100)-(b.secondary??100));const unassigned=filtered.find(row=>row.location.startsWith('Unassigned'));return[spendView==='total'?`${ranked[0].location} concentra ${money(ranked[0].primary)} del gasto total.`:`${ranked[0].location} concentra ${money(ranked[0].primary)} de gasto con excepciones.`,unassigned&&unassigned.primary>0?`${money(unassigned.primary)} todavía requiere asignación de restaurante o departamento.`:`No hay gasto sin asignación dentro de este filtro.`,`${compliance[0].location} tiene el menor compliance score: ${(compliance[0].secondary??0).toFixed(0)} / 100.`];}}/>
+    </>}
 
     <section className="ramp-policy-strip">
       <div><strong>OpsVista Compliance Policy</strong><span>Cardholder, restaurant/department, memo and receipt are required. Missing receipt or memo becomes overdue after 48 hours.</span></div>
