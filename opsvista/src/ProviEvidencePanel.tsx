@@ -4,7 +4,14 @@ import type { ProviEvidenceDraft, ProviSourceFile, StoredProviEvidence } from '.
 
 const usd = (value: number | null | undefined) => value === null || value === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const stamp = (value: string) => new Date(value).toLocaleString('es-MX', { timeZone: 'America/New_York' });
-type EvidenceResponse = { evidence?: StoredProviEvidence[]; canImport?: boolean; documentExtractionReady?: boolean; error?: string };
+type EvidenceResponse = {
+  evidence?: StoredProviEvidence[];
+  canImport?: boolean;
+  pdfTextExtractionReady?: boolean;
+  visualExtractionConfigured?: boolean;
+  documentExtractionReady?: boolean;
+  error?: string;
+};
 
 async function readEvidence(signal?: AbortSignal): Promise<EvidenceResponse> {
   const response = await fetch('/api/integrations/restaurant365?view=provi', { credentials: 'include', cache: 'no-store', signal });
@@ -40,8 +47,8 @@ export default function ProviEvidencePanel({ locations, allowImport = false }: {
     setError(''); setNotice(''); setDrafts([]); setFiles([]);
     if (!selected?.length) return;
     const picked = [...selected];
-    if (picked.length > 4) return setError('Selecciona máximo 4 fotos/PDF por compra.');
-    if (picked.reduce((sum, file) => sum + file.size, 0) > 3_000_000) return setError('Las fotos/PDF pueden pesar hasta 3 MB combinados.');
+    if (picked.length > 4) return setError('Selecciona máximo 4 archivos por compra.');
+    if (picked.reduce((sum, file) => sum + file.size, 0) > 3_000_000) return setError('Los archivos pueden pesar hasta 3 MB combinados.');
     setBusy(true);
     try {
       const encoded: ProviSourceFile[] = await Promise.all(picked.map(async file => ({ name: file.name, mime: safeMime(file), data: await fileBase64(file) })));
@@ -63,6 +70,7 @@ export default function ProviEvidencePanel({ locations, allowImport = false }: {
       }));
       if (!purchases.length) throw new Error('No se identificó ninguna compra en esos archivos.');
       setDrafts(purchases);
+      if (body.extractionMode === 'pdf-text') setNotice('PDF leído localmente en OpsVista · sin usar créditos de OpenAI. Revisa los campos antes de guardar.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo leer la evidencia.'); }
     finally { setBusy(false); }
   };
@@ -81,13 +89,14 @@ export default function ProviEvidencePanel({ locations, allowImport = false }: {
   const status = (row: StoredProviEvidence) => row.match.status === 'verified' ? ['Verificada con R365', 'verified'] : row.match.status === 'needs_review' ? ['Revisar posible coincidencia', 'review'] : ['Provi provisional', 'provisional'];
 
   return <div className="provi-evidence">
-    <div className="provi-evidence-head"><div><h4>Compras rápidas · foto o PDF</h4><p>Sube la evidencia el mismo día de la orden. OpsVista la usa provisionalmente y deja de sumarla cuando encuentra la factura correspondiente en R365.</p></div><span className={`provi-reader ${data.documentExtractionReady ? 'ready' : 'offline'}`}>{data.documentExtractionReady ? 'Lector de documentos listo' : 'Lector pendiente de configuración'}</span></div>
+    <div className="provi-evidence-head"><div><h4>Compras rápidas · PDF, foto o JSON</h4><p>Los PDF que contienen texto se leen dentro de OpsVista sin usar créditos. La compra queda provisional hasta que R365 encuentre y corrobore el invoice.</p></div><span className="provi-reader ready">PDF con texto · sin API</span></div>
     {notice && <p role="status" className="provi-success">{notice}</p>}
     {error && <p role="alert" className="provi-warning">{error}</p>}
     {allowImport && data.canImport && <div className="provi-evidence-actions">
-      <label className="provi-upload-button">Subir foto / PDF<input type="file" accept="image/jpeg,image/png,image/webp,.pdf,application/pdf" multiple disabled={busy} onChange={event => { void chooseFiles(event.target.files); event.currentTarget.value = ''; }}/></label>
+      <label className="provi-upload-button">Subir PDF · sin API<input type="file" accept=".pdf,application/pdf" multiple disabled={busy} onChange={event => { void chooseFiles(event.target.files); event.currentTarget.value = ''; }}/></label>
+      <label className="provi-upload-button secondary">Subir foto<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy} onChange={event => { void chooseFiles(event.target.files); event.currentTarget.value = ''; }}/></label>
       <label className="provi-upload-button secondary">Tomar foto<input type="file" accept="image/*" capture="environment" disabled={busy} onChange={event => { void chooseFiles(event.target.files); event.currentTarget.value = ''; }}/></label>
-      <small>Máximo 4 archivos y 3 MB combinados por carga. JSON sigue disponible en el importador de reportes.</small>
+      <small>PDF con texto: lectura local sin créditos. PDF escaneado como imagen y fotografías: requieren lector visual/API. JSON sigue disponible en el importador de reportes.</small>
     </div>}
     {busy && <p role="status">Leyendo o guardando evidencia Provi…</p>}
     {drafts.length > 0 && <div className="provi-evidence-review"><h4>Revisa antes de guardar</h4><p>Estos datos sí afectarán la compra provisional. Corrige cualquier campo que no coincida con la orden.</p>
