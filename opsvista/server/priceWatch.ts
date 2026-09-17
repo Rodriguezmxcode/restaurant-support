@@ -5,7 +5,7 @@ type Row=Record<string,unknown>;
 const baseUrl=()=> (process.env.RESTAURANT365_ODATA_BASE_URL?.trim()||'https://odata.restaurant365.net/api/v2/views').replace(/\/$/,'');
 const pick=(row:Row,names:string[])=>{for(const name of names){const entry=Object.entries(row).find(([key])=>key.toLowerCase()===name.toLowerCase());if(entry&&entry[1]!==undefined&&entry[1]!==null&&String(entry[1]).trim()!=='')return entry[1];}return undefined;};
 const text=(row:Row,names:string[])=>{const v=pick(row,names);return v===undefined?'':String(v).trim();};
-const num=(row:Row,names:string[])=>{const v=pick(row,names);if(typeof v==='number'&&Number.isFinite(v))return v;const n=Number(String(v??'').replace(/[$,()]/g,''));return Number.isFinite(n)?n:null;};
+const num=(row:Row,names:string[])=>{const v=pick(row,names);if(v===undefined||v===null||String(v).trim()==='')return null;if(typeof v==='number'&&Number.isFinite(v))return v;const raw=String(v).trim();const negative=/^\(.*\)$/.test(raw);const n=Number(raw.replace(/[$,()\s]/g,''));if(!Number.isFinite(n))return null;return negative?-Math.abs(n):n;};
 const bool=(row:Row,names:string[])=>{const v=pick(row,names);return v===true||v===1||['true','1','yes'].includes(String(v).toLowerCase());};
 const id=(row:Row)=>text(row,['transactionId','id']).toLowerCase();
 const validDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(`${value}T12:00:00Z`));
@@ -26,24 +26,23 @@ function parseLine(detail:Row,header:Row,vendor:string):PriceWatchLine|null{
  const directUnit=num(detail,['eachAmount','unitPrice','price','amountEach','costEach','invoiceUnitPrice']);
  const rawTotal=num(detail,['lineAmount','lineTotal','extendedPrice','extPrice','total','amount','debit']);
  const lineTotal=rawTotal===null?null:Math.abs(rawTotal);
- const unitPrice=directUnit!==null?Math.abs(directUnit):quantity&&lineTotal!==null?Math.abs(lineTotal/quantity):null;
+ const unitPrice=directUnit!==null?Math.abs(directUnit):quantity!==null&&quantity!==0&&lineTotal!==null?Math.abs(lineTotal/quantity):null;
  const packSize=text(detail,['packSize','caseSize','packageSize','size','purchasePackSize']);
  const weight=num(detail,['weight','catchWeight','actualWeight']);
- const hasItem=Boolean(itemName||vendorItemNumber||itemId);
- if(!hasItem)return null;
- const verify:string[]=[];if(quantity===null||quantity===0)verify.push('Cantidad/UOM sin confirmar');if(!uom)verify.push('UOM sin confirmar');if(unitPrice===null)verify.push('Precio unitario sin confirmar');if(!vendorItemNumber&&!itemId)verify.push('SKU/vendor item sin confirmar');
+ const hasItem=Boolean(itemName||vendorItemNumber||itemId);if(!hasItem)return null;
+ const verify:string[]=[];if(quantity===null||quantity===0)verify.push('Cantidad sin confirmar');if(!uom)verify.push('UOM sin confirmar');if(unitPrice===null||unitPrice<=0)verify.push('Precio unitario sin confirmar');if(!vendorItemNumber&&!itemId)verify.push('SKU/vendor item sin confirmar');
  const type=text(header,['type']),credit=/credit/i.test(type);const date=text(header,['date']).slice(0,10);const location=normalizeLocation(text(header,['locationName','location']));const name=itemName||vendorItemNumber||'Artículo sin nombre';
- return{transactionId:id(header),invoiceNumber:text(header,['transactionNumber','number'])||undefined,date,location,vendor,approved:bool(header,['isApproved','approved']),credit,itemId:itemId||undefined,itemName:name,vendorItemNumber:vendorItemNumber||undefined,uom:uom||undefined,quantity:quantity===null?null:Math.abs(quantity),unitPrice,lineTotal,packSize:packSize||undefined,weight,category:classifyPriceWatchItem(name,vendor,uom),source:'r365-item',verify};
+ return{transactionId:id(header),invoiceNumber:text(header,['transactionNumber','number'])||undefined,date,location,vendor,approved:bool(header,['isApproved','approved']),credit,itemId:itemId||undefined,itemName:name,vendorItemNumber:vendorItemNumber||undefined,uom:uom||undefined,quantity:quantity===null?null:Math.abs(quantity),unitPrice:unitPrice!==null&&unitPrice>0?unitPrice:null,lineTotal,packSize:packSize||undefined,weight,category:classifyPriceWatchItem(name,vendor,uom),source:'r365-item',verify};
 }
 export async function getPriceWatch(organizationId:string,start:string,end:string,refresh=false):Promise<PriceWatchResponse>{
- if(!validDate(start)||!validDate(end)||start>end||days(start,end)>93)throw new Error('Price Watch requiere un rango válido de hasta 93 días.');const key=`price-watch-v1:${start}:${end}`;
+ if(!validDate(start)||!validDate(end)||start>end||days(start,end)>93)throw new Error('Price Watch requiere un rango válido de hasta 93 días.');const key=`price-watch-v2:${start}:${end}`;
  if(!refresh){const saved=await getIntegrationSnapshot<PriceWatchResponse>(organizationId,'restaurant365-price-watch',key);if(saved&&Date.now()-Date.parse(saved.updatedAt)<30*60*1000)return saved.payload;}
  const c=await credentials(organizationId);const endExclusive=new Date(Date.parse(`${end}T00:00:00Z`)+86400000).toISOString().slice(0,10);
  const headers=await all(c,'Transaction',{'$select':'transactionId,locationId,locationName,date,transactionNumber,type,isApproved,companyId,name','$filter':`date ge ${start}T00:00:00Z and date lt ${endExclusive}T00:00:00Z`},20000,250);
  const invoices=headers.filter(row=>/^ap\s*(invoice|credit(?:\s*memo)?)$/i.test(text(row,['type']).trim()));const companyIds=[...new Set(invoices.map(row=>text(row,['companyId'])).filter(Boolean))];const companies=new Map<string,string>();
  for(const batch of chunks(companyIds,20)){const result=await all(c,'Company',{'$select':'companyId,name','$filter':batch.map(value=>`companyId eq ${value}`).join(' or ')},5000,250).catch(()=>[]);for(const row of result)companies.set(text(row,['companyId']).toLowerCase(),text(row,['name'])||'Proveedor sin identificar');}
  const batches=chunks(invoices.map(id).filter(Boolean),8);const pages=await parallel(batches,2,async batch=>all(c,'TransactionDetail',{'$filter':batch.map(value=>`transactionId eq ${value}`).join(' or ')},5000,250).catch(async()=>{const singles=await parallel(batch,4,value=>all(c,'TransactionDetail',{'$filter':`transactionId eq ${value}`},2000,250));return singles.flat();}));const details=pages.flat();const byId=new Map<string,Row[]>();for(const row of details){const key=id(row);const list=byId.get(key)||[];list.push(row);byId.set(key,list);}
- const parsed:PriceWatchLine[]=[];let accountLines=0;for(const header of invoices){const vendor=companies.get(text(header,['companyId']).toLowerCase())||text(header,['name'])||'Proveedor sin identificar';const rows=byId.get(id(header))||[];for(const detail of rows){const line=parseLine(detail,header,vendor);if(line)parsed.push(line);else accountLines++;}}
+ const parsed:PriceWatchLine[]=[];let accountLines=0;for(const header of invoices){const vendor=companies.get(text(header,['companyId']).toLowerCase())||text(header,['name'])||'Proveedor sin identificar';const detailRows=byId.get(id(header))||[];for(const detail of detailRows){const line=parseLine(detail,header,vendor);if(line)parsed.push(line);else accountLines++;}}
  const result=analyzePriceWatch(parsed,start,end);result.sourceCoverage.accountLines=accountLines;result.sourceCoverage.invoices=invoices.length;result.caveats=[
   'Price Watch compara líneas de AP Invoice/Credit Memo que Restaurant365 expone por artículo. Las líneas registradas solo por cuenta GL quedan fuera del cálculo de precio.',
   'Los cambios de UOM, pack/case size, SKU o datos incompletos se marcan VERIFY y no se presentan como aumento confirmado.',
