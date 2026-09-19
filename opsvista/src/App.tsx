@@ -105,7 +105,7 @@ function LegacyWorkspace(){
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const allowedPerformanceLocations=useMemo(()=>permissions.allLocations?toastPerformanceLocations:allowedLocations,[permissions.allLocations,allowedLocations]);
   const nav=permissions.modules;
-  const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=storedSection();return (integration?(permissions.modules.includes('Integraciones')?'Integraciones':'Configuración'):saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:'Resumen') as OpsVistaModule;});
+  const [section,setSection]=useState<OpsVistaModule>(()=>{const integration=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('integration');const saved=storedSection();return (integration?(permissions.modules.includes('Integraciones')?'Integraciones':permissions.modules.includes('Configuración')?'Configuración':permissions.modules[0]):saved&&permissions.modules.includes(saved as OpsVistaModule)?saved:permissions.modules.includes('Resumen')?'Resumen':permissions.modules[0]) as OpsVistaModule;});
   const [search,setSearch]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const [searchIndex,setSearchIndex]=useState(0);
