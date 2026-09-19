@@ -39,6 +39,13 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
     const organizationId=user.organizationId||'org-puerto-vallarta';
 
     if(!req.method||req.method==='GET'){
+      if(query(req,'view')==='price-watch') {
+        const access=authorize(user,'price-watch:read');
+        if(!access.ok)return res.status(access.status).json({error:access.error,requestId});
+        const start=query(req,'start'),end=query(req,'end');
+        if(Boolean(start)!==Boolean(end)||!start||!end)return res.status(400).json({error:'Selecciona una fecha inicial y final para Price Watch.',requestId});
+        return res.status(200).json(await getPriceWatch(organizationId,start,end,query(req,'refresh')==='1'));
+      }
       if(query(req,'view')==='beverage-score') {
         const access=authorize(user,'bonus:read');
         if(!access.ok)return res.status(access.status).json({error:access.error,requestId});
@@ -62,7 +69,6 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       if(!view)return res.status(200).json(await getRestaurant365Status(organizationId));
       const start=query(req,'start'),end=query(req,'end'),month=query(req,'month')||'2026-08';
       if(Boolean(start)!==Boolean(end))return res.status(400).json({error:'Selecciona una fecha inicial y final para Restaurant365.',requestId});
-      if(view==='price-watch') return res.status(200).json(await getPriceWatch(organizationId,start,end,query(req,'refresh')==='1'));
       if(view==='beverage') {
         const entity=query(req,'entity');
         if(!validBeverageRange(start,end)||!beverageLocations.includes(entity)) return res.status(400).json({error:'Selecciona una locación y un periodo válido de hasta siete días.',requestId});
