@@ -6,13 +6,17 @@ import { parseVistaSocialReviewsCsv } from './vistaSocialCsv';
 import './googleReviews.css';
 import './googleReviewsFallback.css';
 
-type Period = 'this-week' | 'previous-week' | 'this-month' | 'last-30-days' | 'custom';
+type Period = 'today' | 'this-week' | 'previous-week' | 'this-month' | 'last-30-days' | 'custom';
 type Review = { id: string; reviewer: string; rating: number; comment: string; createTime: string; answered: boolean };
 type LocationSummary = {
   location: string;
   googleTitle?: string;
   reviewCount: number;
   averageRating: number | null;
+  oneStarCount?: number;
+  twoStarCount?: number;
+  threeStarCount?: number;
+  fourStarCount?: number;
   fiveStarCount: number;
   lowRatingCount: number;
   unansweredCount: number | null;
@@ -45,6 +49,7 @@ function selectedRange(period: Period, customStart: string, customEnd: string) {
   const sinceWednesday = (today.getDay() - 3 + 7) % 7;
   const weekStart = addDays(today, -sinceWednesday);
   if (period === 'custom') return { start: customStart, end: customEnd };
+  if (period === 'today') return { start: iso(today), end: iso(today) };
   if (period === 'previous-week') { const start = addDays(weekStart, -7); return { start: iso(start), end: iso(addDays(start, 6)) }; }
   if (period === 'this-month') return { start: iso(new Date(today.getFullYear(), today.getMonth(), 1)), end: iso(today) };
   if (period === 'last-30-days') return { start: iso(addDays(today, -29)), end: iso(today) };
@@ -52,6 +57,7 @@ function selectedRange(period: Period, customStart: string, customEnd: string) {
 }
 
 const periodLabels: Record<Period, string> = {
+  today: 'Hoy',
   'this-week': 'Esta semana',
   'previous-week': 'Semana anterior',
   'this-month': 'Este mes',
@@ -174,7 +180,7 @@ export default function GoogleReviewsView({ allowedLocations, canImportReviews =
         return <article className="reviews-location-card" key={row.location}>
           <header><div><span>GOOGLE BUSINESS PROFILE</span><h2>{row.location}</h2><small>{row.googleTitle || row.location}</small></div><strong>{row.averageRating === null ? '—' : `${row.averageRating.toFixed(2)} ★`}</strong></header>
           {row.mappingError ? <p className="mapping-error">{row.mappingError}</p> : <>
-            <div className="reviews-location-stats"><div><span>Reviews</span><strong>{row.reviewCount}</strong></div><div><span>5 estrellas</span><strong>{row.fiveStarCount}</strong></div><div><span>1–2 estrellas</span><strong>{row.lowRatingCount}</strong></div><div><span>Sin respuesta</span><strong>{row.unansweredCount ?? 'N/D'}</strong></div></div>
+            <div className="reviews-location-stats"><div><span>Reviews</span><strong>{row.reviewCount}</strong></div><div><span>1★</span><strong>{row.oneStarCount ?? 'N/D'}</strong></div><div><span>2★</span><strong>{row.twoStarCount ?? 'N/D'}</strong></div><div><span>3★</span><strong>{row.threeStarCount ?? 'N/D'}</strong></div><div><span>4★</span><strong>{row.fourStarCount ?? 'N/D'}</strong></div><div><span>5★</span><strong>{row.fiveStarCount}</strong></div><div><span>Sin respuesta</span><strong>{row.unansweredCount ?? 'N/D'}</strong></div></div>
             <div className="reviews-bonus-progress"><div><span>Bono semanal · Google Reviews</span><strong>{points === undefined ? '0.0 / 5' : `${points.toFixed(1)} / 5`}</strong></div><div className="reviews-progress-track"><i style={{ width: `${Math.min(100, Math.max(0, (points ?? 0) / 5 * 100))}%` }} /></div><small className={row.minimumMet ? 'met' : 'below'}>{row.minimumMet ? '✓ Mínimo semanal cumplido' : `Faltan ${Math.max(0, 5 - row.reviewCount)} para cumplir el mínimo`}</small></div>
           </>}
         </article>;
