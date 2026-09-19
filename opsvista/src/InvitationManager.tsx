@@ -64,14 +64,24 @@ export default function InvitationManager({currentUser}:Props){
     }
   };
 
-  const resendPending=async()=>{
+  const resendPending=async(copyForGmail=false)=>{
     setLoading(true);setMessage('');setInviteUrl('');
     try{
       const response=await fetch('/api/management/invitations',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'resend_pending'})});
-      const body=await response.json().catch(()=>({})) as {error?:string;resent?:number;emailAccepted?:number;emailFailed?:number};
+      const body=await response.json().catch(()=>({})) as {error?:string;resent?:number;emailAccepted?:number;emailFailed?:number;results?:Array<{email?:string;inviteUrl?:string;expiresAt?:string}>};
       if(!response.ok)throw new Error(body.error||`Unable to resend pending invitations (${response.status}).`);
-      if(!body.resent)setMessage('No previously invited users are waiting for activation.');
-      else setMessage(`Reissued ${body.resent} pending invitation${body.resent===1?'':'s'}. Email provider accepted ${body.emailAccepted??0}; ${body.emailFailed??0} need manual follow-up.`);
+      if(!body.resent){setMessage('No previously invited users are waiting for activation.');await load();return;}
+      if(copyForGmail){
+        const rows=(body.results??[]).filter(item=>item.email&&item.inviteUrl).map(item=>{
+          const user=users.find(candidate=>candidate.email?.toLowerCase()===item.email?.toLowerCase());
+          return [user?.name||'',item.email||'',user?.role||'',user?.title||'',user?.locations?.join(', ')||'',item.inviteUrl||''].join('\t');
+        });
+        const payload=['name\temail\trole\ttitle\tlocations\tinviteUrl',...rows].join('\n');
+        await navigator.clipboard?.writeText(payload);
+        setMessage(`Prepared ${rows.length} Gmail invitation${rows.length===1?'':'s'} and copied the full batch to your clipboard. Paste it into ChatGPT so the emails can be sent from Gmail. Previous pending links were replaced by these fresh 48-hour links.`);
+      }else{
+        setMessage(`Reissued ${body.resent} pending invitation${body.resent===1?'':'s'}. Email provider accepted ${body.emailAccepted??0}; ${body.emailFailed??0} need manual follow-up.`);
+      }
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:'Unable to resend pending invitations.');}
     finally{setLoading(false);}
@@ -91,7 +101,7 @@ export default function InvitationManager({currentUser}:Props){
         <button className="primary" disabled={!userId||loading||directoryLoading} onClick={create}>{loading?'Sending…':directoryLoading?'Loading…':'Send invitation'}</button>
       </div>
       {message&&<div className="detail-block"><label>INVITATION</label><p>{message}</p>{inviteUrl&&<div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:8,marginTop:8}}><input readOnly value={inviteUrl} style={{width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #ccd9e8',borderRadius:8}}/><button onClick={()=>navigator.clipboard?.writeText(inviteUrl)}>Copy link</button></div>}</div>}
-      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}><button disabled={loading||directoryLoading} onClick={resendPending}>Resend pending invites</button><span style={{fontSize:12,color:'#64748b'}}>Creates fresh 48-hour links only for previously invited users who have not activated their account.</span></div>
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}><button disabled={loading||directoryLoading} onClick={()=>void resendPending(false)}>Resend pending invites</button><button className="primary" disabled={loading||directoryLoading} onClick={()=>void resendPending(true)}>Prepare Gmail invites</button><span style={{fontSize:12,color:'#64748b'}}>Prepare Gmail invites creates fresh 48-hour links for pending users and copies the complete batch to your clipboard.</span></div>
       <div style={{display:'grid',gap:8}}>{users.slice(0,30).map(user=>{const inv=latestByUser.get(user.id);return <div key={user.id} style={{display:'grid',gridTemplateColumns:'minmax(170px,1fr) 120px minmax(220px,1.2fr) 110px 170px',gap:10,padding:'9px 10px',border:'1px solid #e3eaf2',borderRadius:9,fontSize:12}}><strong>{user.name}</strong><span>{user.role}</span><span>{user.email}</span><span>{inv?.status??'not invited'}</span><span>{inv?new Date(inv.expiresAt).toLocaleString():'—'}</span></div>})}</div>
       <p style={{margin:0,fontSize:12,color:'#64748b'}}>Founder credentials are platform-level and intentionally excluded from client invitations. OpsVista now sends invitation email automatically when the sender is configured; Copy link remains available as a backup.</p>
     </div>
