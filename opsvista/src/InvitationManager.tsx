@@ -37,7 +37,7 @@ export default function InvitationManager({currentUser}:Props){
       setDirectoryLoading(false);
     }
   };
-  useEffect(()=>{void load();},[]);
+  useEffect(()=>{void load();const refresh=()=>void load();window.addEventListener('opsvista-user-directory-changed',refresh);return()=>window.removeEventListener('opsvista-user-directory-changed',refresh);},[]);
 
   const latestByUser=useMemo(()=>{
     const map=new Map<string,Invitation>();
