@@ -53,6 +53,8 @@ const Restaurant365View=recoverableLazy(()=>import('./Restaurant365View'));
 const allLocations=['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 const toastPerformanceLocations=[...allLocations,'Middletown'];
 const icon:Record<string,string>={Resumen:'⌂',Locaciones:'▦',Ventas:'↗','Google Reviews':'✦','Local Intelligence':'⌁',Finanzas:'▥',Gastos:'$',Horarios:'◷',Tasks:'☑','Bono semanal':'★','Action Center':'⚡',Proyectos:'◆',Prioridades:'⚑',Pagos:'$',Transferencias:'⇄',Restaurant365:'R',Integraciones:'⛓',Configuración:'⚙'};
+const navLabels:Record<string,[string,string]>={Resumen:['Home','Inicio'],Locaciones:['Locations','Locaciones'],Ventas:['Sales','Ventas'],'Google Reviews':['Reviews','Reseñas'],'Local Intelligence':['Local','Local'],Finanzas:['Finance','Finanzas'],Gastos:['Ramp','Ramp'],Horarios:['Schedules','Horarios'],Tasks:['Tasks','Tareas'],'Bono semanal':['Bonus','Bono'],'Action Center':['Alerts','Alertas'],Proyectos:['Projects','Proyectos'],Prioridades:['Priorities','Prioridades'],Pagos:['Payments','Pagos'],Transferencias:['Transfers','Transferencias'],Restaurant365:['R365','R365'],Integraciones:['Integrations','Integraciones'],Configuración:['Settings','Configuración']};
+const mobilePrimaryOrder:OpsVistaModule[]=['Resumen','Locaciones','Tasks','Action Center'];
 
 type SearchEntry={section:OpsVistaModule;label:string;description:string;keywords:string[]};
 const searchCatalog:SearchEntry[]=[
@@ -102,6 +104,7 @@ function LegacyWorkspace(){
   const [previewUser,setPreviewUser]=useState<OpsVistaUser|null>(null);
   const [previewNotice,setPreviewNotice]=useState('');
   const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>{try{return window.localStorage.getItem('opsvista-sidebar-collapsed')==='1'}catch{return false}});
+  const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
   const currentUser=previewUser??authenticatedUser;
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
@@ -143,9 +146,21 @@ function LegacyWorkspace(){
       .map(({entry})=>({id:`module-${entry.section}`,section:entry.section,label:entry.label,description:entry.description,badge:'MÓDULO'}));
   },[search,navKey,allowedLocationKey]);
   const searchResults=useMemo(()=>[...moduleResults,...liveSearchResults.filter(result=>!moduleResults.some(module=>module.id===result.id))].slice(0,12),[moduleResults,liveSearchResults]);
+  const mobilePrimary=useMemo(()=>{
+    const preferred=mobilePrimaryOrder.filter(item=>nav.includes(item));
+    return [...preferred,...nav.filter(item=>!preferred.includes(item))].slice(0,4);
+  },[navKey]);
 
   useEffect(()=>{if(!nav.includes(section))setSection(nav.includes('Resumen')?'Resumen':nav[0]);},[currentUser.id,section]);
   useEffect(()=>{rememberSection(section)},[section]);
+  useEffect(()=>{
+    if(!mobileMenuOpen)return;
+    const previousOverflow=document.body.style.overflow;
+    const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setMobileMenuOpen(false)};
+    document.body.style.overflow='hidden';
+    document.addEventListener('keydown',close);
+    return()=>{document.body.style.overflow=previousOverflow;document.removeEventListener('keydown',close)};
+  },[mobileMenuOpen]);
   useEffect(()=>{setSearchIndex(0)},[search,liveSearchResults]);
   useEffect(()=>{
     const value=search.trim();
@@ -196,6 +211,8 @@ function LegacyWorkspace(){
   const startUserPreview=(user:OpsVistaUser)=>{setPreviewNotice('');setPreviewUser(user);setSearch('');setSearchTarget(null);};
   const stopUserPreview=()=>{setPreviewUser(null);setPreviewNotice('');setSection('Configuración');};
   const toggleSidebar=()=>setSidebarCollapsed(collapsed=>{const next=!collapsed;try{window.localStorage.setItem('opsvista-sidebar-collapsed',next?'1':'0')}catch{/* Storage can be unavailable. */}return next});
+  const navLabel=(item:OpsVistaModule)=>{const pair=navLabels[item]||[item,item];return t(pair[0],pair[1]);};
+  const navigateToSection=(item:OpsVistaModule)=>{rememberSection(item);setSearchTarget(null);setSection(item);setMobileMenuOpen(false);window.scrollTo({top:0,behavior:'smooth'});};
   const openSearchResult=(target:GlobalSearchResult)=>{
     if(!nav.includes(target.section))return;
     rememberSection(target.section);
@@ -248,7 +265,7 @@ function LegacyWorkspace(){
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">OV</div><div className="brand-copy"><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
       <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed?'Expandir menú lateral':'Compactar menú lateral'} aria-pressed={sidebarCollapsed} title={sidebarCollapsed?'Expandir menú':'Compactar menú'}>{sidebarCollapsed?'›':'‹'}</button>
-      <nav aria-label="Módulos de OpsVista">{nav.map(item=>{const labels:Record<string,[string,string]>={Resumen:['Overview','Resumen'],Locaciones:['Locations','Locaciones'],Ventas:['Sales','Ventas'],'Google Reviews':['Google Reviews','Google Reviews'],'Local Intelligence':['Local Intelligence','Local Intelligence'],Finanzas:['Finance','Finanzas'],Gastos:['Ramp Expenses','Gastos Ramp'],Horarios:['Schedules','Horarios'],Tasks:['Tasks','Tasks'],'Bono semanal':['Weekly Bonus','Bono semanal'],'Action Center':['Action Center','Action Center'],Proyectos:['Projects','Proyectos'],Prioridades:['Priorities','Prioridades'],Pagos:['Payments','Pagos'],Transferencias:['Transfers','Transferencias'],Restaurant365:['Restaurant365','Restaurant365'],Integraciones:['Integrations','Integraciones'],Configuración:['Settings','Configuración']};const pair=labels[item]||[item,item];const label=t(pair[0],pair[1]);return <button key={item} className={section===item?'active':''} onClick={()=>{rememberSection(item);setSearchTarget(null);setSection(item);}} aria-label={sidebarCollapsed?label:undefined} title={sidebarCollapsed?label:undefined}><span className="nav-icon">{icon[item]}</span><span className="nav-label">{label}</span></button>})}</nav>
+      <nav aria-label="Módulos de OpsVista">{nav.map(item=>{const label=navLabel(item);return <button key={item} className={section===item?'active':''} onClick={()=>navigateToSection(item)} aria-label={sidebarCollapsed?label:undefined} title={sidebarCollapsed?label:undefined}><span className="nav-icon">{icon[item]}</span><span className="nav-label">{label}</span></button>})}</nav>
       <div className="user-card" title={sidebarCollapsed?`${currentUser.name} · ${currentUser.role}`:undefined}><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div className="user-card-copy"><strong>{currentUser.name}</strong><span>{previewUser?'Vista previa · ':''}{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
     </aside>
 
@@ -283,5 +300,22 @@ function LegacyWorkspace(){
       {permissions.canUseCopilot&&<OpsVistaCopilot key={currentUser.id} currentUserId={currentUser.id} currentUserName={currentUser.name} role={currentUser.role} allowedLocations={allowedLocations} modules={nav} currentSection={section} onNavigate={openCopilotModule}/>}
       {assignmentRequest&&<div className="manager-assignment-backdrop" onMouseDown={cancelAssignment}><section className="manager-assignment-dialog" role="dialog" aria-modal="true" aria-label="Assign location manager" onMouseDown={event=>event.stopPropagation()}><header><div><span>RESPONSABILIDAD OPERATIVA</span><h2>Asignar seguimiento al manager</h2><p>{assignmentRequest.item.location} · {assignmentRequest.category}</p></div><button type="button" onClick={cancelAssignment} disabled={assignmentSaving}>×</button></header>{assignmentRequest.item.accountableName&&<div className="manager-assignment-subject"><span>PERSONA QUE REQUIERE CORRECCIÓN</span><strong>{assignmentRequest.item.accountableName}</strong><small>{assignmentRequest.item.accountableRole||'Incumplimiento detectado por OpsVista'}</small></div>}<div className="manager-assignment-signal"><strong>{assignmentRequest.item.title}</strong><span>{assignmentRequest.item.signal}</span></div><label>MANAGER RESPONSABLE<select value={assignmentRequest.ownerId} onChange={event=>setAssignmentRequest({...assignmentRequest,ownerId:event.target.value})}><option value="">Selecciona un manager</option>{assignmentRequest.managers.map(manager=><option key={manager.id} value={manager.id}>{manager.name} · {manager.title}</option>)}</select></label><label>FECHA LÍMITE<OpsVistaDatePicker value={assignmentRequest.dueAt} onChange={dueAt=>setAssignmentRequest({...assignmentRequest,dueAt})} ariaLabel="Seleccionar fecha límite de la acción"/></label><p className="manager-assignment-note">El manager recibirá esta acción en My Actions y deberá dar seguimiento a la persona indicada. OpsVista conservará la fuente y el historial.</p>{assignmentError&&<div className="manager-assignment-error">{assignmentError}</div>}<footer><button type="button" onClick={cancelAssignment} disabled={assignmentSaving}>Cancelar</button><button type="button" className="primary" onClick={()=>void confirmAssignment()} disabled={assignmentSaving||!assignmentRequest.ownerId||!assignmentRequest.dueAt}>{assignmentSaving?'Asignando…':'Asignar acción'}</button></footer></section></div>}
     </main>
+    <nav className="mobile-bottom-nav" aria-label={t('Primary navigation','Navegación principal')}>
+      {mobilePrimary.map(item=><button type="button" key={item} className={section===item?'active':''} onClick={()=>navigateToSection(item)} aria-current={section===item?'page':undefined}><span>{icon[item]}</span><small>{navLabel(item)}</small></button>)}
+      <button type="button" className={mobileMenuOpen||!mobilePrimary.includes(section)?'active':''} onClick={()=>setMobileMenuOpen(true)} aria-expanded={mobileMenuOpen} aria-controls="opsvista-mobile-menu"><span>•••</span><small>{t('More','Más')}</small></button>
+    </nav>
+    {mobileMenuOpen&&<div className="mobile-menu-backdrop" onMouseDown={()=>setMobileMenuOpen(false)}>
+      <section className="mobile-menu-sheet" id="opsvista-mobile-menu" role="dialog" aria-modal="true" aria-label={t('All OpsVista modules','Todos los módulos de OpsVista')} onMouseDown={event=>event.stopPropagation()}>
+        <div className="mobile-sheet-handle" aria-hidden="true" />
+        <header><div><span>{t('Navigation','Navegación')}</span><h2>{t('All modules','Todos los módulos')}</h2></div><button type="button" onClick={()=>setMobileMenuOpen(false)} aria-label={t('Close menu','Cerrar menú')}>×</button></header>
+        <div className="mobile-user-summary"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{currentUser.role} · {permissions.allLocations?t('All locations','Todas las locaciones'):currentUser.locations.join(', ')}</span></div></div>
+        <div className="mobile-module-grid">{nav.map(item=><button type="button" key={item} className={section===item?'active':''} onClick={()=>navigateToSection(item)}><span>{icon[item]}</span><strong>{navLabel(item)}</strong></button>)}</div>
+        <footer>
+          <label>{t('Language','Idioma')}<select value={language} onChange={event=>setLanguage(event.target.value as 'en'|'es')}><option value="en">English</option><option value="es">Español</option></select></label>
+          <button type="button" onClick={previewUser?()=>setPreviewNotice(t('The preview already uses live data. Exit preview to reload the full app.','La vista previa ya consulta datos reales. Sal de este modo para recargar toda la aplicación.')):refreshData}>↻ {t('Refresh','Actualizar')}</button>
+          <button type="button" className="mobile-signout" onClick={logout}>{t('Sign out','Cerrar sesión')}</button>
+        </footer>
+      </section>
+    </div>}
   </div>
 }
