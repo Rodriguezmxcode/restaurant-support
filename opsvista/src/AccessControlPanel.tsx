@@ -9,10 +9,21 @@ type Props = {
 type StoreState = 'loading' | 'central' | 'local-dev' | 'error';
 
 const roles = Object.keys(rolePermissions) as OpsVistaRole[];
+const creatableRoles = roles.filter(role=>role!=='Founder');
 const restaurantLocations = ['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
 
 function cloneUser(user: OpsVistaUser): OpsVistaUser {
-  return { ...user, locations:[...user.locations], locationGrants:user.locationGrants?.map(grant=>({...grant})) };
+  const parts=(user.name||'').trim().split(/\s+/);
+  return {
+    ...user,
+    firstName:user.firstName||parts[0]||'',
+    lastName:user.lastName||parts.slice(1).join(' '),
+    locations:[...user.locations],
+    locationGrants:user.locationGrants?.map(grant=>({...grant})),
+  };
+}
+function blankUser():OpsVistaUser{
+  return {id:`usr-${crypto.randomUUID()}`,name:'',firstName:'',lastName:'',email:'',phone:'',recoveryEmail:'',role:'Location Manager',title:'Restaurant Manager',locations:[],locationGrants:[],active:true};
 }
 function grantsFor(user: OpsVistaUser) {
   return user.locationGrants?.length ? user.locationGrants.map(grant=>({...grant})) : user.locations.map((location,index)=>({location,type:index===0?'Primary':'Additional'} as LocationAccessGrant));
@@ -47,6 +58,7 @@ export default function AccessControlPanel({ currentUser, onPreviewUser }: Props
   const [saveMessage,setSaveMessage] = useState('');
   const [auditSearch,setAuditSearch] = useState('');
   const [saving,setSaving] = useState(false);
+  const [addingUser,setAddingUser] = useState(false);
 
   const loadCentral = async () => {
     setStoreState('loading');
@@ -86,10 +98,25 @@ export default function AccessControlPanel({ currentUser, onPreviewUser }: Props
 
   useEffect(()=>{ void loadCentral(); },[]);
   useEffect(()=>{
+    if(addingUser)return;
     const next = managedUsers.find(user=>user.id===targetId) ?? managedUsers[0];
     if (next) setDraft(cloneUser(next));
     setReason(''); setSaveMessage('');
-  },[targetId,managedUsers.length]);
+  },[targetId,managedUsers.length,addingUser]);
+
+  const startAddUser=()=>{
+    setAddingUser(true);
+    setDraft(blankUser());
+    setReason('New authorized user');
+    setSaveMessage('');
+  };
+  const cancelAddUser=()=>{
+    setAddingUser(false);
+    const next=managedUsers.find(user=>user.id===targetId)??managedUsers[0];
+    if(next)setDraft(cloneUser(next));
+    setReason('');
+    setSaveMessage('');
+  };
 
   const changePrimary = (location:string) => {
     const current = grantsFor(draft);
@@ -110,24 +137,40 @@ export default function AccessControlPanel({ currentUser, onPreviewUser }: Props
   };
 
   const saveUser = async () => {
-    if (!target || !reason.trim()) { setSaveMessage('A management reason is required before saving.'); return; }
-    const events=diffUserChanges(target,draft,currentUser,reason.trim());
+    const firstName=(draft.firstName||'').trim(), lastName=(draft.lastName||'').trim();
+    const email=(draft.email||'').trim().toLowerCase();
+    const normalized={...draft,name:`${firstName} ${lastName}`.trim(),email,firstName,lastName,recoveryEmail:(draft.recoveryEmail||'').trim().toLowerCase(),phone:(draft.phone||'').trim(),title:draft.title.trim()};
+    if(!firstName||!lastName||!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setSaveMessage('First name, last name and a valid email are required.');return;}
+    if(!normalized.title){setSaveMessage('Position / department is required.');return;}
+    if(!rolePermissions[normalized.role].allLocations&&!grantsFor(normalized).some(grant=>grant.type==='Primary')){setSaveMessage('Select a primary location for this role.');return;}
+    if (!reason.trim()) { setSaveMessage('A management reason is required before saving.'); return; }
+    const events:ManagementAuditEvent[]=addingUser?[{
+      id:`mgmt-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      at:new Date().toISOString(),actorId:currentUser.id,actorName:currentUser.name,targetUserId:normalized.id,targetUserName:normalized.name,
+      action:'User created',before:'No account',after:`${normalized.role} · ${normalized.email}`,reason:reason.trim()
+    }]:target?diffUserChanges(target,normalized,currentUser,reason.trim()):[];
     if (!events.length) { setSaveMessage('No changes to save.'); return; }
     setSaving(true); setSaveMessage('');
     try {
       if (storeState === 'central') {
-        const response=await fetch('/api/management/users',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:draft,events})});
+        const response=await fetch('/api/management/users',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:normalized,events})});
         const body=await response.json().catch(()=>({})) as { error?:string };
         if (!response.ok) throw new Error(body.error || 'Unable to save central management changes.');
+        const createdId=normalized.id;
         await loadCentral();
+        setTargetId(createdId);
       } else if (storeState === 'local-dev') {
-        const nextUsers=managedUsers.map(user=>user.id===draft.id?cloneUser(draft):user);
+        const nextUsers=addingUser?[...managedUsers,cloneUser(normalized)]:managedUsers.map(user=>user.id===normalized.id?cloneUser(normalized):user);
         const nextAudit=[...events.reverse(),...audit];
         setManagedUsers(nextUsers); setAudit(nextAudit);
         persistManagedUsers(nextUsers); persistManagementAudit(nextAudit);
+        setTargetId(normalized.id);
       } else throw new Error('Central management store is not available.');
+      const wasCreated=addingUser;
+      setAddingUser(false);
       setReason('');
-      setSaveMessage(`${events.length} audited change${events.length===1?'':'s'} saved to ${storeState==='central'?'central store':'local development cache'}.`);
+      setSaveMessage(wasCreated?'User created. It is now ready for an OpsVista invitation.':`${events.length} audited change${events.length===1?'':'s'} saved.`);
+      if(wasCreated)window.dispatchEvent(new CustomEvent('opsvista-user-directory-changed'));
     } catch (error) { setSaveMessage(error instanceof Error?error.message:'Unable to save changes.'); }
     finally { setSaving(false); }
   };
@@ -155,13 +198,23 @@ export default function AccessControlPanel({ currentUser, onPreviewUser }: Props
       </div>
     </section>}
 
-    {permissions.canManageUsers && target && <section className="panel">
-      <div className="panel-header"><div><h2>User Management</h2><p>Edit role, status, primary location and temporary coverage. Saving requires a reason and writes field-level audit events.</p></div><span className="count-pill">{managedUsers.length} users</span></div>
+    {permissions.canManageUsers && (target||addingUser) && <section className="panel">
+      <div className="panel-header"><div><h2>User Management</h2><p>Add users, assign the correct department/role, manage locations and keep every change audited.</p></div><div style={{display:'flex',gap:8,alignItems:'center'}}><span className="count-pill">{managedUsers.length} users</span>{!addingUser?<button className="primary" onClick={startAddUser}>+ Add User</button>:<button onClick={cancelAddUser}>Cancel</button>}</div></div>
       <div style={{padding:18,display:'grid',gap:16}}>
-        <div style={{display:'grid',gridTemplateColumns:'minmax(220px,1fr) minmax(180px,.7fr)',gap:12}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>USER</label><select value={targetId} onChange={e=>setTargetId(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}>{managedUsers.map(user=><option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></div><div style={{display:'flex',alignItems:'end'}}><label style={{display:'flex',alignItems:'center',gap:8,fontWeight:800,padding:'10px 0'}}><input type="checkbox" checked={draft.active} onChange={e=>setDraft({...draft,active:e.target.checked})}/> Active account</label></div></div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:12}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>ROLE</label><select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value as OpsVistaRole})} style={{width:'100%',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}>{roles.map(role=><option key={role}>{role}</option>)}</select></div><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>TITLE / DEPARTMENT</label><input value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div></div>
+        {!addingUser&&<div style={{display:'grid',gridTemplateColumns:'minmax(220px,1fr) minmax(180px,.7fr)',gap:12}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>USER</label><select value={targetId} onChange={e=>setTargetId(e.target.value)} style={{width:'100%',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}>{managedUsers.map(user=><option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></div><div style={{display:'flex',alignItems:'end'}}><label style={{display:'flex',alignItems:'center',gap:8,fontWeight:800,padding:'10px 0'}}><input type="checkbox" checked={draft.active} onChange={e=>setDraft({...draft,active:e.target.checked})}/> Active account</label></div></div>}
+        {addingUser&&<div className="detail-block"><label>NEW USER</label><p>Create the authorized profile first. After saving, use User Invitations to send the secure activation link.</p></div>}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12}}>
+          <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>FIRST NAME</label><input value={draft.firstName??''} onChange={e=>setDraft({...draft,firstName:e.target.value})} style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div>
+          <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>LAST NAME</label><input value={draft.lastName??''} onChange={e=>setDraft({...draft,lastName:e.target.value})} style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div>
+          <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>LOGIN EMAIL</label><input type="email" value={draft.email??''} onChange={e=>setDraft({...draft,email:e.target.value})} style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:12}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>ROLE / PROFILE</label><select value={draft.role} onChange={e=>setDraft({...draft,role:e.target.value as OpsVistaRole,locations:rolePermissions[e.target.value as OpsVistaRole].allLocations?[]:draft.locations,locationGrants:rolePermissions[e.target.value as OpsVistaRole].allLocations?[]:draft.locationGrants})} style={{width:'100%',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}>{(addingUser?creatableRoles:roles).map(role=><option key={role}>{role}</option>)}</select></div><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>POSITION / DEPARTMENT</label><input value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div></div>
+        {!addingUser&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:12}}>
+          <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>PHONE</label><input value={draft.phone??''} onChange={e=>setDraft({...draft,phone:e.target.value})} placeholder="+1 203..." style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div>
+          <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>RECOVERY EMAIL</label><input type="email" value={draft.recoveryEmail??''} onChange={e=>setDraft({...draft,recoveryEmail:e.target.value})} placeholder="Backup email" style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div>
+        </div>}
         {!rolePermissions[draft.role].allLocations && <><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>PRIMARY LOCATION</label><select value={grantsFor(draft).find(grant=>grant.type==='Primary')?.location??''} onChange={e=>changePrimary(e.target.value)} style={{minWidth:260,padding:10,border:'1px solid #ccd9e8',borderRadius:9}}><option value="" disabled>Select location</option>{restaurantLocations.map(location=><option key={location}>{location}</option>)}</select></div><div style={{display:'grid',gap:8}}>{restaurantLocations.filter(location=>location!==grantsFor(draft).find(grant=>grant.type==='Primary')?.location).map(location=>{const grant=grantsFor(draft).find(item=>item.location===location&&item.type==='Additional');return <div key={location} style={{display:'grid',gridTemplateColumns:'minmax(160px,.8fr) minmax(170px,.7fr) minmax(220px,1.2fr)',gap:10,alignItems:'center',padding:'10px 12px',border:'1px solid #e3eaf2',borderRadius:10}}><label style={{display:'flex',alignItems:'center',gap:9,fontWeight:700}}><input type="checkbox" checked={!!grant} onChange={()=>toggleAdditional(location)}/>{location}</label>{grant?<input type="date" title="Access expires" value={grant.expiresAt?grant.expiresAt.slice(0,10):''} onChange={e=>patchGrant(location,{expiresAt:e.target.value?new Date(`${e.target.value}T23:59:59`).toISOString():undefined})} style={{width:'100%',boxSizing:'border-box',padding:8,border:'1px solid #ccd9e8',borderRadius:8}}/>:<span style={{fontSize:12,color:'#94a3b8'}}>No access</span>}{grant?<input value={grant.note??''} onChange={e=>patchGrant(location,{note:e.target.value})} placeholder="Coverage note" style={{width:'100%',boxSizing:'border-box',padding:8,border:'1px solid #ccd9e8',borderRadius:8}}/>:<span/>}</div>})}</div></>}
-        <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'end'}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>MANAGEMENT REASON · REQUIRED</label><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Example: Covering Stamford while manager is on PTO" style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div><button className="primary" disabled={saving||storeState==='error'||storeState==='loading'} onClick={saveUser}>{saving?'Saving…':'Save audited changes'}</button></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'end'}}><div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>MANAGEMENT REASON · REQUIRED</label><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Example: Covering Stamford while manager is on PTO" style={{width:'100%',boxSizing:'border-box',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}/></div><button className="primary" disabled={saving||storeState==='error'||storeState==='loading'} onClick={saveUser}>{saving?'Saving…':addingUser?'Create User':'Save audited changes'}</button></div>
         {saveMessage&&<div className="detail-block"><label>USER MANAGEMENT</label><p>{saveMessage}</p></div>}
       </div>
     </section>}
