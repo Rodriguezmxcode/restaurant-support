@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './customDateRangePicker.css';
+import { useI18n } from './i18n';
 
 type DatePreset = { key: string; label: string; start: string; end: string };
 
@@ -37,7 +38,7 @@ const monthStart = (value: string, offset = 0) => {
   return new Date(date.getFullYear(), date.getMonth() + offset, 1, 12);
 };
 
-const formatDate = (value: string) => new Intl.DateTimeFormat('es-MX', {
+const formatDateFor = (value: string, locale:string) => new Intl.DateTimeFormat(locale, {
   day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
 }).format(new Date(`${value}T12:00:00Z`)).replaceAll(' de ', ' ');
 
@@ -46,31 +47,32 @@ const operatingWeekStart = (value: string) => {
   return addDays(value, -((date.getDay() - 3 + 7) % 7));
 };
 
-function buildPresets(today: string): DatePreset[] {
+function buildPresets(today: string, language:'en'|'es'): DatePreset[] {
   const weekStart = operatingWeekStart(today);
   const current = dateFromIso(today);
   const thisMonthStart = isoDate(new Date(current.getFullYear(), current.getMonth(), 1, 12));
   const previousMonthStart = isoDate(new Date(current.getFullYear(), current.getMonth() - 1, 1, 12));
   const previousMonthEnd = isoDate(new Date(current.getFullYear(), current.getMonth(), 0, 12));
   return [
-    { key: 'today', label: 'Hoy', start: today, end: today },
-    { key: 'yesterday', label: 'Ayer', start: addDays(today, -1), end: addDays(today, -1) },
-    { key: 'this-week', label: 'Esta semana', start: weekStart, end: today },
-    { key: 'prior-week', label: 'Semana anterior', start: addDays(weekStart, -7), end: addDays(weekStart, -1) },
-    { key: 'last-7', label: 'Últimos 7 días', start: addDays(today, -6), end: today },
-    { key: 'last-30', label: 'Últimos 30 días', start: addDays(today, -29), end: today },
-    { key: 'this-month', label: 'Este mes', start: thisMonthStart, end: today },
-    { key: 'prior-month', label: 'Mes anterior', start: previousMonthStart, end: previousMonthEnd },
+    { key: 'today', label: language==='es'?'Hoy':'Today', start: today, end: today },
+    { key: 'yesterday', label: language==='es'?'Ayer':'Yesterday', start: addDays(today, -1), end: addDays(today, -1) },
+    { key: 'this-week', label: language==='es'?'Esta semana':'This week', start: weekStart, end: today },
+    { key: 'prior-week', label: language==='es'?'Semana anterior':'Previous week', start: addDays(weekStart, -7), end: addDays(weekStart, -1) },
+    { key: 'last-7', label: language==='es'?'Últimos 7 días':'Last 7 days', start: addDays(today, -6), end: today },
+    { key: 'last-30', label: language==='es'?'Últimos 30 días':'Last 30 days', start: addDays(today, -29), end: today },
+    { key: 'this-month', label: language==='es'?'Este mes':'This month', start: thisMonthStart, end: today },
+    { key: 'prior-month', label: language==='es'?'Mes anterior':'Previous month', start: previousMonthStart, end: previousMonthEnd },
   ];
 }
 
-function CalendarMonth({ month, start, end, minDate, maxDate, onSelect }: {
+function CalendarMonth({ month, start, end, minDate, maxDate, onSelect, language }: {
   month: Date;
   start: string;
   end: string;
   minDate?: string;
   maxDate?: string;
   onSelect: (date: string) => void;
+  language:'en'|'es';
 }) {
   const first = new Date(month.getFullYear(), month.getMonth(), 1, 12);
   const gridStart = new Date(first);
@@ -80,10 +82,10 @@ function CalendarMonth({ month, start, end, minDate, maxDate, onSelect }: {
     date.setDate(gridStart.getDate() + index);
     return date;
   });
-  const title = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(month);
+  const locale=language==='es'?'es-MX':'en-US';const title = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month);
   return <section className="range-calendar-month">
     <h3>{title}</h3>
-    <div className="range-calendar-weekdays">{['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(day => <span key={day}>{day}</span>)}</div>
+    <div className="range-calendar-weekdays">{(language==='es'?['Do','Lu','Ma','Mi','Ju','Vi','Sá']:['Su','Mo','Tu','We','Th','Fr','Sa']).map(day => <span key={day}>{day}</span>)}</div>
     <div className="range-calendar-days">{days.map(date => {
       const value = isoDate(date);
       const outside = date.getMonth() !== month.getMonth();
@@ -96,7 +98,7 @@ function CalendarMonth({ month, start, end, minDate, maxDate, onSelect }: {
         className={`${outside ? 'outside' : ''} ${selected ? 'selected' : ''} ${between ? 'between' : ''}`}
         disabled={disabled}
         aria-pressed={selected}
-        aria-label={formatDate(value)}
+        aria-label={formatDateFor(value,locale)}
         onClick={() => onSelect(value)}
       >{date.getDate()}</button>;
     })}</div>
@@ -113,6 +115,7 @@ export default function CustomDateRangePicker({
   maxRangeDays = 31,
   ariaLabel = 'Seleccionar periodo personalizado',
 }: Props) {
+  const {language,t,locale}=useI18n();
   const [open, setOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
   const [draftEnd, setDraftEnd] = useState(end);
@@ -120,7 +123,7 @@ export default function CustomDateRangePicker({
   const [error, setError] = useState('');
   const previousActive = useRef(active);
   const today = maxDate || isoDate(new Date());
-  const presets = useMemo(() => buildPresets(today), [today]);
+  const presets = useMemo(() => buildPresets(today,language), [today,language]);
   const secondMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1, 12);
 
   useEffect(() => {
@@ -150,12 +153,12 @@ export default function CustomDateRangePicker({
 
   const apply = () => {
     if (!draftStart || !draftEnd || draftStart > draftEnd) {
-      setError('Selecciona una fecha inicial y final válidas.');
+      setError(t('Select a valid start and end date.','Selecciona una fecha inicial y final válidas.'));
       return;
     }
     const days = Math.floor((Date.parse(`${draftEnd}T00:00:00Z`) - Date.parse(`${draftStart}T00:00:00Z`)) / 86_400_000) + 1;
     if (days > maxRangeDays) {
-      setError(`El rango puede incluir hasta ${maxRangeDays} días.`);
+      setError(t(`The range can include up to ${maxRangeDays} days.`,`El rango puede incluir hasta ${maxRangeDays} días.`));
       return;
     }
     onApply(draftStart, draftEnd);
@@ -165,41 +168,41 @@ export default function CustomDateRangePicker({
   if (!active) return null;
   return <>
     <button type="button" className="custom-range-trigger" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open}>
-      <span>CALENDARIO</span>
-      <strong>{start && end ? `${formatDate(start)} → ${formatDate(end)}` : 'Seleccionar fechas'}</strong>
+      <span>{t('CALENDAR','CALENDARIO')}</span>
+      <strong>{start && end ? `${formatDateFor(start,locale)} → ${formatDateFor(end,locale)}`  : t('Select dates','Seleccionar fechas')}</strong>
       <em>▣</em>
     </button>
     {open && <div className="range-calendar-backdrop" onMouseDown={() => setOpen(false)}>
       <div className="range-calendar-dialog" role="dialog" aria-modal="true" aria-label={ariaLabel} onMouseDown={event => event.stopPropagation()}>
-        <header className="range-calendar-mobile-head"><div><span>PERIODO PERSONALIZADO</span><strong>Selecciona una fecha o rango</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Cerrar calendario">×</button></header>
+        <header className="range-calendar-mobile-head"><div><span>{t('CUSTOM PERIOD','PERIODO PERSONALIZADO')}</span><strong>{t('Select a date or range','Selecciona una fecha o rango')}</strong></div><button type="button" onClick={() => setOpen(false)} aria-label={t('Close calendar','Cerrar calendario')}>×</button></header>
         <aside className="range-calendar-presets">
-          <div><span>RANGOS RÁPIDOS</span><strong>Semana operativa miércoles–martes</strong></div>
+          <div><span>{t('QUICK RANGES','RANGOS RÁPIDOS')}</span><strong>{t('Operating week Wednesday–Tuesday','Semana operativa miércoles–martes')}</strong></div>
           {presets.map(preset => <button type="button" key={preset.key} onClick={() => {
             setDraftStart(preset.start);
             setDraftEnd(preset.end);
             setVisibleMonth(monthStart(preset.start));
             setError('');
           }}>
-            <strong>{preset.label}</strong><span>{formatDate(preset.start)} – {formatDate(preset.end)}</span>
+            <strong>{preset.label}</strong><span>{formatDateFor(preset.start,locale)} – {formatDateFor(preset.end,locale)}</span>
           </button>)}
         </aside>
         <section className="range-calendar-workspace">
           <div className="range-calendar-navigation">
-            <button type="button" onClick={() => setVisibleMonth(current => new Date(current.getFullYear(), current.getMonth() - 1, 1, 12))} aria-label="Mes anterior">‹</button>
-            <strong>Selecciona una fecha o rango</strong>
-            <button type="button" onClick={() => setVisibleMonth(current => new Date(current.getFullYear(), current.getMonth() + 1, 1, 12))} aria-label="Mes siguiente">›</button>
+            <button type="button" onClick={() => setVisibleMonth(current => new Date(current.getFullYear(), current.getMonth() - 1, 1, 12))} aria-label={t('Previous month','Mes anterior')}>‹</button>
+            <strong>{t('Select a date or range','Selecciona una fecha o rango')}</strong>
+            <button type="button" onClick={() => setVisibleMonth(current => new Date(current.getFullYear(), current.getMonth() + 1, 1, 12))} aria-label={t('Next month','Mes siguiente')}>›</button>
           </div>
           <div className="range-calendar-months">
-            <CalendarMonth month={visibleMonth} start={draftStart} end={draftEnd} minDate={minDate} maxDate={maxDate} onSelect={selectDay} />
-            <CalendarMonth month={secondMonth} start={draftStart} end={draftEnd} minDate={minDate} maxDate={maxDate} onSelect={selectDay} />
+            <CalendarMonth month={visibleMonth} start={draftStart} end={draftEnd} minDate={minDate} maxDate={maxDate} onSelect={selectDay} language={language} />
+            <CalendarMonth month={secondMonth} start={draftStart} end={draftEnd} minDate={minDate} maxDate={maxDate} onSelect={selectDay} language={language} />
           </div>
           <div className="range-calendar-selection">
-            <div><span>DESDE</span><strong>{draftStart ? formatDate(draftStart) : 'Seleccionar'}</strong></div>
+            <div><span>{t('FROM','DESDE')}</span><strong>{draftStart ? formatDateFor(draftStart,locale) : t('Select','Seleccionar')}</strong></div>
             <i>→</i>
-            <div><span>HASTA</span><strong>{draftEnd ? formatDate(draftEnd) : 'Seleccionar'}</strong></div>
+            <div><span>{t('TO','HASTA')}</span><strong>{draftEnd ? formatDateFor(draftEnd,locale) : t('Select','Seleccionar')}</strong></div>
           </div>
           {error && <p className="range-calendar-error">{error}</p>}
-          <button type="button" className="range-calendar-apply" onClick={apply} disabled={!draftStart || !draftEnd}>Aplicar periodo</button>
+          <button type="button" className="range-calendar-apply" onClick={apply} disabled={!draftStart || !draftEnd}>{t('Apply period','Aplicar periodo')}</button>
         </section>
       </div>
     </div>}
