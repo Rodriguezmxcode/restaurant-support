@@ -310,7 +310,7 @@ async function googleReviews(req:ApiRequest,res:ApiResponse,user:NonNullable<Ret
  const span=(new Date(`${end}T00:00:00Z`).getTime()-new Date(`${start}T00:00:00Z`).getTime())/86400000+1;
  if(span>31)return res.status(400).json({error:'Google review requests are limited to 31 days'});
  const requested=q(req,'location');
- const unrestricted=['Founder','Corporate','Administration'].includes(user.role);
+ const unrestricted=['Founder','Corporate','Online Reputation Manager','Administration'].includes(user.role);
  if(requested&&!unrestricted&&!user.locations.includes(requested))return res.status(403).json({error:'Location outside your access scope'});
  const scope=requested?[requested]:unrestricted?undefined:user.locations;
  const organizationId=userOrganization(user);
