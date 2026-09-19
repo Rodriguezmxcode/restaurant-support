@@ -34,6 +34,10 @@ export type OpsVistaUser = {
   id: string;
   name: string;
   email?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  recoveryEmail?: string;
   role: OpsVistaRole;
   title: string;
   locations: string[];
