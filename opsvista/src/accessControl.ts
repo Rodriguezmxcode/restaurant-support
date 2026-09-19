@@ -1,4 +1,4 @@
-export type OpsVistaRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
+export type OpsVistaRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Online Reputation Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
 export type OpsVistaModule =
   | 'Resumen' | 'Locaciones' | 'Ventas' | 'Google Reviews' | 'Local Intelligence' | 'Finanzas' | 'Gastos'
@@ -55,6 +55,12 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     allLocations: true, canPreviewUsers: false, canManageUsers: true, canManagePlatform: false, canManageIntegrations: true,
     canRunAutomation: true, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
+  },
+  'Online Reputation Manager': {
+    modules: ['Google Reviews'],
+    allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
+    canRunAutomation: false, canUseCopilot: false, canReviewEvidence: false, canEscalateActions: false,
+    canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   'Location Manager': {
     modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365'],
