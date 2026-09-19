@@ -21,7 +21,7 @@ type ApiResponse = {
   end?: () => void;
 };
 
-const roles: ServerRole[] = ['Founder','Corporate','Location Manager','Kitchen','HR','Administration','Maintenance'];
+const roles: ServerRole[] = ['Founder','Corporate','Location Manager','Online Reputation Manager','Kitchen','HR','Administration','Maintenance'];
 const queryValue=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query[key] as string).trim():'';
 const text=(value:unknown)=>typeof value==='string'?value.trim():'';
 const userOrganization=(user:SessionUser)=>user.organizationId||'org-puerto-vallarta';
