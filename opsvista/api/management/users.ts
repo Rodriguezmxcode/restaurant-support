@@ -2,7 +2,7 @@ import { readSession, type ServerRole, type SessionUser } from '../../server/aut
 import { authorize } from '../../server/authorization.js';
 import { createInvitation, listInvitations } from '../../server/accountStore.js';
 import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore.js';
-import { getOrganizationMembership } from '../../server/organizationStore.js';
+import { ensureOrganizationMembership, getOrganizationMembership } from '../../server/organizationStore.js';
 import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
 import { deliverNotificationEmail } from '../../server/emailDelivery.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../../server/googleBusinessOAuth.js';
@@ -229,7 +229,8 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
       }
 
       await saveManagedUser(user,events,auth.user);
-      return res.status(200).json({ user });
+      if (user.role !== 'Founder') await ensureOrganizationMembership(user.id,auth.user.organizationId||'org-puerto-vallarta');
+      return res.status(existing?200:201).json({ user, created:!existing });
     }
     res.setHeader?.('Allow','GET, PUT');
     return res.status(405).json({ error:'Method not allowed' });
