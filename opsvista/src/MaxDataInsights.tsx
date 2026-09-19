@@ -31,15 +31,15 @@ const coordinates: Record<string, { lat: number; lon: number }> = {
 };
 
 const number = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value);
-const defaultConclusions = (rows: MaxDataRow[], label: string, format: (value: number) => string) => {
-  if (!rows.length) return ['No hay datos verificables para el alcance seleccionado.'];
+const defaultConclusions = (rows: MaxDataRow[], label: string, format: (value: number) => string, t:(en:string,es:string)=>string) => {
+  if (!rows.length) return [t('No verifiable data for the selected scope.','No hay datos verificables para el alcance seleccionado.')];
   const ranked = [...rows].sort((a, b) => b.primary - a.primary);
   const average = rows.reduce((sum, row) => sum + row.primary, 0) / rows.length;
   const alerts = rows.filter(row => row.status === 'bad' || row.status === 'watch');
   return [
-    `${ranked[0].location} lidera ${label.toLowerCase()} con ${format(ranked[0].primary)}.`,
-    `El promedio del alcance es ${format(average)} entre ${rows.length} locaciones.`,
-    alerts.length ? `${alerts.length} locación${alerts.length === 1 ? '' : 'es'} requiere${alerts.length === 1 ? '' : 'n'} atención.` : 'No hay alertas visibles en este indicador.',
+    t(`${ranked[0].location} leads ${label.toLowerCase()} with ${format(ranked[0].primary)}.`,`${ranked[0].location} lidera ${label.toLowerCase()} con ${format(ranked[0].primary)}.`),
+    t(`The scope average is ${format(average)} across ${rows.length} locations.`,`El promedio del alcance es ${format(average)} entre ${rows.length} locaciones.`),
+    alerts.length ? t(`${alerts.length} location${alerts.length===1?'':'s'} require${alerts.length===1?'s':''} attention.`,`${alerts.length} locación${alerts.length === 1 ? '' : 'es'} requiere${alerts.length === 1 ? '' : 'n'} atención.`) : t('No visible alerts for this indicator.','No hay alertas visibles en este indicador.'),
   ];
 };
 
@@ -52,7 +52,7 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
   const secondaryValues = available.map(row => row.secondary).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const secondaryMin = secondaryValues.length ? Math.min(...secondaryValues) : 0;
   const secondaryMax = secondaryValues.length ? Math.max(...secondaryValues) : 1;
-  const insights = conclusion ? conclusion(filtered) : defaultConclusions(filtered, primaryLabel, primaryFormat);
+  const insights = conclusion ? conclusion(filtered) : defaultConclusions(filtered, primaryLabel, primaryFormat,t);
   const choose = (location: string) => setSelected(current => current === location ? 'All locations' : location);
   const primaryTone = (row: MaxDataRow) => {
     if (primaryColorScale === 'status') return row.status || 'neutral';
@@ -64,7 +64,7 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
   return <section className="mmd-insights" aria-label={`${title} interactive dashboard`}>
     <header className="mmd-insights-head">
       <div><span>MAXMAXDATA · DECISION VIEW</span><h2>{title}</h2><p>{subtitle}</p></div>
-      <div className="mmd-filter-chips" aria-label="Filtro cruzado de locación">
+      <div className="mmd-filter-chips" aria-label={t('Cross-location filter','Filtro cruzado de locación')}>
         <button className={selected === 'All locations' ? 'active' : ''} onClick={() => setSelected('All locations')}>{t('All','Todas')}</button>
         {available.map(row => <button key={row.location} className={selected === row.location ? 'active' : ''} onClick={() => choose(row.location)}>{row.location}</button>)}
       </div>
@@ -74,7 +74,7 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
       <section className="mmd-visual-card">
         <div className="mmd-visual-title"><div><span>{t('COMPARISON','COMPARACIÓN')}</span><h3>{primaryLabel}</h3></div><small>{primaryColorScale === 'higher-is-better' ? t('Green ≥80% of leader · Yellow 60–79% · Red <60%','Verde ≥80% del líder · Amarillo 60–79% · Rojo <60%') : t('Click a bar to filter','Pulsa una barra para filtrar')}</small></div>
         <div className="mmd-bars" role="list">
-          {available.map(row => <button key={row.location} role="listitem" className={`mmd-bar-row ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} onClick={() => choose(row.location)} aria-label={`Filtrar ${row.location}: ${primaryFormat(row.primary)}`}>
+          {available.map(row => <button key={row.location} role="listitem" className={`mmd-bar-row ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} onClick={() => choose(row.location)} aria-label={t(`Filter ${row.location}: ${primaryFormat(row.primary)}`,`Filtrar ${row.location}: ${primaryFormat(row.primary)}`)}>
             <span>{row.location}</span><i><b className={primaryTone(row)} style={{ width: `${Math.max(3, row.primary / maxPrimary * 100)}%` }} /></i><strong>{primaryFormat(row.primary)}</strong>
           </button>)}
         </div>
@@ -82,9 +82,9 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
 
       <section className="mmd-visual-card mmd-map-card">
         <div className="mmd-visual-title"><div><span>{t('RELATIVE MAP','MAPA RELATIVO')}</span><h3>{t('Connecticut · restaurant network','Connecticut · red de restaurantes')}</h3></div><small>{t('Actual latitude / longitude','Latitud / longitud reales')}</small></div>
-        <div className="mmd-map" aria-label="Mapa interactivo de locaciones">
+        <div className="mmd-map" aria-label={t('Interactive location map','Mapa interactivo de locaciones')}>
           <span className="mmd-map-axis north">N</span><span className="mmd-map-axis west">{t('West','Oeste')}</span><span className="mmd-map-axis east">{t('East','Este')}</span>
-          {available.map(row => { const point = coordinates[row.location]; if (!point) return null; const x = (point.lon + 73.65) / 1.1 * 100; const y = (41.92 - point.lat) / 1.02 * 100; return <button key={row.location} className={`mmd-map-point ${row.status || 'neutral'} ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} style={{ left: `${x}%`, top: `${y}%` }} onClick={() => choose(row.location)} aria-label={`Filtrar ${row.location}`}><i/><span>{row.location}</span></button>; })}
+          {available.map(row => { const point = coordinates[row.location]; if (!point) return null; const x = (point.lon + 73.65) / 1.1 * 100; const y = (41.92 - point.lat) / 1.02 * 100; return <button key={row.location} className={`mmd-map-point ${row.status || 'neutral'} ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} style={{ left: `${x}%`, top: `${y}%` }} onClick={() => choose(row.location)} aria-label={t(`Filter ${row.location}`,`Filtrar ${row.location}`)}><i/><span>{row.location}</span></button>; })}
         </div>
       </section>
 
