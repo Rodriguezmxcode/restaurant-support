@@ -216,6 +216,8 @@ export default async function handler(req:ApiRequest,res:ApiResponse) {
       const events = req.body?.events ?? [];
       if (!user?.id || !user.name || !roles.includes(user.role)) return res.status(400).json({ error:'Valid user payload required' });
       if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) return res.status(400).json({ error:'Valid email required' });
+      if (user.recoveryEmail && !/^\S+@\S+\.\S+$/.test(user.recoveryEmail)) return res.status(400).json({ error:'Valid recovery email required' });
+      if (user.email && user.recoveryEmail && user.email.trim().toLowerCase()===user.recoveryEmail.trim().toLowerCase()) return res.status(400).json({ error:'Recovery email must be different from login email' });
       if (!events.length || events.some(event => !event.reason?.trim())) return res.status(400).json({ error:'At least one audited change with management reason is required' });
       if (events.some(event => event.targetUserId !== user.id)) return res.status(400).json({ error:'Audit target must match edited user' });
 
