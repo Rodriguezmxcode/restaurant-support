@@ -77,8 +77,38 @@ export async function listInvitations() {
   return rows.map(row=>({id:String(row.id),userId:String(row.user_id),email:String(row.email),status:String(row.status),expiresAt:new Date(String(row.expires_at)).toISOString(),createdAt:new Date(String(row.created_at)).toISOString(),createdBy:String(row.created_by),acceptedAt:row.accepted_at?new Date(String(row.accepted_at)).toISOString():undefined}));
 }
 
-export async function acceptInvitation(token:string,password:string) {
+
+export async function getInvitationProfile(token:string) {
+  await ensureSchema();
+  const rows=await sql()`select * from opsvista_auth_invitations where token_hash=${tokenHash(token)} and status='pending' limit 1`;
+  const invitation=rows[0];
+  if (!invitation) throw new Error('Invitation is invalid or has already been used');
+  if (new Date(String(invitation.expires_at)).getTime() <= Date.now()) {
+    await sql()`update opsvista_auth_invitations set status='expired' where id=${String(invitation.id)}`;
+    throw new Error('Invitation has expired');
+  }
+  const managed=await getManagedUser(String(invitation.user_id));
+  if (!managed || !managed.active || !managed.email) throw new Error('Account is not active');
+  const pieces=(managed.name||'').trim().split(/\s+/);
+  return {
+    email:managed.email,
+    firstName:managed.firstName||pieces[0]||'',
+    lastName:managed.lastName||pieces.slice(1).join(' '),
+    title:managed.title||'',
+    phone:managed.phone||'',
+    recoveryEmail:managed.recoveryEmail||'',
+  };
+}
+
+export async function acceptInvitation(token:string,password:string,profile?:{firstName?:string;lastName?:string;title?:string;phone?:string;recoveryEmail?:string}) {
   if (password.length < 12) throw new Error('Password must be at least 12 characters');
+  const firstName=(profile?.firstName||'').trim();
+  const lastName=(profile?.lastName||'').trim();
+  const title=(profile?.title||'').trim();
+  const phone=(profile?.phone||'').trim();
+  const recoveryEmail=(profile?.recoveryEmail||'').trim().toLowerCase();
+  if(!firstName||!lastName||!title||!phone||!recoveryEmail) throw new Error('Complete name, position, phone and recovery email are required');
+  if(!/^\S+@\S+\.\S+$/.test(recoveryEmail)) throw new Error('A valid recovery email is required');
   await ensureSchema();
   const db=sql();
   const rows=await db`select * from opsvista_auth_invitations where token_hash=${tokenHash(token)} and status='pending' limit 1`;
@@ -88,16 +118,19 @@ export async function acceptInvitation(token:string,password:string) {
   const managed=await getManagedUser(String(invitation.user_id));
   if (!managed || !managed.active) throw new Error('Account is not active');
   if (!managed.email || managed.email.toLowerCase() !== String(invitation.email).toLowerCase()) throw new Error('Invitation account mismatch');
+  if (managed.email.toLowerCase()===recoveryEmail) throw new Error('Recovery email must be different from the login email');
+  const fullName=`${firstName} ${lastName}`.trim();
   const signup=await fetch(`${SUPABASE_URL}/auth/v1/signup`,{
     method:'POST',
     headers:{apikey:SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},
-    body:JSON.stringify({email:managed.email.toLowerCase(),password,data:{full_name:managed.name}}),
+    body:JSON.stringify({email:managed.email.toLowerCase(),password,data:{full_name:fullName,first_name:firstName,last_name:lastName,position:title,phone,recovery_email:recoveryEmail}}),
   });
   if(!signup.ok){
     const body=await signup.json().catch(()=>({})) as {msg?:string;message?:string};
     throw new Error(body.message||body.msg||'Unable to create the secure Supabase account');
   }
   await db.begin(async tx=>{
+    await tx`update opsvista_management_users set name=${fullName},first_name=${firstName},last_name=${lastName},title=${title},phone=${phone},recovery_email=${recoveryEmail},updated_at=now(),updated_by=${managed.id} where id=${managed.id}`;
     await tx`update opsvista_auth_invitations set status='accepted',accepted_at=now() where id=${String(invitation.id)}`;
     await tx`insert into opsvista_management_audit (id,at,actor_id,actor_name,target_user_id,target_user_name,action,before_value,after_value,reason,automatic) values (${auditId('invite_accept')},now(),${managed.id},${managed.name},${managed.id},${managed.name},'Invitation accepted','Supabase account not activated','Supabase identity activated','User accepted onboarding invitation and created a password with the shared identity provider.',true)`;
   });
