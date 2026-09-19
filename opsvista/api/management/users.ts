@@ -4,6 +4,7 @@ import { createInvitation, listInvitations } from '../../server/accountStore.js'
 import { getManagedUser, listManagedUsers, saveManagedUser, type ManagedDirectoryUser, type StoredAuditEvent } from '../../server/managementStore.js';
 import { getOrganizationMembership } from '../../server/organizationStore.js';
 import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
+import { deliverNotificationEmail } from '../../server/emailDelivery.js';
 import { authorizationUrl, createOAuthState, exchangeAuthorizationCode, googleBusinessRedirectUri, publicOrigin, verifyOAuthState } from '../../server/googleBusinessOAuth.js';
 import { disconnectGoogleBusiness, getGoogleBusinessCredentials, saveGoogleBusinessAuthorization, saveGoogleBusinessClient } from '../../server/integrationStore.js';
 
@@ -11,7 +12,7 @@ type ApiRequest = {
   method?: string;
   query?: Record<string,string|string[]>;
   headers?: Record<string,string|string[]|undefined> & { cookie?: string; host?: string; 'x-forwarded-proto'?: string; 'x-forwarded-host'?: string; origin?: string };
-  body?: Record<string,unknown> & { user?: ManagedDirectoryUser; events?: StoredAuditEvent[]; userId?: string };
+  body?: Record<string,unknown> & { user?: ManagedDirectoryUser; events?: StoredAuditEvent[]; userId?: string; action?: string };
 };
 
 type ApiResponse = {
@@ -26,12 +27,60 @@ const queryValue=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'
 const text=(value:unknown)=>typeof value==='string'?value.trim():'';
 const userOrganization=(user:SessionUser)=>user.organizationId||'org-puerto-vallarta';
 
+const invitationBase=(req:ApiRequest)=>(process.env.OPSVISTA_APP_URL||process.env.OPSVISTA_PUBLIC_URL||req.headers?.origin||`${req.headers?.['x-forwarded-proto']||'https'}://${req.headers?.host||''}`).replace(/\/$/,'');
+async function createAndDeliverInvitation(req:ApiRequest,user:ManagedDirectoryUser,createdBy:string){
+  if(!user.email)throw new Error('User with email not found');
+  const invitation=await createInvitation(user.id,user.email,createdBy);
+  const inviteUrl=`${invitationBase(req)}/?invite=${encodeURIComponent(invitation.token)}`;
+  const apiKey=process.env.RESEND_API_KEY?.trim()||'';
+  if(!apiKey)return {id:invitation.id,userId:user.id,email:user.email,expiresAt:invitation.expiresAt,inviteUrl,delivery:'sender-unconfigured' as const,deliveryError:'Email sender is not configured'};
+  const delivery=await deliverNotificationEmail({
+    apiKey,
+    from:process.env.OPSVISTA_EMAIL_FROM||'OpsVista <alerts@getopsvista.com>',
+    recipients:[user.email],
+    eventKey:`invitation:${invitation.id}`,
+    title:"You're invited to OpsVista | Invitación a OpsVista",
+    body:`Hello ${user.name}, you have been invited to activate your OpsVista account. This secure link expires in 48 hours.\n\nHola ${user.name}, has sido invitado(a) a activar tu cuenta de OpsVista. Este enlace seguro vence en 48 horas.`,
+    appUrl:inviteUrl,
+  });
+  return delivery.accepted
+    ? {id:invitation.id,userId:user.id,email:user.email,expiresAt:invitation.expiresAt,inviteUrl,delivery:'email-accepted' as const,providerId:delivery.providerId}
+    : {id:invitation.id,userId:user.id,email:user.email,expiresAt:invitation.expiresAt,inviteUrl,delivery:'email-failed' as const,deliveryError:delivery.error};
+}
+
 async function invitations(req:ApiRequest,res:ApiResponse,auth:ReturnType<typeof authorize> & {ok:true}) {
   if(!req.method||req.method==='GET') {
-    const allowed=new Set((await listManagedUsers()).map(user=>user.id));
+    const directory=await listManagedUsers();
+    const allowed=new Set<string>();
+    for(const user of directory){
+      if(auth.user.role==='Founder'||(await getOrganizationMembership(user.id))?.organizationId===auth.user.organizationId)allowed.add(user.id);
+    }
     return res.status(200).json({invitations:(await listInvitations()).filter(invitation=>allowed.has(invitation.userId))});
   }
   if(req.method==='POST'){
+    const action=req.body?.action?.trim();
+    if(action==='resend_pending'){
+      const directory=await listManagedUsers();
+      const history=await listInvitations();
+      const latest=new Map<string,(typeof history)[number]>();
+      for(const invitation of history)if(!latest.has(invitation.userId))latest.set(invitation.userId,invitation);
+      const targets:ManagedDirectoryUser[]=[];
+      for(const user of directory){
+        if(!user.active||!user.email||user.role==='Founder')continue;
+        if(auth.user.role!=='Founder'&&(await getOrganizationMembership(user.id))?.organizationId!==auth.user.organizationId)continue;
+        const previous=latest.get(user.id);
+        if(!previous||previous.status==='accepted')continue;
+        targets.push(user);
+      }
+      const results=[];
+      for(const user of targets)results.push(await createAndDeliverInvitation(req,user,auth.user.id));
+      return res.status(200).json({
+        resent:results.length,
+        emailAccepted:results.filter(item=>item.delivery==='email-accepted').length,
+        emailFailed:results.filter(item=>item.delivery!=='email-accepted').length,
+        results,
+      });
+    }
     const userId=req.body?.userId?.trim();
     if(!userId) return res.status(400).json({error:'userId is required'});
     const user=await getManagedUser(userId);
@@ -39,10 +88,8 @@ async function invitations(req:ApiRequest,res:ApiResponse,auth:ReturnType<typeof
     if(!user||!user.email) return res.status(404).json({error:'User with email not found'});
     if(!user.active) return res.status(400).json({error:'Cannot invite an inactive user'});
     if(user.role==='Founder'&&auth.user.role!=='Founder') return res.status(403).json({error:'Founder invitations require Founder access'});
-    const invitation=await createInvitation(user.id,user.email,auth.user.id);
-    const base=process.env.OPSVISTA_APP_URL || req.headers?.origin || `${req.headers?.['x-forwarded-proto']||'https'}://${req.headers?.host||''}`;
-    const inviteUrl=`${String(base).replace(/\/$/,'')}/?invite=${encodeURIComponent(invitation.token)}`;
-    return res.status(201).json({invitation:{id:invitation.id,userId:user.id,email:user.email,expiresAt:invitation.expiresAt,inviteUrl,delivery:'manual-link'}});
+    const invitation=await createAndDeliverInvitation(req,user,auth.user.id);
+    return res.status(201).json({invitation});
   }
   res.setHeader?.('Allow','GET, POST');
   return res.status(405).json({error:'Method not allowed'});
