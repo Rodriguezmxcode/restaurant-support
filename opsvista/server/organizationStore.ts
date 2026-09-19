@@ -160,3 +160,13 @@ export async function addClientTeamMember(body: Record<string, unknown>, actor: 
   });
   return { userId };
 }
+
+
+export async function ensureOrganizationMembership(userId:string,organizationId='org-puerto-vallarta'){
+  await bootstrapPuertoVallarta();
+  await sql()`
+    insert into opsvista_organization_memberships (user_id,organization_id)
+    values (${userId},${organizationId})
+    on conflict (user_id) do update set organization_id=excluded.organization_id,updated_at=now()
+  `;
+}
