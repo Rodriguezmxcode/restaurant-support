@@ -14,6 +14,7 @@ export type ServerCapability =
   | 'automation:run'
   | 'payments:approve'
   | 'restaurant365:read'
+  | 'price-watch:read'
   | 'bonus:read'
   | 'users:manage'
   | 'platform:admin'
@@ -22,12 +23,12 @@ export type ServerCapability =
 const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write','automation:run','payments:approve','users:manage'];
 
 const capabilities: Record<ServerRole, ServerCapability[]> = {
-  Founder: [...operational,'restaurant365:read','bonus:read','platform:admin','integrations:manage'],
-  Corporate: [...operational,'restaurant365:read','bonus:read','integrations:manage'],
-  'Location Manager': ['bonus:read','ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
+  Founder: [...operational,'restaurant365:read','price-watch:read','bonus:read','platform:admin','integrations:manage'],
+  Corporate: [...operational,'restaurant365:read','price-watch:read','bonus:read','integrations:manage'],
+  'Location Manager': ['bonus:read','price-watch:read','ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   Kitchen: ['bonus:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   HR: ['labor:read','actions:read','actions:write','projects:read','projects:write'],
-  Administration: ['ramp:read','actions:read','actions:write','actions:verify','projects:read','projects:write','payments:approve','restaurant365:read'],
+  Administration: ['ramp:read','actions:read','actions:write','actions:verify','projects:read','projects:write','payments:approve','restaurant365:read','price-watch:read'],
   Maintenance: ['evidence:read','actions:read','actions:write','actions:verify','projects:read','projects:write'],
 };
 
