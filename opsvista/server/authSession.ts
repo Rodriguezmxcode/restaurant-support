@@ -3,7 +3,7 @@ import { getManagedUser, getManagedUserByEmail } from './managementStore.js';
 import { authenticateStoredCredential } from './accountStore.js';
 import { getOrganizationMembership } from './organizationStore.js';
 
-export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
+export type ServerRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Online Reputation Manager' | 'Kitchen' | 'HR' | 'Administration' | 'Maintenance';
 
 export type SessionUser = {
   id: string;
