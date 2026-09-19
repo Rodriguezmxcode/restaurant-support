@@ -12,6 +12,10 @@ export type ManagedDirectoryUser = {
   id: string;
   name: string;
   email?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  recoveryEmail?: string;
   role: ServerRole;
   title: string;
   locations: string[];
@@ -95,6 +99,10 @@ async function ensureSchema() {
     )
   `;
   await db`alter table opsvista_management_users add column if not exists email text`;
+  await db`alter table opsvista_management_users add column if not exists first_name text`;
+  await db`alter table opsvista_management_users add column if not exists last_name text`;
+  await db`alter table opsvista_management_users add column if not exists phone text`;
+  await db`alter table opsvista_management_users add column if not exists recovery_email text`;
   // Existing records belong to the original customer. New-client provisioning
   // always supplies an explicit organization, in the same transaction as membership.
   await db`alter table opsvista_management_users add column if not exists organization_id text not null default 'org-puerto-vallarta'`;
@@ -166,8 +174,10 @@ async function bootstrapInitialDirectory() {
 
 function normalizeUser(row: Record<string, unknown>): ManagedDirectoryUser {
   return {
-    id:String(row.id), name:String(row.name), email:row.email ? String(row.email) : undefined, role:row.role as ServerRole,
-    title:String(row.title ?? ''), active:Boolean(row.active),
+    id:String(row.id), name:String(row.name), email:row.email ? String(row.email) : undefined,
+    firstName:row.first_name ? String(row.first_name) : undefined, lastName:row.last_name ? String(row.last_name) : undefined,
+    phone:row.phone ? String(row.phone) : undefined, recoveryEmail:row.recovery_email ? String(row.recovery_email) : undefined,
+    role:row.role as ServerRole, title:String(row.title ?? ''), active:Boolean(row.active),
     locations:Array.isArray(row.locations) ? row.locations.map(String) : [],
     locationGrants:Array.isArray(row.location_grants) ? row.location_grants as StoredLocationGrant[] : [],
   };
@@ -213,10 +223,11 @@ export async function saveManagedUser(user: ManagedDirectoryUser, events: Stored
   const db = sql();
   await db.begin(async tx => {
     await tx`
-      insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_at,updated_by)
-      values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},now(),${actor.id})
+      insert into opsvista_management_users (id,name,email,first_name,last_name,phone,recovery_email,role,title,active,locations,location_grants,updated_at,updated_by)
+      values (${user.id},${user.name},${user.email ?? null},${user.firstName ?? null},${user.lastName ?? null},${user.phone ?? null},${user.recoveryEmail ?? null},${user.role},${user.title},${user.active},${tx.json(user.locations)},${tx.json(user.locationGrants ?? [])},now(),${actor.id})
       on conflict (id) do update set
-        name=excluded.name, email=excluded.email, role=excluded.role, title=excluded.title, active=excluded.active,
+        name=excluded.name, email=excluded.email, first_name=excluded.first_name, last_name=excluded.last_name, phone=excluded.phone, recovery_email=excluded.recovery_email,
+        role=excluded.role, title=excluded.title, active=excluded.active,
         locations=excluded.locations, location_grants=excluded.location_grants, updated_at=now(), updated_by=excluded.updated_by
     `;
     for (const event of events) {
@@ -234,8 +245,8 @@ export async function seedManagedUsers(users: ManagedDirectoryUser[], actorId = 
   await ensureSchema();
   for (const user of users) {
     await sql()`
-      insert into opsvista_management_users (id,name,email,role,title,active,locations,location_grants,updated_by)
-      values (${user.id},${user.name},${user.email ?? null},${user.role},${user.title},${user.active},${sql().json(user.locations)},${sql().json(user.locationGrants ?? [])},${actorId})
+      insert into opsvista_management_users (id,name,email,first_name,last_name,phone,recovery_email,role,title,active,locations,location_grants,updated_by)
+      values (${user.id},${user.name},${user.email ?? null},${user.firstName ?? null},${user.lastName ?? null},${user.phone ?? null},${user.recoveryEmail ?? null},${user.role},${user.title},${user.active},${sql().json(user.locations)},${sql().json(user.locationGrants ?? [])},${actorId})
       on conflict (id) do nothing
     `;
   }
