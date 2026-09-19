@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import './maxDataInsights.css';
+import { useI18n } from './i18n';
 
 export type MaxDataRow = {
   location: string;
@@ -43,6 +44,7 @@ const defaultConclusions = (rows: MaxDataRow[], label: string, format: (value: n
 };
 
 export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, secondaryLabel, primaryFormat = number, secondaryFormat = number, primaryColorScale = 'status', conclusion }: Props) {
+  const {t}=useI18n();
   const [selected, setSelected] = useState('All locations');
   const available = useMemo(() => rows.filter(row => Number.isFinite(row.primary)), [rows]);
   const filtered = selected === 'All locations' ? available : available.filter(row => row.location === selected);
@@ -63,14 +65,14 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
     <header className="mmd-insights-head">
       <div><span>MAXMAXDATA · DECISION VIEW</span><h2>{title}</h2><p>{subtitle}</p></div>
       <div className="mmd-filter-chips" aria-label="Filtro cruzado de locación">
-        <button className={selected === 'All locations' ? 'active' : ''} onClick={() => setSelected('All locations')}>Todas</button>
+        <button className={selected === 'All locations' ? 'active' : ''} onClick={() => setSelected('All locations')}>{t('All','Todas')}</button>
         {available.map(row => <button key={row.location} className={selected === row.location ? 'active' : ''} onClick={() => choose(row.location)}>{row.location}</button>)}
       </div>
     </header>
 
     <div className="mmd-visual-grid">
       <section className="mmd-visual-card">
-        <div className="mmd-visual-title"><div><span>COMPARACIÓN</span><h3>{primaryLabel}</h3></div><small>{primaryColorScale === 'higher-is-better' ? 'Verde ≥80% del líder · Amarillo 60–79% · Rojo <60%' : 'Pulsa una barra para filtrar'}</small></div>
+        <div className="mmd-visual-title"><div><span>{t('COMPARISON','COMPARACIÓN')}</span><h3>{primaryLabel}</h3></div><small>{primaryColorScale === 'higher-is-better' ? t('Green ≥80% of leader · Yellow 60–79% · Red <60%','Verde ≥80% del líder · Amarillo 60–79% · Rojo <60%') : t('Click a bar to filter','Pulsa una barra para filtrar')}</small></div>
         <div className="mmd-bars" role="list">
           {available.map(row => <button key={row.location} role="listitem" className={`mmd-bar-row ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} onClick={() => choose(row.location)} aria-label={`Filtrar ${row.location}: ${primaryFormat(row.primary)}`}>
             <span>{row.location}</span><i><b className={primaryTone(row)} style={{ width: `${Math.max(3, row.primary / maxPrimary * 100)}%` }} /></i><strong>{primaryFormat(row.primary)}</strong>
@@ -79,27 +81,27 @@ export default function MaxDataInsights({ title, subtitle, rows, primaryLabel, s
       </section>
 
       <section className="mmd-visual-card mmd-map-card">
-        <div className="mmd-visual-title"><div><span>MAPA RELATIVO</span><h3>Connecticut · red de restaurantes</h3></div><small>Latitud / longitud reales</small></div>
+        <div className="mmd-visual-title"><div><span>{t('RELATIVE MAP','MAPA RELATIVO')}</span><h3>{t('Connecticut · restaurant network','Connecticut · red de restaurantes')}</h3></div><small>{t('Actual latitude / longitude','Latitud / longitud reales')}</small></div>
         <div className="mmd-map" aria-label="Mapa interactivo de locaciones">
-          <span className="mmd-map-axis north">N</span><span className="mmd-map-axis west">Oeste</span><span className="mmd-map-axis east">Este</span>
+          <span className="mmd-map-axis north">N</span><span className="mmd-map-axis west">{t('West','Oeste')}</span><span className="mmd-map-axis east">{t('East','Este')}</span>
           {available.map(row => { const point = coordinates[row.location]; if (!point) return null; const x = (point.lon + 73.65) / 1.1 * 100; const y = (41.92 - point.lat) / 1.02 * 100; return <button key={row.location} className={`mmd-map-point ${row.status || 'neutral'} ${selected === row.location ? 'selected' : ''} ${selected !== 'All locations' && selected !== row.location ? 'muted' : ''}`} style={{ left: `${x}%`, top: `${y}%` }} onClick={() => choose(row.location)} aria-label={`Filtrar ${row.location}`}><i/><span>{row.location}</span></button>; })}
         </div>
       </section>
 
       {secondaryLabel && <section className="mmd-visual-card">
-        <div className="mmd-visual-title"><div><span>DISTRIBUCIÓN</span><h3>{secondaryLabel}</h3></div><small>Escala común</small></div>
+        <div className="mmd-visual-title"><div><span>{t('DISTRIBUTION','DISTRIBUCIÓN')}</span><h3>{secondaryLabel}</h3></div><small>{t('Common scale','Escala común')}</small></div>
         <div className="mmd-dotplot">
           {available.map(row => { const value = row.secondary; const position = value == null ? 0 : secondaryMax === secondaryMin ? 50 : (value - secondaryMin) / (secondaryMax - secondaryMin) * 100; return <button key={row.location} className={selected === row.location ? 'selected' : ''} onClick={() => choose(row.location)}><span>{row.location}</span><i><b className={row.status || 'neutral'} style={{ left: `${position}%` }}/></i><strong>{value == null ? '—' : secondaryFormat(value)}</strong></button>; })}
         </div>
       </section>}
 
       <aside className="mmd-conclusions">
-        <span>CONCLUSIONES DEL FILTRO</span><h3>{selected === 'All locations' ? 'Vista de red' : selected}</h3>
+        <span>{t('FILTER INSIGHTS','CONCLUSIONES DEL FILTRO')}</span><h3>{selected === 'All locations' ? t('Network view','Vista de red') : selected}</h3>
         <ol>{insights.map((insight, index) => <li key={`${insight}-${index}`}>{insight}</li>)}</ol>
-        <small>Las conclusiones cambian al pulsar barras, puntos, mapa o tabla.</small>
+        <small>{t('Insights change when you click bars, points, the map or the table.','Las conclusiones cambian al pulsar barras, puntos, mapa o tabla.')}</small>
       </aside>
     </div>
 
-    <div className="mmd-table-wrap"><table className="mmd-table"><thead><tr><th>Locación</th><th>{primaryLabel}</th>{secondaryLabel && <th>{secondaryLabel}</th>}<th>Estado</th></tr></thead><tbody>{filtered.map(row => <tr key={row.location} onClick={() => choose(row.location)} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') choose(row.location); }}><td><button onClick={event => { event.stopPropagation(); choose(row.location); }}>{row.location}</button></td><td>{primaryFormat(row.primary)}</td>{secondaryLabel && <td>{row.secondary == null ? '—' : secondaryFormat(row.secondary)}</td>}<td><span className={`mmd-status ${row.status || 'neutral'}`}>{row.status === 'bad' ? 'Acción' : row.status === 'watch' ? 'Vigilar' : row.status === 'good' ? 'Saludable' : 'Informativo'}</span></td></tr>)}</tbody></table></div>
+    <div className="mmd-table-wrap"><table className="mmd-table"><thead><tr><th>{t('Location','Locación')}</th><th>{primaryLabel}</th>{secondaryLabel && <th>{secondaryLabel}</th>}<th>{t('Status','Estado')}</th></tr></thead><tbody>{filtered.map(row => <tr key={row.location} onClick={() => choose(row.location)} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') choose(row.location); }}><td><button onClick={event => { event.stopPropagation(); choose(row.location); }}>{row.location}</button></td><td>{primaryFormat(row.primary)}</td>{secondaryLabel && <td>{row.secondary == null ? '—' : secondaryFormat(row.secondary)}</td>}<td><span className={`mmd-status ${row.status || 'neutral'}`}>{row.status === 'bad' ? t('Action','Acción') : row.status === 'watch' ? t('Watch','Vigilar') : row.status === 'good' ? t('Healthy','Saludable') : t('Informational','Informativo')}</span></td></tr>)}</tbody></table></div>
   </section>;
 }
