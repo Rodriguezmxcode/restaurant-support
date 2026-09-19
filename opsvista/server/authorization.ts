@@ -25,6 +25,7 @@ const operational: ServerCapability[] = ['ramp:read','labor:read','evidence:read
 const capabilities: Record<ServerRole, ServerCapability[]> = {
   Founder: [...operational,'restaurant365:read','price-watch:read','bonus:read','platform:admin','integrations:manage'],
   Corporate: [...operational,'restaurant365:read','price-watch:read','bonus:read','integrations:manage'],
+  'Online Reputation Manager': [],
   'Location Manager': ['bonus:read','price-watch:read','ramp:read','labor:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   Kitchen: ['bonus:read','evidence:read','evidence:review','actions:read','actions:write','actions:verify','projects:read','projects:write'],
   HR: ['labor:read','actions:read','actions:write','projects:read','projects:write'],
@@ -32,7 +33,7 @@ const capabilities: Record<ServerRole, ServerCapability[]> = {
   Maintenance: ['evidence:read','actions:read','actions:write','actions:verify','projects:read','projects:write'],
 };
 
-const globalLocationRoles: ServerRole[] = ['Founder','Corporate','HR','Administration','Maintenance'];
+const globalLocationRoles: ServerRole[] = ['Founder','Corporate','Online Reputation Manager','HR','Administration','Maintenance'];
 
 export function hasCapability(user: SessionUser, capability: ServerCapability) {
   return capabilities[user.role].includes(capability);
