@@ -22,7 +22,8 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
     const selected=requested&&requested!=='All locations'?[requested]:unrestricted?undefined:user.locations;
     if(selected?.some(location=>!localIntelligenceLocationNames.includes(location)))return res.status(400).json({error:'Unknown location'});
     if(!unrestricted&&selected?.some(location=>!user.locations.includes(location)))return res.status(403).json({error:'Location outside your access scope'});
-    const payload=await getLocalIntelligence(selected,localIntelligenceHorizons[horizonKey],radiusMiles);
+    const lang=query(req,'lang')==='es'?'es':'en';
+    const payload=await getLocalIntelligence(selected,localIntelligenceHorizons[horizonKey],radiusMiles,lang);
     res.setHeader?.('Cache-Control','private, max-age=60, stale-while-revalidate=120');
     return res.status(200).json(payload);
   }catch(error){
