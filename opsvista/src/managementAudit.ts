@@ -4,6 +4,10 @@ export type ManagementAuditAction =
   | 'User created'
   | 'User activated'
   | 'User deactivated'
+  | 'Name changed'
+  | 'Email changed'
+  | 'Phone changed'
+  | 'Recovery email changed'
   | 'Role changed'
   | 'Title changed'
   | 'Primary location changed'
@@ -97,6 +101,10 @@ export function diffUserChanges(before: OpsVistaUser, after: OpsVistaUser, actor
   });
 
   if (before.active !== after.active) add({ action: after.active ? 'User activated' : 'User deactivated', before: String(before.active), after: String(after.active) });
+  if (before.name !== after.name) add({ action:'Name changed', before:value(before.name), after:value(after.name) });
+  if (value(before.email) !== value(after.email)) add({ action:'Email changed', before:value(before.email), after:value(after.email) });
+  if (value(before.phone) !== value(after.phone)) add({ action:'Phone changed', before:value(before.phone), after:value(after.phone) });
+  if (value(before.recoveryEmail) !== value(after.recoveryEmail)) add({ action:'Recovery email changed', before:value(before.recoveryEmail), after:value(after.recoveryEmail) });
   if (before.role !== after.role) add({ action:'Role changed', before:before.role, after:after.role });
   if (before.title !== after.title) add({ action:'Title changed', before:value(before.title), after:value(after.title) });
 
