@@ -53,6 +53,7 @@ export const initialManagedDirectory: ManagedDirectoryUser[] = [
   {id:'usr-esaul',name:'Esaul Rodríguez',email:'esaul08@gmail.com',role:'Corporate',title:'CEO',locations:[],active:true},
   {id:'usr-caleb',name:'Caleb Kyllo',email:'caleb@puertovallartausa.com',role:'Corporate',title:'Corporate',locations:[],active:true},
   {id:'usr-gladys',name:'Gladys Valdez',email:'gvaldez1223@outlook.com',role:'HR',title:'Human Resources & Payroll',locations:[],active:true},
+  {id:'usr-sergio-reputation',name:'Sergio',email:'sergio@puertovallartausa.com',role:'Online Reputation Manager',title:'Online Reputation Manager',locations:[],active:true},
   {id:'usr-eduardo',name:'Eduardo Santos',email:'lalo@puertovallartausa.com',role:'Kitchen',title:'Kitchen Operations',locations,locationGrants:grants(locations),active:true},
   {id:'usr-miguel',name:'Miguel Bello',email:'miguel@puertovallartausa.com',role:'Maintenance',title:'Head of Maintenance · All Locations',locations:[],active:true},
   {id:'usr-samantha',name:'Samantha Lora',email:'invoicepv@puertovallartausa.com',role:'Administration',title:'Administration',locations:[],active:true},
