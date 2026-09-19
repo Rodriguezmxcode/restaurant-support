@@ -57,7 +57,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: true, canApprovePayments: true, canSeeFinancialImpact: true,
   },
   'Location Manager': {
-    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias'],
+    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
