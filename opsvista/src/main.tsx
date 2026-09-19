@@ -11,7 +11,7 @@ import './rampComplianceOverdue.css';
 import './corporateImportBootstrap';
 import './priceWatchBootstrap';
 
-const isMarketingHost=typeof window!=='undefined'&&['getopsvista.com','www.getopsvista.com'].includes(window.location.hostname.toLowerCase());
+const isMarketingHost=typeof window!=='undefined'&&(['getopsvista.com','www.getopsvista.com'].includes(window.location.hostname.toLowerCase())||new URLSearchParams(window.location.search).get('marketing')==='1');
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
