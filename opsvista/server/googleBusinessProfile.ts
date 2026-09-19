@@ -31,6 +31,10 @@ export type GoogleReviewLocationSummary = {
   googleTitle?: string;
   reviewCount: number;
   averageRating: number | null;
+  oneStarCount: number;
+  twoStarCount: number;
+  threeStarCount: number;
+  fourStarCount: number;
   fiveStarCount: number;
   lowRatingCount: number;
   unansweredCount: number;
@@ -177,7 +181,7 @@ async function reviewsForLocation(account: string, locationName: string, start: 
 }
 
 function summarize(location: string, googleLocation: GoogleLocation | undefined, reviews: GoogleReview[]): GoogleReviewLocationSummary {
-  if (!googleLocation) return { location, reviewCount: 0, averageRating: null, fiveStarCount: 0, lowRatingCount: 0, unansweredCount: 0, minimumMet: false, scorePct: 0, reviews: [], mappingError: `No Google Business Profile location matched ${location}` };
+  if (!googleLocation) return { location, reviewCount: 0, averageRating: null, oneStarCount: 0, twoStarCount: 0, threeStarCount: 0, fourStarCount: 0, fiveStarCount: 0, lowRatingCount: 0, unansweredCount: 0, minimumMet: false, scorePct: 0, reviews: [], mappingError: `No Google Business Profile location matched ${location}` };
   const normalizedReviews = reviews.map(review => ({
     id: review.reviewId || `${review.createTime || 'review'}-${review.reviewer?.displayName || 'anonymous'}`,
     reviewer: review.reviewer?.displayName || 'Google user',
@@ -200,6 +204,10 @@ function summarize(location: string, googleLocation: GoogleLocation | undefined,
     googleTitle: googleLocation.title,
     reviewCount,
     averageRating,
+    oneStarCount: normalizedReviews.filter(review => review.rating === 1).length,
+    twoStarCount: normalizedReviews.filter(review => review.rating === 2).length,
+    threeStarCount: normalizedReviews.filter(review => review.rating === 3).length,
+    fourStarCount: normalizedReviews.filter(review => review.rating === 4).length,
     fiveStarCount: normalizedReviews.filter(review => review.rating === 5).length,
     lowRatingCount: normalizedReviews.filter(review => review.rating <= 2).length,
     unansweredCount: normalizedReviews.filter(review => !review.answered).length,
