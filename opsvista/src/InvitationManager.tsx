@@ -50,16 +50,31 @@ export default function InvitationManager({currentUser}:Props){
     setLoading(true);setMessage('');setInviteUrl('');
     try {
       const response=await fetch('/api/management/invitations',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId})});
-      const body=await response.json().catch(()=>({})) as {error?:string;invitation?:{inviteUrl?:string;expiresAt?:string}};
+      const body=await response.json().catch(()=>({})) as {error?:string;invitation?:{inviteUrl?:string;expiresAt?:string;email?:string;delivery?:string;deliveryError?:string}};
       if(!response.ok) throw new Error(body.error||`Unable to create invitation (${response.status}).`);
       setInviteUrl(body.invitation?.inviteUrl??'');
-      setMessage(`Invitation created. Expires ${body.invitation?.expiresAt?new Date(body.invitation.expiresAt).toLocaleString():'in 48 hours'}.`);
+      const expires=body.invitation?.expiresAt?new Date(body.invitation.expiresAt).toLocaleString():'in 48 hours';
+      if(body.invitation?.delivery==='email-accepted') setMessage(`Invitation email accepted for delivery to ${body.invitation.email}. Expires ${expires}.`);
+      else setMessage(`Invitation link created for ${body.invitation?.email||'the user'}, but email delivery was not confirmed${body.invitation?.deliveryError?`: ${body.invitation.deliveryError}`:''}. Expires ${expires}. Use Copy link as backup.`);
       await load();
     } catch(error) {
       setMessage(error instanceof Error?error.message:'Unable to create invitation.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const resendPending=async()=>{
+    setLoading(true);setMessage('');setInviteUrl('');
+    try{
+      const response=await fetch('/api/management/invitations',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'resend_pending'})});
+      const body=await response.json().catch(()=>({})) as {error?:string;resent?:number;emailAccepted?:number;emailFailed?:number};
+      if(!response.ok)throw new Error(body.error||`Unable to resend pending invitations (${response.status}).`);
+      if(!body.resent)setMessage('No previously invited users are waiting for activation.');
+      else setMessage(`Reissued ${body.resent} pending invitation${body.resent===1?'':'s'}. Email provider accepted ${body.emailAccepted??0}; ${body.emailFailed??0} need manual follow-up.`);
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:'Unable to resend pending invitations.');}
+    finally{setLoading(false);}
   };
 
   if(!['Founder','Corporate'].includes(currentUser.role)) return null;
@@ -73,11 +88,12 @@ export default function InvitationManager({currentUser}:Props){
       </div>
       <div style={{display:'grid',gridTemplateColumns:'minmax(240px,1fr) auto',gap:10,alignItems:'end'}}>
         <div><label style={{display:'block',fontWeight:800,fontSize:11,marginBottom:5}}>CLIENT USER</label><select value={userId} disabled={directoryLoading||!users.length} onChange={e=>{setUserId(e.target.value);setInviteUrl('');setMessage('');}} style={{width:'100%',padding:10,border:'1px solid #ccd9e8',borderRadius:9}}>{directoryLoading?<option value="">Loading users…</option>:!users.length?<option value="">No eligible users available</option>:users.map(user=><option key={user.id} value={user.id}>{user.name} · {user.role} · {user.email}</option>)}</select></div>
-        <button className="primary" disabled={!userId||loading||directoryLoading} onClick={create}>{loading?'Creating…':directoryLoading?'Loading…':'Create invitation'}</button>
+        <button className="primary" disabled={!userId||loading||directoryLoading} onClick={create}>{loading?'Sending…':directoryLoading?'Loading…':'Send invitation'}</button>
       </div>
       {message&&<div className="detail-block"><label>INVITATION</label><p>{message}</p>{inviteUrl&&<div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:8,marginTop:8}}><input readOnly value={inviteUrl} style={{width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #ccd9e8',borderRadius:8}}/><button onClick={()=>navigator.clipboard?.writeText(inviteUrl)}>Copy link</button></div>}</div>}
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}><button disabled={loading||directoryLoading} onClick={resendPending}>Resend pending invites</button><span style={{fontSize:12,color:'#64748b'}}>Creates fresh 48-hour links only for previously invited users who have not activated their account.</span></div>
       <div style={{display:'grid',gap:8}}>{users.slice(0,30).map(user=>{const inv=latestByUser.get(user.id);return <div key={user.id} style={{display:'grid',gridTemplateColumns:'minmax(170px,1fr) 120px minmax(220px,1.2fr) 110px 170px',gap:10,padding:'9px 10px',border:'1px solid #e3eaf2',borderRadius:9,fontSize:12}}><strong>{user.name}</strong><span>{user.role}</span><span>{user.email}</span><span>{inv?.status??'not invited'}</span><span>{inv?new Date(inv.expiresAt).toLocaleString():'—'}</span></div>})}</div>
-      <p style={{margin:0,fontSize:12,color:'#64748b'}}>Founder credentials are platform-level and intentionally excluded from client invitations. Automatic email delivery is not enabled yet; during testing, use Copy link.</p>
+      <p style={{margin:0,fontSize:12,color:'#64748b'}}>Founder credentials are platform-level and intentionally excluded from client invitations. OpsVista now sends invitation email automatically when the sender is configured; Copy link remains available as a backup.</p>
     </div>
   </section>;
 }
