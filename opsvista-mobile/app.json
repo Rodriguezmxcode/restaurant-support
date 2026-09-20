@@ -4,6 +4,7 @@
     "slug": "opsvista-mobile",
     "scheme": "opsvista",
     "version": "0.2.0",
+    "icon": "./assets/app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "ios": {
