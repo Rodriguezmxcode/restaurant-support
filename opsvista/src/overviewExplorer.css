@@ -40,3 +40,20 @@
 .overview-location-link{font:inherit;font-weight:800;color:#0f766e;background:none;border:0;padding:5px 0;text-decoration:underline;text-underline-offset:4px;cursor:pointer}
 @media(max-width:600px){.overview-explorer{padding:16px}.overview-explorer .overview-explorer-row{grid-template-columns:minmax(90px,1fr) minmax(90px,1fr);gap:10px}.overview-explorer-bar{grid-column:1/-1;grid-row:2}.overview-explorer-row strong{grid-column:2;grid-row:1}.overview-explorer-controls label{flex:1 1 140px}.overview-explorer-controls>button{flex:1 1 180px}.overview-explorer-footer button{width:100%}.overview-kpi{min-height:145px}}
 @media(prefers-reduced-motion:reduce){.overview-kpi,.overview-explorer-bar>span{transition:none}.overview-kpi:not(:disabled):hover{transform:none}}
+
+/* Compact radial gauges for metrics with a meaningful percentage target. */
+.overview-kpi.has-gauge{min-height:292px;align-items:stretch}
+.overview-gauge{position:relative;width:min(100%,180px);height:127px;margin:2px auto 0;color:#0f766e;text-align:center;font-variant-numeric:tabular-nums}
+.overview-gauge.warning{color:#c45424}
+.overview-gauge.pending{color:#94a3b8}
+.overview-gauge svg{display:block;width:100%;height:108px;overflow:visible}
+.overview-gauge path{fill:none;stroke-linecap:round;stroke-width:12}
+.overview-gauge-track{stroke:#e2e8f0}
+.overview-gauge-progress{stroke:currentColor;transition:stroke-dashoffset .35s ease}
+.overview-gauge-target{stroke:#142235;stroke-width:3;stroke-linecap:round}
+.overview-gauge>strong{position:absolute;top:55px;left:0;width:100%;font-size:1.45rem;line-height:1;color:currentColor;letter-spacing:-.035em}
+.overview-gauge>span{position:absolute;top:82px;left:0;width:100%;font-size:.69rem;line-height:1.15;font-weight:850;letter-spacing:.035em;text-transform:uppercase;color:#526174}
+.overview-gauge>small{display:block;margin-top:-6px;color:#526174;font-size:.72rem;font-weight:750}
+.overview-kpi.has-gauge .overview-kpi-value{font-size:1.15rem;margin-top:1px}
+@media(max-width:600px){.overview-kpi.has-gauge{min-height:280px}.overview-gauge{width:170px}}
+@media(prefers-reduced-motion:reduce){.overview-gauge-progress{transition:none}}
