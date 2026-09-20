@@ -98,3 +98,12 @@
 @keyframes mobile-sheet-in{from{transform:translateY(28px);opacity:.7}to{transform:translateY(0);opacity:1}}
 @keyframes mobile-fade-in{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.mobile-menu-backdrop,.mobile-menu-sheet{animation:none}}
+
+/* Deterministic role identity colors: the text label remains visible for accessibility. */
+.avatar.role-avatar{background:var(--role-color,#2b6fd5);box-shadow:0 0 0 3px var(--role-soft,#e8f1ff)}
+.role-identity{display:flex!important;align-items:center;gap:7px;color:var(--role-color,#687a91)!important;font-weight:850}
+.role-identity i{width:7px;height:7px;border-radius:50%;background:var(--role-color,#2b6fd5);box-shadow:0 0 0 3px var(--role-soft,#e8f1ff);flex:0 0 auto}
+.mobile-user-summary>div:last-child{min-width:0}
+.role-color-key{display:flex;flex-wrap:wrap;gap:9px;padding:0 18px 18px}
+.role-color-key>span{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:6px 10px;border:1px solid var(--role-soft,#e8f1ff);border-radius:999px;background:var(--role-soft,#e8f1ff);color:#263a52;font-size:12px;font-weight:800}
+.role-color-key i{width:10px;height:10px;border-radius:50%;background:var(--role-color,#2b6fd5);box-shadow:0 0 0 3px #fff;flex:0 0 auto}

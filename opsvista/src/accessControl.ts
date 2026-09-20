@@ -45,6 +45,21 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
+export type RoleVisual = { color:string; soft:string; label:string };
+
+export const roleVisuals: Record<OpsVistaRole, RoleVisual> = {
+  Founder: { color:'#d97706', soft:'#fff4d6', label:'Founder' },
+  Corporate: { color:'#6d4bd1', soft:'#f0ebff', label:'Corporate' },
+  'Location Manager': { color:'#1677b8', soft:'#e5f4ff', label:'Location Manager' },
+  'Online Reputation Manager': { color:'#c23b8c', soft:'#ffe8f5', label:'Online Reputation' },
+  Kitchen: { color:'#d05b20', soft:'#fff0e7', label:'Kitchen' },
+  HR: { color:'#008f83', soft:'#e2f8f4', label:'Human Resources' },
+  Administration: { color:'#53657d', soft:'#edf1f5', label:'Administration' },
+  Maintenance: { color:'#2f855a', soft:'#e7f6ed', label:'Maintenance' },
+};
+
+export function roleVisualFor(role:OpsVistaRole){return roleVisuals[role]}
+
 const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Finanzas','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {

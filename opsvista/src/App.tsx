@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { ExternalEscalation } from './actionCenterTypes';
-import { canAccessLocation, currentAuthenticatedUser, permissionsFor, visibleLocations, type OpsVistaModule, type OpsVistaUser } from './accessControl';
+import { canAccessLocation, currentAuthenticatedUser, permissionsFor, roleVisualFor, visibleLocations, type OpsVistaModule, type OpsVistaUser } from './accessControl';
 import GoogleBusinessIntegrationPanel from './GoogleBusinessIntegrationPanel';
 import { searchLiveOpsVista, type GlobalSearchResult } from './globalSearch';
 import ModuleErrorBoundary from './ModuleErrorBoundary';
@@ -106,6 +106,8 @@ function LegacyWorkspace(){
   const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>{try{return window.localStorage.getItem('opsvista-sidebar-collapsed')==='1'}catch{return false}});
   const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
   const currentUser=previewUser??authenticatedUser;
+  const roleVisual=roleVisualFor(currentUser.role);
+  const roleStyle={'--role-color':roleVisual.color,'--role-soft':roleVisual.soft} as CSSProperties;
   const permissions=permissionsFor(currentUser);
   const allowedLocations=useMemo(()=>visibleLocations(currentUser,allLocations),[currentUser]);
   const allowedPerformanceLocations=useMemo(()=>permissions.allLocations?toastPerformanceLocations:allowedLocations,[permissions.allLocations,allowedLocations]);
@@ -266,7 +268,7 @@ function LegacyWorkspace(){
       <div className="brand"><div className="brand-mark">OV</div><div className="brand-copy"><strong>OpsVista</strong><span>OPERATIONS CENTER</span><small>Account OPS-0001</small></div></div>
       <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed?'Expandir menú lateral':'Compactar menú lateral'} aria-pressed={sidebarCollapsed} title={sidebarCollapsed?'Expandir menú':'Compactar menú'}>{sidebarCollapsed?'›':'‹'}</button>
       <nav aria-label="Módulos de OpsVista">{nav.map(item=>{const label=navLabel(item);return <button key={item} className={section===item?'active':''} onClick={()=>navigateToSection(item)} aria-label={sidebarCollapsed?label:undefined} title={sidebarCollapsed?label:undefined}><span className="nav-icon">{icon[item]}</span><span className="nav-label">{label}</span></button>})}</nav>
-      <div className="user-card" title={sidebarCollapsed?`${currentUser.name} · ${currentUser.role}`:undefined}><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div className="user-card-copy"><strong>{currentUser.name}</strong><span>{previewUser?'Vista previa · ':''}{currentUser.role} · {permissions.allLocations?'All locations':currentUser.locations.join(', ')}</span></div></div>
+      <div className="user-card" style={roleStyle} title={sidebarCollapsed?`${currentUser.name} · ${currentUser.role}`:undefined}><div className="avatar role-avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div className="user-card-copy"><strong>{currentUser.name}</strong><span className="role-identity"><i />{previewUser?`${t('Preview','Vista previa')} · ${roleVisual.label}`:roleVisual.label}</span><span>{permissions.allLocations?t('All locations','Todas las locaciones'):currentUser.locations.join(', ')}</span></div></div>
     </aside>
 
     <main>
@@ -286,7 +288,7 @@ function LegacyWorkspace(){
             <div className="search-hint"><span>↑↓ navegar</span><span>Enter abrir</span><span>Esc cerrar</span></div>
           </div>}
         </div>
-        <div className="top-actions"><select aria-label={t('Language','Idioma')} value={language} onChange={e=>setLanguage(e.target.value as 'en'|'es')}><option value="en">EN</option><option value="es">ES</option></select><button onClick={previewUser?()=>setPreviewNotice('La vista previa ya consulta datos reales. Sal de este modo para recargar toda la aplicación.'):refreshData} >{previewUser?t('✓ Live data','✓ Datos en vivo'):t('↻ Refresh data','↻ Actualizar datos')}</button>{previewUser?<button className="preview-exit" onClick={stopUserPreview}>Salir de vista previa</button>:<button className="danger-outline" onClick={logout}>{t('Sign out','Cerrar sesión')}</button>}<div className="avatar small">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
+        <div className="top-actions" style={roleStyle}><select aria-label={t('Language','Idioma')} value={language} onChange={e=>setLanguage(e.target.value as 'en'|'es')}><option value="en">EN</option><option value="es">ES</option></select><button onClick={previewUser?()=>setPreviewNotice('La vista previa ya consulta datos reales. Sal de este modo para recargar toda la aplicación.'):refreshData} >{previewUser?t('✓ Live data','✓ Datos en vivo'):t('↻ Refresh data','↻ Actualizar datos')}</button>{previewUser?<button className="preview-exit" onClick={stopUserPreview}>Salir de vista previa</button>:<button className="danger-outline" onClick={logout}>{t('Sign out','Cerrar sesión')}</button>}<div className="avatar small role-avatar" title={`${currentUser.name} · ${roleVisual.label}`}>{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div>
       </header>
 
       <div className="page">
@@ -308,7 +310,7 @@ function LegacyWorkspace(){
       <section className="mobile-menu-sheet" id="opsvista-mobile-menu" role="dialog" aria-modal="true" aria-label={t('All OpsVista modules','Todos los módulos de OpsVista')} onMouseDown={event=>event.stopPropagation()}>
         <div className="mobile-sheet-handle" aria-hidden="true" />
         <header><div><span>{t('Navigation','Navegación')}</span><h2>{t('All modules','Todos los módulos')}</h2></div><button type="button" onClick={()=>setMobileMenuOpen(false)} aria-label={t('Close menu','Cerrar menú')}>×</button></header>
-        <div className="mobile-user-summary"><div className="avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span>{currentUser.role} · {permissions.allLocations?t('All locations','Todas las locaciones'):currentUser.locations.join(', ')}</span></div></div>
+        <div className="mobile-user-summary" style={roleStyle}><div className="avatar role-avatar">{currentUser.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><strong>{currentUser.name}</strong><span className="role-identity"><i />{roleVisual.label}</span><span>{permissions.allLocations?t('All locations','Todas las locaciones'):currentUser.locations.join(', ')}</span></div></div>
         <div className="mobile-module-grid">{nav.map(item=><button type="button" key={item} className={section===item?'active':''} onClick={()=>navigateToSection(item)}><span>{icon[item]}</span><strong>{navLabel(item)}</strong></button>)}</div>
         <footer>
           <label>{t('Language','Idioma')}<select value={language} onChange={event=>setLanguage(event.target.value as 'en'|'es')}><option value="en">English</option><option value="es">Español</option></select></label>
