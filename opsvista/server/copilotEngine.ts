@@ -114,7 +114,7 @@ You may make at most four data calls. Answer using the provided numeric totals, 
   try {
     for (let round = 0; round < 5; round++) {
       const response = await Promise.race([deps.respond({
-        model: process.env.OPSVISTA_COPILOT_MODEL || 'gpt-5-mini', store: false,
+        model: process.env.OPSVISTA_COPILOT_MODEL?.trim() || 'gpt-5.6-luna', store: false,
         include: ['reasoning.encrypted_content'], reasoning: { effort: 'low' },
         max_output_tokens: 2400, parallel_tool_calls: false, instructions, input,
         tools, tool_choice: calls >= 4 ? 'none' : 'auto', text: { format: finalFormat },
