@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { OpsVistaModule } from './accessControl';
 import { answerCopilot, copilotSuggestedPrompts, type CopilotAction, type CopilotAnswer } from './copilot';
-import type { CopilotAgentAnswer, CopilotDataset, CopilotSource } from '../shared/copilotAgent';
+import type { CopilotAgentAnswer, CopilotDataset, CopilotIssueCode, CopilotSource } from '../shared/copilotAgent';
 import './copilot.css';
 
 type Props = {
@@ -22,12 +22,21 @@ type ChatMessage = {
   answer?:CopilotAnswer;
   sources?:CopilotSource[];
   error?:boolean;
+  issueCode?:CopilotIssueCode;
+  retryAt?:number;
   createdAt:number;
 };
 
 type CopilotSide='left'|'right';
 
 const sourceModules:Record<CopilotDataset,OpsVistaModule>={performance:'Ventas',ramp:'Gastos',tasks:'Tasks',actions:'Action Center',provi:'Restaurant365',reviews:'Google Reviews'};
+const openAIHelp:Partial<Record<CopilotIssueCode,{label:string;url:string}>>={
+  openai_credit:{label:'Revisar saldo de OpenAI',url:'https://platform.openai.com/settings/organization/billing/overview'},
+  openai_quota:{label:'Revisar saldo y cuota de OpenAI',url:'https://platform.openai.com/settings/organization/billing/overview'},
+  openai_project_spend:{label:'Revisar proyecto de OpenAI',url:'https://platform.openai.com/settings/organization/projects'},
+  openai_organization_spend:{label:'Revisar límites de OpenAI',url:'https://platform.openai.com/settings/organization/limits'},
+  openai_usage:{label:'Revisar límites de OpenAI',url:'https://platform.openai.com/settings/organization/limits'},
+};
 const api='/api/workflows?resource=actions';
 const makeId=()=>`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
 const greeting=(name:string,locations:string[]):ChatMessage=>({
@@ -117,6 +126,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
     }
     const controller=new AbortController();requestRef.current=controller;setBusy(true);
     const timer=window.setTimeout(()=>controller.abort('timeout'),105000);
+    let issueCode:CopilotIssueCode|undefined,retryAt:number|undefined;
     try{
       const response=await fetch('/api/workflows?resource=copilot',{
         method:'POST',credentials:'include',cache:'no-store',signal:controller.signal,
@@ -124,12 +134,12 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
         body:JSON.stringify({question:next,history:messages.filter(item=>item.id!=='welcome'&&!item.error&&!item.answer).slice(-8).map(item=>({role:item.role,text:item.text.slice(0,4000)}))}),
       });
       const body=await response.json();
-      if(!response.ok)throw new Error(body.error||'No se pudo consultar el asistente.');
+      if(!response.ok){issueCode=body.code;retryAt=typeof body.retryAfterSeconds==='number'&&Number.isFinite(body.retryAfterSeconds)&&body.retryAfterSeconds>=0&&body.retryAfterSeconds<=604800?Date.now()+body.retryAfterSeconds*1000:undefined;throw new Error(body.error||'No se pudo consultar el asistente.');}
       const answer=body as CopilotAgentAnswer;
       if(typeof answer.answer!=='string'||!Array.isArray(answer.sources))throw new Error('La respuesta llegó incompleta. Intenta de nuevo.');
       if(!controller.signal.aborted)setMessages(items=>[...items,{id:makeId(),role:'assistant',text:answer.answer,sources:answer.sources,createdAt:Date.now()}].slice(-30) as ChatMessage[]);
     }catch(error){
-      if(!controller.signal.aborted||controller.signal.reason==='timeout')setMessages(items=>[...items,{id:makeId(),role:'assistant',error:true,text:controller.signal.aborted?'La consulta tardó demasiado. Prueba una locación o un período más corto.':error instanceof Error?error.message:'No se pudo consultar el asistente.',createdAt:Date.now()}].slice(-30) as ChatMessage[]);
+      if(!controller.signal.aborted||controller.signal.reason==='timeout'){setQuestion(next);setMessages(items=>[...items,{id:makeId(),role:'assistant',error:true,issueCode,retryAt,text:controller.signal.aborted?'La consulta tardó demasiado. Prueba una locación o un período más corto.':error instanceof Error?error.message:'No se pudo consultar el asistente.',createdAt:Date.now()}].slice(-30) as ChatMessage[]);}
     }finally{window.clearTimeout(timer);if(requestRef.current===controller){requestRef.current=null;setBusy(false);}}
   };
   const submit=(event:FormEvent)=>{event.preventDefault();ask();};
@@ -169,6 +179,8 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
             <div className="copilot-message-label">{message.role==='user'?'TÚ':message.answer?'GUÍA OPSVISTA':'OPSVISTA'}</div>
             <div className="copilot-bubble">
               <p>{message.text}</p>
+              {message.error&&message.retryAt&&<p className="copilot-retry-note">Puedes reintentar después de {new Date(message.retryAt).toLocaleTimeString('es-US',{timeZone:'America/New_York'})} ET.</p>}
+              {message.error&&message.issueCode&&openAIHelp[message.issueCode]&&role==='Founder'&&<a className="copilot-open-module" href={openAIHelp[message.issueCode]!.url} target="_blank" rel="noopener noreferrer">{openAIHelp[message.issueCode]!.label}<b>↗</b></a>}
               {message.sources&&message.sources.length>0&&<details className="copilot-sources"><summary>Fuentes consultadas · {message.sources.length}</summary>{message.sources.map(source=><div key={source.id}>
                 <strong>[{source.id}] {source.label}{source.available?'':' · No disponible'}</strong>
                 <span>{source.start} → {source.end} · {source.locations.join(', ')}</span>

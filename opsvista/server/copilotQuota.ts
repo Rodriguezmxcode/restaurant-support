@@ -27,6 +27,11 @@ export async function reserveCopilotRequest(user: SessionUser) {
       values (${`user:${org}:${user.id}`},date_trunc('hour',now()),1)
       on conflict (scope,bucket) do update set requests=opsvista_copilot_usage.requests+1
       where opsvista_copilot_usage.requests < 20 returning requests`;
-    if (!daily.length || !hourly.length) throw new CopilotError(429, 'Se alcanzó el límite de consultas de IA. Intenta más tarde; los módulos siguen disponibles.');
+    if (!daily.length || !hourly.length) {
+      const now = new Date();
+      const next = new Date(now);
+      if (!daily.length) next.setUTCHours(24, 0, 0, 0); else next.setUTCMinutes(60, 0, 0);
+      throw new CopilotError(429, !daily.length ? 'OpsVista alcanzó su límite diario de consultas de IA. Los módulos siguen disponibles.' : 'Alcanzaste tu límite por hora de consultas de IA en OpsVista. Los módulos siguen disponibles.', { code: 'opsvista_limit', retryAfterSeconds: Math.max(1, Math.ceil((next.getTime() - now.getTime()) / 1000)) });
+    }
   });
 }

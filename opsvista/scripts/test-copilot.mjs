@@ -10,7 +10,7 @@ const output = await mkdtemp(join(tmpdir(), 'opsvista-copilot-'));
 async function write(name, body) { const path = join(output, name); await mkdir(dirname(path), { recursive: true }); await writeFile(path, body); }
 try {
   await write('package.json', '{"type":"module"}');
-  for (const name of ['shared/tenantAccess', 'shared/copilotAgent', 'server/copilotPolicy', 'server/copilotEngine', 'server/copilotSources', 'server/copilotQuota', 'server/copilotEndpoint', 'server/copilotAgent.test']) {
+  for (const name of ['shared/tenantAccess', 'shared/copilotAgent', 'server/copilotPolicy', 'server/copilotEngine', 'server/copilotSources', 'server/copilotQuota', 'server/copilotEndpoint', 'server/copilotAgent.test', 'server/copilotProvider.test']) {
     const fileName = join(root, `${name}.ts`);
     const compiled = ts.transpileModule(await readFile(fileName, 'utf8'), { fileName, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
     await write(`${name}.js`, compiled.outputText);
@@ -37,5 +37,5 @@ try {
     export default function(){return adapter(database);}
     export const closeFixture=()=>database.close();`);
   await write('server/copilotAgent.test.js', (await readFile(join(output, 'server/copilotAgent.test.js'), 'utf8')) + `\nimport {after} from 'node:test'; import {closeFixture} from 'postgres'; after(closeFixture);\n`);
-  process.exitCode = spawnSync(process.execPath, ['--test', join(output, 'server/copilotAgent.test.js')], { stdio: 'inherit', timeout: 30000 }).status ?? 1;
+  process.exitCode = spawnSync(process.execPath, ['--test', join(output, 'server/copilotAgent.test.js'), join(output, 'server/copilotProvider.test.js')], { stdio: 'inherit', timeout: 30000 }).status ?? 1;
 } finally { await rm(output, { recursive: true, force: true }); }
