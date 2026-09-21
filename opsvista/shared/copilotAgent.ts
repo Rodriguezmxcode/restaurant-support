@@ -1,4 +1,4 @@
-export type CopilotDataset = 'performance' | 'ramp' | 'tasks' | 'actions' | 'provi' | 'reviews';
+export type CopilotDataset = 'performance' | 'ramp' | 'tasks' | 'actions' | 'provi' | 'reviews' | 'invoices';
 export type CopilotSource = {
   id: string;
   dataset: CopilotDataset;

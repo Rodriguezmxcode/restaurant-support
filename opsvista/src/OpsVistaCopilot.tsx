@@ -29,7 +29,7 @@ type ChatMessage = {
 
 type CopilotSide='left'|'right';
 
-const sourceModules:Record<CopilotDataset,OpsVistaModule>={performance:'Ventas',ramp:'Gastos',tasks:'Tasks',actions:'Action Center',provi:'Restaurant365',reviews:'Google Reviews'};
+const sourceModules:Record<CopilotDataset,OpsVistaModule>={performance:'Ventas',ramp:'Gastos',tasks:'Tasks',actions:'Action Center',provi:'Restaurant365',reviews:'Google Reviews',invoices:'Restaurant365'};
 const openAIHelp:Partial<Record<CopilotIssueCode,{label:string;url:string}>>={
   openai_credit:{label:'Revisar saldo de OpenAI',url:'https://platform.openai.com/settings/organization/billing/overview'},
   openai_quota:{label:'Revisar saldo y cuota de OpenAI',url:'https://platform.openai.com/settings/organization/billing/overview'},
@@ -108,6 +108,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
   const prompts=useMemo(()=>{
     if(!useGuide)return ([
       ['performance','¿Cómo va hoy el salario acumulado y el labor total?'],
+      ['invoices','¿Qué facturas de los últimos 7 días están aprobadas y cuáles faltan por aprobar?'],
       ['ramp','¿Cuántos gastos de esta semana no tienen recibo?'],
       ['tasks','¿Cómo va el cumplimiento de tareas hoy?'],
       ['provi','¿Qué reportes Provi tengo de los últimos 28 días?'],
