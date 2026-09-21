@@ -12,7 +12,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs",
     "test:source-sync": "node scripts/test-source-sync.mjs",
-    "test:salary-timing": "node scripts/test-salary-timing.mjs"
+    "test:salary-timing": "node scripts/test-salary-timing.mjs",
+    "test:copilot": "node scripts/test-copilot.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
