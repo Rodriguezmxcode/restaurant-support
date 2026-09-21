@@ -1,6 +1,6 @@
 # Intraday salary allocation — review notes
 
-Full daily salaries currently appear immediately against partial-day sales. This draft adds an operating-hours allocation for single-day live views, while retaining the full daily fixed salary as a separate reference.
+Full daily salaries previously appeared immediately against partial-day sales. This change adds an operating-hours allocation for single-day live views, while retaining the full daily fixed salary as a separate reference.
 
 ## Verified Google profile hours
 
@@ -39,5 +39,7 @@ These are the main business hours. Additional access, kitchen, or delivery hours
 
 - 13 focused calculation/source tests pass: 11–23 example, prep/closing, cent reconciliation, zero sales, overnight, DST, missing/closed hours, varying day lengths, unchanged weekly salary, mixed configuration, all eight Google schedules, holiday overrides, split service, invalid exceptions.
 - Frontend and server type checks pass; production build passes.
-- Local visual fixture could not be opened by the browser (ERR_BLOCKED_BY_CLIENT for loopback). Live authenticated GBP/Toast end-to-end and browser verification remain release gates.
-- Prepared on an isolated branch, with no production merge or deployment.
+- Nine additional offline checks pass with `node scripts/verify-intraday-release.mjs`: actual API handler and Spanish/English component rendering, authorization boundaries, accrued/full totals, historical/default/multiday preservation, overnight service, incomplete salary/hours, Google fallback, and Toast errors. Sessions and upstream responses are isolated fixtures; no credentials or live records are used.
+- Vercel preview for commit `5665b9a` reached READY and GitHub reports the Vercel check successful. Its login screen opens in the browser. Production logs show the existing performance endpoint returning HTTP 200 on 2026-09-21 UTC.
+- Local visual preview was blocked for loopback; the remote preview requires an OpsVista session. Authenticated visual layout, live GBP mapping, Toast open-entry coverage and source latency have not been independently verified. These checks must not be described as completed.
+- The user authorized activation and explicitly requested an alternative to browser sign-in. Release validation therefore uses the offline handler/render checks, existing calculation checks, and the GitHub/Vercel administrative connection. Production deployment status must be confirmed separately after merge.
