@@ -15,7 +15,9 @@ The assistant cannot read arbitrary SQL, browse arbitrary URLs, write records, p
 
 ## Configuration and limits
 
-Reuse server-only `OPENAI_API_KEY` and the existing OpsVista PostgreSQL connection. Optional `OPSVISTA_COPILOT_MODEL` defaults to `gpt-5-mini`. `OPSVISTA_COPILOT_ENABLED=false` disables model calls without a code rollback. No key or model credential is sent to the browser.
+Reuse server-only `OPENAI_API_KEY` and the existing OpsVista PostgreSQL connection. Optional `OPSVISTA_COPILOT_MODEL` defaults to `gpt-5.6-luna`; an explicit deployment override still takes precedence. Empty/whitespace configuration also uses Luna. `OPSVISTA_COPILOT_ENABLED=false` disables model calls without a code rollback. No key or model credential is sent to the browser.
+
+Luna is selected in the API request, not by buying model-specific credits or choosing a ChatGPT subscription. Its documented Responses API, low reasoning effort, function calling and structured outputs support the existing protocol. This default change does not change the separate Provi document-reader model or increase any usage caps. Quality and cost on real OpsVista questions must still be checked after the configured OpenAI project has credit and model access.
 
 When the key/database is absent, the UI clearly identifies the existing module guide and does not claim AI availability. Configured status only checks configuration presence; it does not prove provider credit, model availability or end-to-end source access.
 
