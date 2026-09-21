@@ -5,14 +5,53 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "rewrites": [
-    { "source": "/api/auth/logout", "destination": "/api/workflows?resource=auth_logout" },
-    { "source": "/api/management/audit", "destination": "/api/workflows?resource=management_audit" },
-    { "source": "/api/management/invitations", "destination": "/api/management/users?view=invitations" },
-    { "source": "/api/integrations/google-business/callback", "destination": "/api/management/users?resource=google_business_callback" },
-    { "source": "/api/integrations/google-business", "destination": "/api/management/users?resource=google_business_integration" },
-    { "source": "/api/integrations/restaurant365", "destination": "/api/restaurant365" },
-    { "source": "/api/payments", "destination": "/api/workflows?resource=payments" },
-    { "source": "/api/tasks/weekly", "destination": "/api/workflows?resource=tasks" },
-    { "source": "/api/google-business/reviews", "destination": "/api/workflows?resource=google_reviews" }
+    {
+      "source": "/api/v1/openapi.json",
+      "destination": "/pv-control-openapi.json"
+    },
+    {
+      "source": "/api/v1/:endpoint",
+      "destination": "/api/workflows?resource=public_api&endpoint=:endpoint"
+    },
+    {
+      "source": "/api/integrations/pv-control",
+      "destination": "/api/workflows?resource=partner_keys"
+    },
+    {
+      "source": "/api/auth/logout",
+      "destination": "/api/workflows?resource=auth_logout"
+    },
+    {
+      "source": "/api/management/audit",
+      "destination": "/api/workflows?resource=management_audit"
+    },
+    {
+      "source": "/api/management/invitations",
+      "destination": "/api/management/users?view=invitations"
+    },
+    {
+      "source": "/api/integrations/google-business/callback",
+      "destination": "/api/management/users?resource=google_business_callback"
+    },
+    {
+      "source": "/api/integrations/google-business",
+      "destination": "/api/management/users?resource=google_business_integration"
+    },
+    {
+      "source": "/api/integrations/restaurant365",
+      "destination": "/api/restaurant365"
+    },
+    {
+      "source": "/api/payments",
+      "destination": "/api/workflows?resource=payments"
+    },
+    {
+      "source": "/api/tasks/weekly",
+      "destination": "/api/workflows?resource=tasks"
+    },
+    {
+      "source": "/api/google-business/reviews",
+      "destination": "/api/workflows?resource=google_reviews"
+    }
   ]
 }
