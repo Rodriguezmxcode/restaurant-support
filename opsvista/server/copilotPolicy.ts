@@ -4,10 +4,10 @@ import type { CopilotDataset, CopilotIssueCode } from '../shared/copilotAgent.js
 
 const restaurants = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
 const datasetsByRole: Record<SessionUser['role'], CopilotDataset[]> = {
-  Founder: ['performance', 'ramp', 'tasks', 'actions', 'provi', 'reviews'],
-  Corporate: ['performance', 'ramp', 'tasks', 'actions', 'provi', 'reviews'],
+  Founder: ['performance', 'ramp', 'tasks', 'actions', 'provi', 'reviews', 'invoices'],
+  Corporate: ['performance', 'ramp', 'tasks', 'actions', 'provi', 'reviews', 'invoices'],
   'Location Manager': ['performance', 'ramp', 'tasks', 'actions', 'reviews'],
-  Administration: ['ramp', 'actions', 'provi'],
+  Administration: ['ramp', 'actions', 'provi', 'invoices'],
   Kitchen: ['tasks', 'actions'], HR: ['actions'], Maintenance: ['tasks', 'actions'],
   'Online Reputation Manager': [],
 };

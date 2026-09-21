@@ -22,6 +22,14 @@ try {
     res.status(200).json({locations:[{location:'Avon',netSales:1000,hourlyLaborCost:100,salaryLaborCost:20,totalLaborCost:120,totalLaborPct:12,employeeLabor:[{name:'PRIVATE_EMPLOYEE'}]}],totals:{netSales:1000,totalLaborCost:120},salaryLaborConfigured:true,salaryTiming:{applied:true,rows:[{location:'Avon',accruedSalary:20,fullDaySalary:120}]},scheduleRisk:{people:['PRIVATE_EMPLOYEE']},notes:{salaryLabor:'Accrued through snapshot time'}});
   }`);
   await write('server/actionStore.js', 'export const listActions=async()=>[];');
+  await write('api/restaurant365.js', `export default async function(req,res){
+    if(req.headers.cookie!=='fixture-cookie'||req.query.view!=='ap'||req.query.start!=='2026-09-20'||req.query.end!=='2026-09-20')throw new Error('Invalid AP fixture request');
+    res.status(200).json({period:{start:'2026-09-20',endExclusive:'2026-09-21'},fetchedAt:'2026-09-20T15:00:00Z',memory:{pending:true},totals:{approved:999,amount:999999},transactions:[
+      {id:'1',entity:'Avon',date:'2026-09-20',number:'INV-1',vendor:'Vendor A',approved:true,amount:120,createdBy:'PRIVATE_EMPLOYEE'},
+      {id:'2',entity:'Orange',date:'2026-09-20',number:'PRIVATE_INVOICE',approved:true,amount:999999},
+      {id:'3',entity:'Corporate Office',date:'2026-09-20',number:'PRIVATE_OFFICE',approved:true,amount:999999}
+    ]});
+  }`);
   await write('server/rampComplianceEndpoint.js', 'export const getRampCompliancePayload=async()=>({transactions:[]});');
   await write('server/proviReports.js', 'export const getProviReports=async()=>[];');
   await write('server/googleBusinessProfile.js', 'export const getGoogleReviewSummaries=async()=>({locations:[]});export const googleBusinessProfileConfigured=async()=>false;');

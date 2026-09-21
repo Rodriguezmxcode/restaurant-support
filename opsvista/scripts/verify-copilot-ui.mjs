@@ -65,7 +65,11 @@ assert.match(billing,/Revisar saldo de OpenAI/);
 assert.match(billing,/https:\/\/platform.openai.com\/settings\/organization\/billing\/overview/);
 const managerBilling=render({0:true,6:[{id:'billing',role:'assistant',text:'Crédito agotado.',error:true,issueCode:'openai_credit',createdAt:1}],7:'ai'});
 assert.doesNotMatch(managerBilling,/Revisar saldo de OpenAI/);
-console.log('5 offline chat rendering checks passed: cited response/escaping, preview guard, setup guidance, pending request, Founder billing guidance.');
+const invoices = render({0:true,6:[{id:'ap',role:'assistant',text:'Aprobada; pago no disponible. [S1]',sources:[{...source,dataset:'invoices',label:'Restaurant365'}],createdAt:1}],7:'ai',8:['invoices']},{role:'Founder',modules:['Restaurant365']});
+assert.match(invoices,/Abrir módulo de la fuente/);
+assert.match(invoices,/facturas de los últimos 7 días/);
+assert.doesNotMatch(ai,/facturas de los últimos 7 días/);
+console.log('6 offline chat rendering checks passed: cited response/escaping, preview guard, setup guidance, pending request, Founder billing guidance, invoice source and authorized suggestion.');
 
 // Exercise the real component event handlers with isolated state and transport.
 // This verifies the zero-POST path, not just the presence of a guide button.
@@ -76,12 +80,15 @@ for (const [question, destination] of [
   ['Abre Tasks', 'Tasks'], ['Abre Resumen', 'Resumen'],
   ['¿Dónde subo un recibo?', 'Gastos'], ['¿Dónde subo archivos de Provi?', 'Restaurant365'],
   ['Abre Price Watch', 'Restaurant365'], ['¿Cómo funciona el bono?', 'Bono semanal'],
+  ['Abre Facturas', 'Restaurant365'],
   ['¿Dónde subo una foto?', 'Tasks'], ['Open sales', 'Ventas'],
 ]) assert.equal(localCopilotAnswer(question, modules)?.module, destination, question);
 for (const question of [
   '¿Cómo va hoy el salario acumulado y el labor total?',
   '¿Cuántos gastos de esta semana no tienen recibo?', 'What are sales today?',
   '¿Qué reportes Provi tengo de los últimos 28 días?',
+  '¿Qué facturas de los últimos 7 días están aprobadas y cuáles faltan por aprobar?',
+  '¿Cuáles facturas están aprobadas y pagadas?',
 ]) assert.equal(localCopilotAnswer(question, modules), null, question);
 assert.equal(localCopilotAnswer('Abre Configuración', modules).module, undefined);
 assert.match(localCopilotAnswer('Abre Configuración', modules).answer, /no tiene acceso/);
@@ -137,4 +144,4 @@ try {
   suggestion('Guía de módulos · Gratis').props.onClick();
   await submit('What are sales today?'); assert.equal(requests, 3, 'Manual guide must not POST');
 } finally { interactive = false; globalThis.fetch = originalFetch; globalThis.window = originalWindow; }
-console.log('Free routing and interaction checks passed: 10 destinations, live-data routing, permissions, four connection modes, navigation click, zero-credit fallback, explicit retry and manual guide.');
+console.log('Free routing and interaction checks passed: 11 destinations, live-data routing, permissions, four connection modes, navigation click, zero-credit fallback, explicit retry and manual guide.');

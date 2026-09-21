@@ -1,5 +1,7 @@
 import type { SessionUser } from './authSession.js';
 import performanceHandler from '../api/operations/performance.js';
+import restaurant365Handler from '../api/restaurant365.js';
+import type { Restaurant365ApSnapshot } from './restaurant365OData.js';
 import { listActions } from './actionStore.js';
 import { getRampCompliancePayload } from './rampComplianceEndpoint.js';
 import { getProviReports } from './proviReports.js';
@@ -11,6 +13,35 @@ import type { CopilotReadResult } from './copilotEngine.js';
 type TaskSummary = { locations: { locationName: string; total: number; completed: number; incomplete: number; completionPct: number | null; detailAvailable?: boolean }[]; taskSource?: string };
 const text = (value: unknown, max = 400) => typeof value === 'string' ? value.replace(/https?:\/\/\S+/g, '[link omitted]').replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, '[email omitted]').slice(0, max) : '';
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+export function selectApInvoices(snapshot: Restaurant365ApSnapshot, query: CopilotQuery) {
+  const rows = snapshot.transactions.filter(row => row.entity && query.locations.includes(row.entity)
+    && row.date.slice(0, 10) >= query.start && row.date.slice(0, 10) <= query.end);
+  const knownAmount = (amount: unknown): amount is number => typeof amount === 'number' && Number.isFinite(amount);
+  const summarize = (items: typeof rows) => {
+    const amounts = items.filter(row => knownAmount(row.amount));
+    return { count: items.length, knownInvoiceAmount: amounts.length ? money(amounts.reduce((sum, row) => sum + row.amount!, 0)) : null,
+      missingAmounts: items.length - amounts.length };
+  };
+  const group = (items: typeof rows) => ({ ...summarize(items), detailsTruncated: items.length > 30,
+    invoices: [...items].sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id)).slice(0, 30).map(row => ({
+      number: text(row.number, 100) || null, transactionDate: row.date.slice(0, 10), vendor: text(row.vendor, 160) || null,
+      location: row.entity, amount: knownAmount(row.amount) ? row.amount : null,
+      approvalStatus: row.approved === true ? 'approved' : row.approved === false ? 'unapproved' : 'unknown',
+      paymentStatus: 'unavailable', paidAmount: null, outstandingAmount: null,
+    })),
+  });
+  return {
+    start: query.start, end: query.end, snapshotAt: snapshot.fetchedAt || null,
+    dateBasis: 'R365 transaction date, not payment date', ...summarize(rows),
+    locationsWithoutRecords: query.locations.filter(location => !rows.some(row => row.entity === location)),
+    approved: group(rows.filter(row => row.approved === true)),
+    unapproved: group(rows.filter(row => row.approved === false)),
+    unknownApproval: group(rows.filter(row => typeof row.approved !== 'boolean')),
+    paymentCoverage: { available: false, status: 'unavailable', invoicesWithoutPaymentStatus: rows.length,
+      paidInvoiceCount: null, unpaidInvoiceCount: null, paidAmount: null, outstandingAmount: null },
+  };
+}
 
 export function selectProviReports(reports: Awaited<ReturnType<typeof getProviReports>>, query: CopilotQuery) {
   const matching = reports.filter(row => query.locations.includes(row.location) && row.start <= query.end && row.end >= query.start);
@@ -37,6 +68,19 @@ export function copilotSourceReader(user: SessionUser, cookie: string | undefine
     const query = parseCopilotQuery(input, user);
     const { start, end, locations } = query;
     const org = user.organizationId || 'org-puerto-vallarta';
+    if (query.dataset === 'invoices') {
+      let code = 200, body: any;
+      const res = { status(value: number) { code = value; return res; }, json(value: unknown) { body = value; }, setHeader() {} };
+      // Reuse AP authorization, persistent snapshots, and initial-sync behavior.
+      await restaurant365Handler({ method: 'GET', headers: { cookie }, query: { view: 'ap', start, end } }, res);
+      const until = new Date(Date.parse(end) + 86400000).toISOString().slice(0, 10);
+      if (code !== 200 || !Array.isArray(body?.transactions) || body.period?.start !== start || body.period?.endExclusive !== until) throw new Error('AP invoices unavailable');
+      const data = selectApInvoices(body, query);
+      return { label: 'Restaurant365 · aprobación de facturas',
+        note: `Copia guardada: ${data.snapshotAt || 'fecha de actualización no disponible'}.${body.memory?.pending ? ' Actualización pendiente.' : ''} Fechas de transacción, no de pago. Solo restaurantes solicitados; excluye Corporate Office y locaciones sin asignación. Hasta 30 facturas por estado; totales sobre todos los registros recuperados. Aprobada no confirma pagada. La conexión no entrega pagos aplicados ni saldos por factura; el pago es desconocido, no pendiente. Abre Restaurant365 → Facturas y AP para ver el listado completo.`,
+        data: { ...data, refreshPending: Boolean(body.memory?.pending) },
+      };
+    }
     if (query.dataset === 'performance') {
       let code = 200, body: any;
       const res = { status(value: number) { code = value; return res; }, json(value: unknown) { body = value; }, setHeader() {} };
