@@ -19,6 +19,8 @@ Reuse server-only `OPENAI_API_KEY` and the existing OpsVista PostgreSQL connecti
 
 When the key/database is absent, the UI clearly identifies the existing module guide and does not claim AI availability. Configured status only checks configuration presence; it does not prove provider credit, model availability or end-to-end source access.
 
+Module navigation and static how-to questions are resolved locally before any model request, even while connection status is loading or unavailable. The user can explicitly select the free module guide at any time. Credit, quota, authentication and configuration failures switch back to this guide; retrying data analysis requires selecting “Consultar datos con IA”. The guide preserves role permissions and can still link to Restaurant365 / Compras Provi. Navigation never calls the model or consumes the server copilot quota. Ordinary live-data questions continue to the data assistant when AI mode is selected.
+
 Shared PostgreSQL counters admit at most 20 turns per user/hour and 250 per organization/UTC day, including failed attempts after reservation. Each turn has at most four data reads, five model responses (at most one short retry per response for temporary rate/availability errors), 2,400 output tokens per response and a 95-second engine deadline. Source responses are capped and detail truncation is explicit. Upstream calls already in progress may continue until their existing adapter timeout. API calls incur the configured OpenAI account's usage charges; no subscription or credits are purchased by this change.
 
 OpenAI requests set `store:false`; selected source data and recent conversation context are transmitted to the configured OpenAI account. This setting is not a claim of zero provider retention. Raw upstream diagnostics, card details, attachment URLs, employee payroll detail and credentials are excluded. No chat text is written to the quota table. Old browser chat history for the active account is removed when the component mounts.
@@ -26,7 +28,7 @@ OpenAI requests set `store:false`; selected source data and recent conversation 
 ## Validation
 
 - `npm run test:copilot`: 26 isolated tests covering tenant/role/location boundaries, date/history validation, Responses function-call protocol, source citations, unavailable data, bounded calls, provider error sanitization, source projection, overlapping Provi reports, cross-site requests, missing key status and concurrent PostgreSQL quota enforcement using PGlite.
-- `node scripts/verify-copilot-ui.mjs`: five offline React rendering checks for source display/text escaping, user-preview guard, setup guidance and pending requests.
+- `node scripts/verify-copilot-ui.mjs`: five offline React rendering checks plus routing and real event-handler checks proving module navigation uses zero model POSTs across all four connection states, credit-error fallback, manual guide selection, explicit AI retry, permissions and live-data routing. These are isolated component checks, not authenticated browser tests.
 - Client/server TypeScript checks and production build pass.
 
 Tests use synthetic data and a mocked model transport. Live model output quality, OpenAI key/credit status, authenticated browser behavior and real connector coverage require an authenticated acceptance check and must not be described as verified by these tests.
