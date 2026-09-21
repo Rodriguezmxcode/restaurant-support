@@ -113,3 +113,17 @@ export function summarizeCorporateRows(rows:CorporateExpenseRow[]):CorporatePnlS
     excluded:money(rows.filter(row=>!row.includeInPnl).reduce((sum,row)=>sum+row.amount,0)),reviewCount:rows.filter(row=>row.section==='Review').length,rowCount:rows.length,
   };
 }
+
+export function corporateExpenseComposition(rows:CorporateExpenseRow[],start:string,end:string){
+  const periodRows=rows.filter(row=>row.date>=start&&row.date<=end);
+  const included=periodRows.filter(row=>row.includeInPnl&&row.section!=='Balance Sheet'&&row.section!=='Review');
+  const sections:CorporatePnlSection[]=['Labor','Operating Expenses','Occupancy','Other Expense','COGS'];
+  return {
+    summary:summarizeCorporateRows(periodRows),
+    sourceFiles:[...new Set(periodRows.map(row=>row.sourceFile))].sort(),
+    groups:sections.map(section=>{
+      const selected=included.filter(row=>row.section===section);
+      return {section,amount:money(selected.reduce((sum,row)=>sum+row.amount,0)),rowCount:selected.length,categoryCount:new Set(selected.map(row=>row.category)).size};
+    }),
+  };
+}
