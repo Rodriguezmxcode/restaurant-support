@@ -1,3 +1,6 @@
+import { useLaborSnapshotRefresh } from './useLaborSnapshotRefresh';
+import SalaryTimingPanel from './SalaryTimingPanel';
+import type { SalaryTiming } from '../shared/salaryTiming';
 import { useEffect, useMemo, useState } from 'react';
 import './laborIntelligence.css';
 import './laborFilters.css';
@@ -9,7 +12,7 @@ import { useI18n } from './i18n';
 
 type Props={onEscalate?:(item:ExternalEscalation)=>Promise<unknown>|void;allowedLocations?:string[]};
 type LiveRow={location:string;netSales:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
-type LiveResponse={start:string;end:string;scheduleStart:string;scheduleEnd:string;overtimeEnd:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
+type LiveResponse={salaryTiming?:SalaryTiming|null;start:string;end:string;scheduleStart:string;scheduleEnd:string;overtimeEnd:string;locations:LiveRow[];scheduleRisk:ScheduleRisk|null;scheduleRiskError?:string;error?:string};
 type Insight=LiveRow&{targetLaborPct:number;gap:number;estimatedExcess:number;severity:'Healthy'|'Watch'|'Action'};
 type PeriodKey='today'|'yesterday'|'this_week'|'prior_week'|'last_30'|'custom';
 
@@ -34,7 +37,7 @@ function selectedRange(period:PeriodKey,customStart:string,customEnd:string){
 export default function LaborIntelligenceView({onEscalate,allowedLocations}:Props){
   const {language,t}=useI18n();
   const labels=periodLabels(language);
-  const today=useMemo(easternToday,[]);
+  const today=easternToday();
   const [period,setPeriod]=useState<PeriodKey>(()=>{const saved=stored('opsvista-labor-period') as PeriodKey;return saved in labels?saved:'today';});
   const [customStart,setCustomStart]=useState(()=>stored('opsvista-labor-custom-start')||today);
   const [customEnd,setCustomEnd]=useState(()=>stored('opsvista-labor-custom-end')||today);
@@ -51,13 +54,14 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
 
   useEffect(()=>{const valid=selectedLocations.filter(location=>allowedLocations?.includes(location));if(valid.length!==selectedLocations.length)setSelectedLocations(valid);},[allowedLocations,selectionKey]);
   useEffect(()=>{window.localStorage.setItem('opsvista-labor-period',period);window.localStorage.setItem('opsvista-labor-custom-start',customStart);window.localStorage.setItem('opsvista-labor-custom-end',customEnd);window.localStorage.setItem('opsvista-labor-locations',JSON.stringify(selectedLocations));},[period,customStart,customEnd,selectionKey]);
+  const {revision:liveRevision,refresh:refreshLabor}=useLaborSnapshotRefresh(!loading&&range.start===range.end&&range.start===easternToday());
   useEffect(()=>{const controller=new AbortController();setLoading(true);setError('');
     setData(null);
-    const params=new URLSearchParams({start:range.start,end:range.end,schedule_start:overtimeWeek.start,schedule_end:overtimeWeek.end,overtime_end:overtimeEnd,include_tasks:'false'});
+    const params=new URLSearchParams({start:range.start,end:range.end,schedule_start:overtimeWeek.start,schedule_end:overtimeWeek.end,overtime_end:overtimeEnd,include_tasks:'false',salary_basis:'elapsed'});
     if(selectedLocations.length)params.set('locations',selectedLocations.join(','));
     fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as LiveResponse;if(!response.ok)throw new Error(body.error||'Live labor data unavailable');setData(body)}).catch(e=>{if(e?.name!=='AbortError')setError(e instanceof Error?e.message:t('Live labor data unavailable','Datos de labor en vivo no disponibles'))}).finally(()=>setLoading(false));
     return()=>controller.abort();
-  },[range.start,range.end,overtimeWeek.start,overtimeWeek.end,overtimeEnd,selectionKey]);
+  },[range.start,range.end,overtimeWeek.start,overtimeWeek.end,overtimeEnd,selectionKey,liveRevision]);
 
   const rows=useMemo<Insight[]>(()=>((data?.locations||[])
     .filter(row=>!allowedLocations?.length||allowedLocations.some(location=>row.location.toLowerCase().includes(location.toLowerCase())))
@@ -79,8 +83,9 @@ export default function LaborIntelligenceView({onEscalate,allowedLocations}:Prop
       <div className="labor-period-explanation overtime"><span>{t('OVERTIME EVALUATION','EVALUACIÓN DE OVERTIME')}</span><strong>{overtimeWeek.start} → {overtimeWeek.end}</strong><small>{t('The 40-hour threshold always uses the Wednesday–Tuesday operating week.','El umbral de 40 horas siempre usa la semana operativa miércoles–martes.')}</small></div>
     </section>
     {error&&<div className="labor-data-error">{error}</div>}
+    <SalaryTimingPanel data={data?.salaryTiming} language={language} onRefresh={refreshLabor}/>
     <section className="labor-summary-grid">
-      <article className="labor-card labor-hero"><span>{t('TOTAL LABOR','LABOR TOTAL')}</span><strong>{loading?'…':pct(totals.sales?totals.labor/totals.sales*100:0)}</strong><p>{t('Hourly + salary labor','Labor por hora + salario')}</p></article>
+      <article className="labor-card labor-hero"><span>{data?.salaryTiming?.applied?t('ACCRUED LABOR','LABOR ACUMULADO'):t('TOTAL LABOR','LABOR TOTAL')}</span><strong>{loading?'…':pct(totals.sales?totals.labor/totals.sales*100:0)}</strong><p>{t('Hourly + salary labor','Labor por hora + salario')}</p></article>
       <article className="labor-card"><span>{t('NET SALES','VENTAS NETAS')}</span><strong>{money(totals.sales)}</strong><p>{t('Live Toast','Toast en vivo')}</p></article>
       <article className="labor-card"><span>SPLH</span><strong>{money(totals.hours?totals.sales/totals.hours:0)}</strong><p>{t('Sales per hourly labor hour','Ventas por hora de labor')}</p></article>
       <article className="labor-card labor-warn"><span>{t('ABOVE TARGET','SOBRE META')}</span><strong>{money(totals.excess)}</strong><p>{t('Actual period variance','Variación real del periodo')}</p></article>

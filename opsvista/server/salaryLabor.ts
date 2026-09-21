@@ -63,7 +63,9 @@ export function allocateSalaryLabor(start: string, end: string, locations: strin
       const dailyCosts = dates.map(date => weeklySalaryForDate(location, date, override) / 7);
       const salaryLaborCost = dailyCosts.reduce((sum, value) => sum + value, 0);
       const weeklySalaryLaborCost = weeklySalaryForDate(location, end, override);
-      return { location, weeklySalaryLaborCost: round(weeklySalaryLaborCost), salaryLaborCost: round(salaryLaborCost) };
+      const key = salaryLocationKey(location, override);
+      const salaryConfigured = override[key] !== undefined || (SALARY_PAYROLL_HISTORY[key] ?? []).some(entry => entry.effectiveFrom <= start);
+      return { location, salaryConfigured, weeklySalaryLaborCost: round(weeklySalaryLaborCost), salaryLaborCost: round(salaryLaborCost) };
     }),
   };
 }

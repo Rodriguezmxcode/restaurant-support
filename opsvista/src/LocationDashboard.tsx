@@ -1,3 +1,6 @@
+import { useLaborSnapshotRefresh } from './useLaborSnapshotRefresh';
+import SalaryTimingPanel from './SalaryTimingPanel';
+import type { SalaryTiming } from '../shared/salaryTiming';
 import { useEffect, useMemo, useState } from 'react';
 import CustomDateRangePicker from './CustomDateRangePicker';
 import './locationDashboard.css';
@@ -7,7 +10,7 @@ type PeriodKey='today'|'yesterday'|'this-week'|'previous-week'|'this-month'|'las
 type LiveRow={location:string;netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
 type TaskLocation={location:string;completed:number;total:number;compliancePct:number};
 type ScheduleLocation={location:string;monitoredEmployees:number;riskEmployees:number;projectedOvertimeHours:number;estimatedOvertimeCost:number;employeesMissingHourlyWage:number};
-type PerformanceResponse={source:string;start:string;end:string;salaryLaborConfigured:boolean;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};taskCompliance?:{locations:TaskLocation[];totals:{completed:number;total:number;compliancePct:number}}|null;taskComplianceError?:string;scheduleRisk?:{locations:ScheduleLocation[];projectedOvertimeHours:number;estimatedOvertimeCost:number}|null;scheduleRiskError?:string;notes?:{salaryLabor?:string;tasks?:string;overtime?:string}};
+type PerformanceResponse={salaryTiming?:SalaryTiming|null;source:string;start:string;end:string;salaryLaborConfigured:boolean;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};taskCompliance?:{locations:TaskLocation[];totals:{completed:number;total:number;compliancePct:number}}|null;taskComplianceError?:string;scheduleRisk?:{locations:ScheduleLocation[];projectedOvertimeHours:number;estimatedOvertimeCost:number}|null;scheduleRiskError?:string;notes?:{salaryLabor?:string;tasks?:string;overtime?:string}};
 type LogbookEntry={id:number;date:string;locationName:string;author:string;category:string;message:string;attachments:number};
 type TasksResponse={locations?:Array<{locationName:string;completed:number;total:number;completionPct:number|null}>;logbook?:LogbookEntry[];logbookComplete?:boolean;logbookError?:string;error?:string};
 type Props={allowedLocations:string[];allLocations:boolean;onOpenTasks?:()=>void;onOpenLabor?:()=>void};
@@ -41,7 +44,7 @@ function MetricCell({label,value,note,tone='neutral'}:{label:string;value:string
 }
 
 export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLabor}:Props){
-  const today=useMemo(easternToday,[]);
+  const today=easternToday();
   const [period,setPeriod]=useState<PeriodKey>(()=>{const saved=window.localStorage.getItem('opsvista-locations-period');return saved&&['today','yesterday','this-week','previous-week','this-month','last-30-days','custom'].includes(saved)?saved as PeriodKey:'today'});
   const [customStart,setCustomStart]=useState(()=>window.localStorage.getItem('opsvista-locations-custom-start')||today);
   const [customEnd,setCustomEnd]=useState(()=>window.localStorage.getItem('opsvista-locations-custom-end')||today);
@@ -66,6 +69,7 @@ export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLa
 
   useEffect(()=>{const valid=selectedLocations.filter(location=>allowedLocations.includes(location));if(valid.length!==selectedLocations.length)setSelectedLocations(valid)},[allowedLocations,selectionKey]);
   useEffect(()=>{window.localStorage.setItem('opsvista-locations-period',period);window.localStorage.setItem('opsvista-locations-custom-start',customStart);window.localStorage.setItem('opsvista-locations-custom-end',customEnd);window.localStorage.setItem('opsvista-locations-selection',JSON.stringify(selectedLocations))},[period,customStart,customEnd,selectionKey]);
+  const {revision:liveRevision,refresh:refreshLabor}=useLaborSnapshotRefresh(!loading&&range.start===range.end&&range.start===easternToday());
   useEffect(()=>{
     if(rangeError){setLoading(false);return}
     const controller=new AbortController();
@@ -73,10 +77,10 @@ export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLa
     setLoading(true);setComparisonLoading(false);setTasksLoading(true);
     setCurrent(null);setPrevious(null);setTasks(null);
     setError('');setComparisonError('');setTasksError('');
-    const currentParams=new URLSearchParams({start:range.start,end:range.end});
+    const currentParams=new URLSearchParams({start:range.start,end:range.end,salary_basis:'elapsed'});
     const priorParams=new URLSearchParams({start:prior.start,end:prior.end,include_tasks:'false'});
     if(visibleLocations.length){const locations=visibleLocations.join(',');currentParams.set('locations',locations);priorParams.set('locations',locations)}
-    const tasksParams=new URLSearchParams({start:range.start,end:range.end});
+    const tasksParams=new URLSearchParams({start:range.start,end:range.end,salary_basis:'elapsed'});
     const performanceRequest=(params:URLSearchParams,message:string)=>fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as PerformanceResponse&{error?:string};if(!response.ok)throw new Error(body.error||message);return body});
 
     // Render the selected Toast period first. The prior-period comparison is
@@ -107,7 +111,7 @@ export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLa
     });
 
     return()=>{cancelled=true;controller.abort()};
-  },[range.start,range.end,prior.start,prior.end,visibleLocationKey,rangeError]);
+  },[range.start,range.end,prior.start,prior.end,visibleLocationKey,rangeError,liveRevision]);
 
   const toggleLocation=(location:string)=>setSelectedLocations(currentSelection=>{const base=currentSelection.length?currentSelection:allowedLocations;if(base.length===1&&base.includes(location))return base;const next=base.includes(location)?base.filter(item=>item!==location):[...base,location];return next.length===allowedLocations.length?[]:next});
   const logbookAvailable=tasks!==null&&!tasksError&&!tasks.logbookError&&tasks.logbookComplete!==false;
@@ -146,9 +150,10 @@ export default function LocationDashboard({allowedLocations,onOpenTasks,onOpenLa
 
     {(comparisonError||tasksError||tasks?.logbookError)&&<section className="location-dashboard-warning"><strong>Fuentes parciales</strong><span>{[comparisonError,tasksError,tasks?.logbookError].filter(Boolean).join(' · ')}</span></section>}
 
+    <SalaryTimingPanel data={current?.salaryTiming} onRefresh={refreshLabor}/>
     <section className="location-summary-grid">
       <SummaryKpi label="NET SALES" value={loading?'…':totals?money2.format(totals.netSales):'Pendiente'} note={`${cards.length} locaciones · periodo seleccionado`} tone={totals?'good':'neutral'}/>
-      <SummaryKpi label="TOTAL LABOR" value={totals?`${totals.totalLaborPct.toFixed(2)}%`:'Pendiente'} note={totals?`${money2.format(totals.totalLaborCost)} · Hourly + salary`:'Esperando Toast y salarios'} tone={totals?(totals.totalLaborPct>30?'bad':'good'):'neutral'}/>
+      <SummaryKpi label={current?.salaryTiming?.applied?"LABOR ACUMULADO":"TOTAL LABOR"} value={totals?`${totals.totalLaborPct.toFixed(2)}%`:'Pendiente'} note={totals?`${money2.format(totals.totalLaborCost)} · Hourly + salary`:'Esperando Toast y salarios'} tone={totals?(totals.totalLaborPct>30?'bad':'good'):'neutral'}/>
       <SummaryKpi label="SPLH" value={totals?.splh?money2.format(totals.splh):'—'} note={totals?`${totals.hourlyHours.toFixed(1)} horas hourly trabajadas`:'Ventas ÷ horas hourly'} tone={totals?.splh?'good':'neutral'}/>
       <SummaryKpi label="OT TRABAJADAS" value={totals?`${totals.overtimeHours.toFixed(1)} h`:'—'} note="Time entries reales de Toast" tone={totals?.overtimeHours?'warn':'good'}/>
       <SummaryKpi label="TASKS COMPLIANCE" value={taskTotals?.total?`${taskTotals.compliancePct.toFixed(1)}%`:'—'} note={taskTotals?.total?`${taskTotals.completed} de ${taskTotals.total} completadas`:'Sin Tasks verificables'} tone={taskTotals?.total?(taskTotals.compliancePct>=80?'good':'bad'):'neutral'}/>

@@ -1,3 +1,6 @@
+import { useLaborSnapshotRefresh } from './useLaborSnapshotRefresh';
+import SalaryTimingPanel from './SalaryTimingPanel';
+import type { SalaryTiming } from '../shared/salaryTiming';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CustomDateRangePicker from './CustomDateRangePicker';
 import './locationDashboard.css';
@@ -7,7 +10,7 @@ import type { OpsVistaModule } from './accessControl';
 
 type RangeKey='today'|'yesterday'|'this-week'|'previous-week'|'this-month'|'last-month'|'custom';
 export type LiveRow={location:string;netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
-type LiveResponse={source:string;start:string;end:string;salaryLaborConfigured:boolean;taskCompliance?:SevenShiftsResponse|null;taskComplianceError?:string;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};notes?:{salaryLabor?:string;tasks?:string}};
+type LiveResponse={salaryTiming?:SalaryTiming|null;source:string;start:string;end:string;salaryLaborConfigured:boolean;taskCompliance?:SevenShiftsResponse|null;taskComplianceError?:string;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};notes?:{salaryLabor?:string;tasks?:string}};
 export type SevenShiftsResponse={source:string;totals:{completed:number;total:number;compliancePct:number};locations:Array<{location:string;completed:number;total:number;compliancePct:number}>};
 type Props={allowedLocations:string[];allLocations:boolean;initialLocation?:string;modules?:OpsVistaModule[];onOpenModule?:(module:OpsVistaModule)=>void};
 
@@ -28,7 +31,7 @@ function Kpi({label,value,note,status='ready',metric,active,disabled,onOpen}:{la
 }
 
 export default function OperationalOverview({allowedLocations,initialLocation='All locations',modules,onOpenModule}:Props){
-  const today=useMemo(easternToday,[]);
+  const today=easternToday();
   const [range,setRange]=useState<RangeKey>(()=>{
     const saved=typeof window!=='undefined'?window.localStorage.getItem('opsvista-overview-range'):null;
     return saved&&['today','yesterday','this-week','previous-week','this-month','last-month','custom'].includes(saved)?saved as RangeKey:'today';
@@ -70,13 +73,14 @@ export default function OperationalOverview({allowedLocations,initialLocation='A
     window.localStorage.setItem('opsvista-overview-locations',JSON.stringify(selectedLocations));
   },[range,customStart,customEnd,selectionKey]);
 
+  const {revision:liveRevision,refresh:refreshLabor}=useLaborSnapshotRefresh(!loading&&resolved.start===resolved.end&&resolved.start===easternToday());
   useEffect(()=>{
     const controller=new AbortController();setLoading(true);setError('');setLive(null);
-    const params=new URLSearchParams({start:resolved.start,end:resolved.end});
+    const params=new URLSearchParams({start:resolved.start,end:resolved.end,salary_basis:'elapsed'});
     if(effectiveLocations.length)params.set('locations',effectiveLocations.join(','));
     fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as LiveResponse&{error?:string;requiredEnvironmentVariables?:string[]};if(!response.ok)throw new Error(body.error||'Live performance source unavailable');if(!controller.signal.aborted){setLive(body);setReadAt(new Intl.DateTimeFormat('es-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date()))}}).catch(err=>{if(!controller.signal.aborted)setError(err instanceof Error?err.message:'Live performance source unavailable')}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});
     return()=>controller.abort();
-  },[resolved.start,resolved.end,effectiveLocationKey,refresh]);
+  },[resolved.start,resolved.end,effectiveLocationKey,refresh,liveRevision]);
 
   const total=live?.totals;
   const tasks=live?.taskCompliance??null;
@@ -85,12 +89,13 @@ export default function OperationalOverview({allowedLocations,initialLocation='A
   return <div style={{display:'grid',gap:16}}>
     <section style={{background:'#fff',border:'1px solid #dce6f0',borderRadius:14,padding:16}}><div style={{display:'flex',gap:10,alignItems:'end',justifyContent:'space-between',flexWrap:'wrap'}}><div><div style={{fontSize:11,fontWeight:900,letterSpacing:'.07em',color:'#0f766e'}}>OPERATIONAL PERFORMANCE</div><h2 style={{fontSize:22,margin:'5px 0 3px',color:'#142235'}}>Performance Dashboard</h2><div style={{fontSize:13,color:'#64748b'}}>Wednesday–Tuesday operating week · live Toast data follows the selected range.</div></div><div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}><details className="location-dashboard-location-picker"><summary><span>LOCACIONES</span><strong>{locationLabel}</strong></summary><div><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/>Todas las locaciones ({allowedLocations.length})</label>{allowedLocations.map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/>{location}</label>)}</div></details><select aria-label="Periodo del resumen" value={range} onChange={e=>setRange(e.target.value as RangeKey)} style={{padding:'9px 11px',height:52,border:'1px solid #cbd8e6',borderRadius:9,fontWeight:700,color:'#233247',background:'#fff'}}><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this-week">This week</option><option value="previous-week">Previous week</option><option value="this-month">This month</option><option value="last-month">Last month</option><option value="custom">Custom range</option></select><CustomDateRangePicker active={range==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo de Resumen o Ventas"/><button type="button" className="overview-refresh" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>{loading?'Actualizando…':'Actualizar datos ↻'}</button></div></div><div className="location-dashboard-scope"><strong>Incluye {effectiveLocations.length} locación{effectiveLocations.length===1?'':'es'}:</strong><span>{effectiveLocations.join(' · ')}</span></div><div style={{marginTop:10,padding:'9px 11px',borderRadius:9,background:error?'#fff7ed':'#f0fdfa',fontSize:12.5,color:error?'#9a3412':'#115e59',display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><span><strong>{resolved.label}</strong> · {resolved.start} → {resolved.end}</span><span>{loading?'Loading live Toast data…':error?error:live?`Live · ${live.source} · Consultado ${readAt} ET`:'Waiting for source'}</span></div></section>
 
+    <SalaryTimingPanel data={live?.salaryTiming} onRefresh={refreshLabor}/>
     <p className="overview-drill-hint">Toca una tarjeta para explorar su desglose, ordenar locaciones y revisar excepciones.</p>
     <section aria-label="Indicadores interactivos" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12}}>
       <Kpi {...metricProps('sales')} label="NET SALES" value={loading?'Loading…':total?money.format(total.netSales):'Pending source'} note={total?`Live Toast · ${effectiveLocations.length} locaciones · ${resolved.start} → ${resolved.end}`:'Toast Standard API connection required'} status={total?'ready':'pending'} />
       <Kpi {...metricProps('hourly')} label="HOURLY LABOR" value={loading?'Loading…':total?money2.format(total.hourlyLaborCost):'Pending source'} note={total?`${total.hourlyHours.toFixed(1)} hrs · OT ${total.overtimeHours.toFixed(1)} hrs · ${total.laborPct.toFixed(2)}%`:'Toast time entries required'} status={total&&total.laborPct>30?'warning':total?'ready':'pending'} />
-      <Kpi {...metricProps('salary')} label="SALARY LABOR" value={loading?'Loading…':total?money2.format(total.salaryLaborCost):'Pending source'} note={total?`${total.salaryLaborPct.toFixed(2)}% · ${live?.notes?.salaryLabor||'Salary allocation'}`:'Weekly salary allocation required'} status={live?.salaryLaborConfigured?'ready':'pending'} />
-      <Kpi {...metricProps('labor')} label="TOTAL LABOR" value={loading?'Loading…':total?money2.format(total.totalLaborCost):'Pending source'} note={total?`${total.totalLaborPct.toFixed(2)}% · Hourly ${total.hourlyLaborPct.toFixed(2)}% + Salary ${total.salaryLaborPct.toFixed(2)}%`:'Hourly + salary labor combined automatically'} status={total&&total.totalLaborPct>30?'warning':total?'ready':'pending'} />
+      <Kpi {...metricProps('salary')} label={live?.salaryTiming?.applied?"SALARY ACCRUED":"SALARY LABOR"} value={loading?'Loading…':total?money2.format(total.salaryLaborCost):'Pending source'} note={total?`${total.salaryLaborPct.toFixed(2)}% · ${live?.notes?.salaryLabor||'Salary allocation'}`:'Weekly salary allocation required'} status={live?.salaryLaborConfigured?'ready':'pending'} />
+      <Kpi {...metricProps('labor')} label={live?.salaryTiming?.applied?"LABOR ACCRUED":"TOTAL LABOR"} value={loading?'Loading…':total?money2.format(total.totalLaborCost):'Pending source'} note={total?`${total.totalLaborPct.toFixed(2)}% · Hourly ${total.hourlyLaborPct.toFixed(2)}% + Salary ${total.salaryLaborPct.toFixed(2)}%`:'Hourly + salary labor combined automatically'} status={total&&total.totalLaborPct>30?'warning':total?'ready':'pending'} />
       <Kpi {...metricProps('tasks')} label="TASKS COMPLIANCE" value={tasks?(tasks.totals.total>0?`${tasks.totals.compliancePct.toFixed(1)}%`:'Sin tareas'):loading?'Loading…':tasksError?'Connection error':'Sin datos'} note={tasks?`${tasks.totals.completed} of ${tasks.totals.total} tasks completed · Live 7shifts`:tasksError} status={tasks&&tasks.totals.total>0?(tasks.totals.compliancePct>=80?'ready':'warning'):'pending'} />
       <Kpi {...metricProps('voids')} label="VOIDS" value={total?`${money2.format(total.voidAmount)} · ${total.voidPct.toFixed(2)}%`:'Pending source'} note="Live Toast order void calculation" status={total&&total.voidPct>.5?'warning':total?'ready':'pending'} />
       <Kpi {...metricProps('discounts')} label="DISCOUNTS" value={total?`${money2.format(total.discountAmount)} · ${total.discountPct.toFixed(2)}%`:'Pending source'} note="Live active check + item discounts · target ≤ 2.00%" status={total&&total.discountPct>2?'warning':total?'ready':'pending'} />
