@@ -46,6 +46,12 @@ const isEnglish = (value:string) => /\b(how|what|where|why|which|need|show|open|
 
 const guides:Guide[] = [
   {
+    module:'Restaurant365', label:'Restaurant365 · Provi · Price Watch',
+    keywords:['restaurant365','restaurant 365','r365','provi','licor','alcohol','price watch','factura','invoice','corporate office'],
+    es:{answer:'Restaurant365 reúne facturas, compras Provi, conciliación de alcohol, Corporate Office y Price Watch.',recommendation:'Abre Restaurant365 y selecciona la pestaña correspondiente. Los archivos de Provi se cargan en Compras Provi.',followUps:['¿Dónde subo archivos de Provi?','Abre Price Watch']},
+    en:{answer:'Restaurant365 brings together invoices, Provi purchases, alcohol reconciliation, Corporate Office, and Price Watch.',recommendation:'Open Restaurant365 and select the relevant tab. Provi files are uploaded under Provi Purchases.',followUps:['Where do I upload Provi files?','Open Price Watch']},
+  },
+  {
     module:'Gastos', label:'Gastos Ramp',
     keywords:['ramp','gasto','expense','recibo','receipt','memo','cardholder','tarjeta','comprobante','invoice pendiente'],
     es:{
@@ -215,7 +221,7 @@ const guides:Guide[] = [
   },
   {
     module:'Configuración', label:'Configuración',
-    keywords:['usuario','usuarios','user','users','permiso','permissions','acceso','access','invitacion','invitation','integracion','integration','password','contrasena'],
+    keywords:['configuracion','settings','usuario','usuarios','user','users','permiso','permissions','acceso','access','invitacion','invitation','integracion','integration','password','contrasena'],
     es:{
       answer:'Usuarios, permisos, invitaciones, credenciales e integraciones se administran en Configuración según tu nivel de acceso.',
       recommendation:'Abre Configuración y selecciona el panel correspondiente. OpsVista ocultará cualquier control que tu rol no pueda administrar.',
@@ -252,7 +258,9 @@ function bestGuide(question:string) {
   for(const guide of guides){
     const points=guide.keywords.reduce((total,keyword)=>{
       const normalized=normalize(keyword);
-      return total+(q.includes(normalized)?Math.max(2,normalized.split(' ').length*3):0);
+      // Short aliases such as OT must not match incidental letters in “foto”.
+      const matches=normalized.length<=3?q.split(/[^a-z0-9]+/).includes(normalized):q.includes(normalized);
+      return total+(matches?Math.max(2,normalized.split(' ').length*3):0);
     },0);
     if(points&&(!best||points>best.score))best={guide,score:points};
   }
@@ -275,6 +283,30 @@ function accessibleRouteAnswer(question:string,guide:Guide,availableModules?:Ops
     answer:copy.answer, observations:[], recommendation:copy.recommendation,
     sources:[guide.label,'OpsVista workflow'], confidence:'High', module:guide.module, moduleLabel:guide.label, followUps:copy.followUps,
   };
+}
+
+/** Module navigation and how-to help never need a model call or API credit.
+ * Live questions are deliberately left to the data assistant, even when they
+ * mention the same module names. The manual guide remains available for all.
+ */
+export function localCopilotAnswer(question:string,availableModules:OpsVistaModule[]):CopilotAnswer|null {
+  const q=normalize(question).replace(/[¿?¡!.,]/g,'').trim();
+  const navigation=/\b(abre|abrir|abreme|lleva|llevame|llevarme|manda|mandame|mandarme|envia|enviame|enviarme|ir a|entrar a|quiero entrar|open|go to|take me to|navigate to)\b/.test(q);
+  const howTo=/\b(donde|where|como funciona|como se calcula|como calculan|como (?:puedo |se )?(?:subir|subo|cargar|cargo|ver|veo|revisar|reviso|invitar|invito|solicitar|solicito|registrar|registro|actualizar|actualizo)|que es|para que sirve|how (?:do i|can i|to|does .* work)|how is .* calculated)\b/.test(q);
+  const namedModule=availableModules.find(module=>q===normalize(module));
+  const guide=bestGuide(question);
+  const bareTopic=guide?.keywords.some(keyword=>normalize(keyword)===q);
+  const help=/^(ayuda|help|que puedes hacer|what can you do|que modulos hay|show modules|modulos|modules)$/.test(q);
+  if(!navigation&&!howTo&&!namedModule&&!bareTopic&&!help)return null;
+  // Prefer the named destination to incidental words in a navigation request.
+  const destination=namedModule||availableModules.filter(module=>q.includes(normalize(module))).sort((a,b)=>b.length-a.length)[0];
+  if(destination){
+    const known=guides.find(item=>item.module===destination);
+    if(known)return accessibleRouteAnswer(question,known,availableModules);
+    return {answer:isEnglish(question)?`You can open ${destination} here.`:`Puedes abrir ${destination} aquí.`,observations:[],sources:['OpsVista navigation'],confidence:'High',module:destination,moduleLabel:destination};
+  }
+  if(guide)return accessibleRouteAnswer(question,guide,availableModules);
+  return {answer:isEnglish(question)?`Module navigation does not use AI credits. Available modules: ${availableModules.join(', ')}. Tell me which one to open.`:`Abrir módulos no consume saldo de IA. Tienes acceso a: ${availableModules.join(', ')}. Dime cuál quieres abrir.`,observations:[],sources:['OpsVista navigation'],confidence:'High',followUps:availableModules.slice(0,3).map(module=>`${isEnglish(question)?'Open':'Abre'} ${module}`)};
 }
 
 export function answerCopilot(question:string,actions:CopilotAction[],selected?:CopilotAction,availableModules?:OpsVistaModule[],currentUserId?:string):CopilotAnswer {

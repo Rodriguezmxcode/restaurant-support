@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { OpsVistaModule } from './accessControl';
-import { answerCopilot, copilotSuggestedPrompts, type CopilotAction, type CopilotAnswer } from './copilot';
+import { answerCopilot, localCopilotAnswer, type CopilotAction, type CopilotAnswer } from './copilot';
 import type { CopilotAgentAnswer, CopilotDataset, CopilotIssueCode, CopilotSource } from '../shared/copilotAgent';
 import './copilot.css';
 
@@ -41,7 +41,7 @@ const api='/api/workflows?resource=actions';
 const makeId=()=>`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
 const greeting=(name:string,locations:string[]):ChatMessage=>({
   id:'welcome', role:'assistant', createdAt:Date.now(),
-  text:`Hola ${name.split(' ')[0]}. Pregúntame por tus ventas, labor, gastos o pendientes. Consultaré las fuentes disponibles según tus permisos${locations.length?` para ${locations.join(', ')}`:''}.`,
+  text:`Hola ${name.split(' ')[0]}. Puedo llevarte a un módulo y explicarte cómo usarlo sin consumir IA. También puedo analizar datos cuando la conexión de IA esté disponible${locations.length?` para ${locations.join(', ')}`:''}.`,
 });
 
 function readSide(key:string):CopilotSide {
@@ -63,6 +63,9 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
   const [datasets,setDatasets]=useState<CopilotDataset[]>([]);
   const [statusError,setStatusError]=useState('');
   const [busy,setBusy]=useState(false);
+  const [guideOnly,setGuideOnly]=useState(false);
+  const [aiBlocked,setAiBlocked]=useState(false);
+  const useGuide=guideOnly||aiBlocked||mode!=='ai';
   const requestRef=useRef<AbortController|null>(null);
   const inputRef=useRef<HTMLTextAreaElement>(null);
   const endRef=useRef<HTMLDivElement>(null);
@@ -71,7 +74,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
   // Business answers stay in memory; do not retain them on a shared device.
   useEffect(()=>{try{window.localStorage.removeItem(storageKey);}catch{/* Optional cleanup. */}},[storageKey]);
   useEffect(()=>()=>requestRef.current?.abort(),[]);
-  useEffect(()=>{requestRef.current?.abort();requestRef.current=null;setBusy(false);setMessages([greeting(currentUserName,allowedLocations)]);setMode('checking');setDatasets([]);setActions([]);setActionsLoading(false);},[role,locationKey,readOnlyPreview,currentUserId]);
+  useEffect(()=>{requestRef.current?.abort();requestRef.current=null;setBusy(false);setMessages([greeting(currentUserName,allowedLocations)]);setMode('checking');setDatasets([]);setActions([]);setActionsLoading(false);setGuideOnly(false);setAiBlocked(false);},[role,locationKey,readOnlyPreview,currentUserId]);
   useEffect(()=>{
     if(!open||readOnlyPreview)return;
     const controller=new AbortController();
@@ -91,7 +94,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
     return()=>document.removeEventListener('keydown',close);
   },[open]);
   useEffect(()=>{
-    if(!open||mode!=='guide'||readOnlyPreview)return;
+    if(!open||!useGuide||readOnlyPreview)return;
     let active=true;
     setActionsLoading(true);
     fetch(api,{credentials:'include',cache:'no-store'})
@@ -100,10 +103,10 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
       .catch(()=>{if(active)setActions([]);})
       .finally(()=>{if(active)setActionsLoading(false);});
     return()=>{active=false;};
-  },[open,locationKey,mode,readOnlyPreview]);
+  },[open,locationKey,useGuide,readOnlyPreview]);
 
   const prompts=useMemo(()=>{
-    if(mode==='ai')return ([
+    if(!useGuide)return ([
       ['performance','¿Cómo va hoy el salario acumulado y el labor total?'],
       ['ramp','¿Cuántos gastos de esta semana no tienen recibo?'],
       ['tasks','¿Cómo va el cumplimiento de tareas hoy?'],
@@ -111,16 +114,17 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
       ['reviews','¿Cómo van las reseñas de esta semana?'],
       ['actions','¿Qué pendientes requieren atención?'],
     ] as [CopilotDataset,string][]).filter(([dataset])=>datasets.includes(dataset)).map(([,prompt])=>prompt).slice(0,5);
-    return copilotSuggestedPrompts.slice(0,4);
-  },[mode,datasets,currentSection]);
+    return ['Abre Ventas','¿Dónde subo un recibo?','¿Dónde subo archivos de Provi?','¿Cómo funciona el bono?','Abre Tasks'];
+  },[useGuide,datasets,currentSection]);
 
   const ask=async(value?:string)=>{
     const next=(value??question).trim();
-    if(!next||next.length>4000||requestRef.current||readOnlyPreview||mode==='checking'||mode==='error')return;
+    if(!next||next.length>4000||requestRef.current||readOnlyPreview)return;
     const userMessage:ChatMessage={id:makeId(),role:'user',text:next,createdAt:Date.now()};
     setMessages(items=>[...items,userMessage].slice(-30));setQuestion('');
-    if(mode==='guide'){
-      const response=answerCopilot(next,actions,undefined,modules,currentUserId);
+    const localAnswer=localCopilotAnswer(next,modules);
+    if(localAnswer||useGuide){
+      const response=localAnswer||answerCopilot(next,actions,undefined,modules,currentUserId);
       setMessages(items=>[...items,{id:makeId(),role:'assistant',text:response.answer,answer:response,createdAt:Date.now()}].slice(-30) as ChatMessage[]);
       return;
     }
@@ -139,7 +143,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
       if(typeof answer.answer!=='string'||!Array.isArray(answer.sources))throw new Error('La respuesta llegó incompleta. Intenta de nuevo.');
       if(!controller.signal.aborted)setMessages(items=>[...items,{id:makeId(),role:'assistant',text:answer.answer,sources:answer.sources,createdAt:Date.now()}].slice(-30) as ChatMessage[]);
     }catch(error){
-      if(!controller.signal.aborted||controller.signal.reason==='timeout'){setQuestion(next);setMessages(items=>[...items,{id:makeId(),role:'assistant',error:true,issueCode,retryAt,text:controller.signal.aborted?'La consulta tardó demasiado. Prueba una locación o un período más corto.':error instanceof Error?error.message:'No se pudo consultar el asistente.',createdAt:Date.now()}].slice(-30) as ChatMessage[]);}
+      if(!controller.signal.aborted||controller.signal.reason==='timeout'){if(issueCode&&['openai_credit','openai_project_spend','openai_organization_spend','openai_usage','openai_quota','openai_auth','openai_configuration'].includes(issueCode))setAiBlocked(true);setQuestion(next);setMessages(items=>[...items,{id:makeId(),role:'assistant',error:true,issueCode,retryAt,text:controller.signal.aborted?'La consulta tardó demasiado. Prueba una locación o un período más corto.':error instanceof Error?error.message:'No se pudo consultar el asistente.',createdAt:Date.now()}].slice(-30) as ChatMessage[]);}
     }finally{window.clearTimeout(timer);if(requestRef.current===controller){requestRef.current=null;setBusy(false);}}
   };
   const submit=(event:FormEvent)=>{event.preventDefault();ask();};
@@ -159,7 +163,7 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
       </div>
       <button type="button" className={`copilot-launcher ${open?'is-open':''}`} aria-label="Abrir OpsVista Assistant" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>
         <span className="copilot-launcher-icon">✦</span>
-        <span className="copilot-launcher-copy"><strong>Ask OpsVista</strong><small>{mode==='ai'?'IA · Consulta tus datos':'Tu asistente de operaciones'}</small></span>
+        <span className="copilot-launcher-copy"><strong>Ask OpsVista</strong><small>{!useGuide?'Guía gratis + consultas de IA':'Guía disponible · sin consumo de IA'}</small></span>
         <span className="copilot-launcher-state">{open?'×':'›'}</span>
       </button>
     </div>
@@ -172,7 +176,12 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
           <button type="button" onClick={()=>setOpen(false)} aria-label="Cerrar chat">×</button>
         </header>
 
-        <div className={`copilot-context ${mode!=='ai'?'is-pending':''}`}><i></i><span>{readOnlyPreview?'Vista de usuario: consultas de IA desactivadas':mode==='ai'?'IA habilitada · Respeta tus permisos y locaciones':mode==='checking'?'Comprobando conexión…':mode==='guide'?'Guía de módulos · La IA requiere activar la conexión de OpenAI':statusError}</span>{actionsLoading&&<em>Actualizando…</em>}</div>
+        <div className={`copilot-context ${useGuide?'is-pending':''}`}><i></i><span>{readOnlyPreview?'Vista de usuario: consultas de IA desactivadas':aiBlocked?'Guía disponible · La conexión de IA necesita atención':guideOnly?'Guía de módulos · Sin consumo de IA':mode==='ai'?'Navegación gratis · La IA solo se usa para analizar datos':mode==='checking'?'Guía disponible · Comprobando conexión de IA…':mode==='guide'?'Guía disponible · La IA requiere activar la conexión de OpenAI':`Guía disponible · ${statusError}`}</span>{actionsLoading&&<em>Actualizando…</em>}
+          {!readOnlyPreview&&<div className="copilot-mode-controls" aria-label="Tipo de ayuda">
+            <button type="button" aria-pressed={useGuide} disabled={busy} onClick={()=>setGuideOnly(true)}>Guía de módulos · Gratis</button>
+            <button type="button" aria-pressed={!useGuide} disabled={busy||mode!=='ai'} onClick={()=>{setGuideOnly(false);setAiBlocked(false);}}>Consultar datos con IA</button>
+          </div>}
+        </div>
 
         <div className="copilot-messages" aria-live="polite">
           {messages.map(message=><article key={message.id} className={`copilot-message ${message.role} ${message.error?'is-error':''}`}>
@@ -191,22 +200,22 @@ export default function OpsVistaCopilot({currentUserId,currentUserName,role,allo
               {message.answer?.observations&&message.answer.observations.length>0&&<div className="copilot-observations"><span>WHAT I FOUND</span>{message.answer.observations.map((item,index)=><p key={index}>{item}</p>)}</div>}
               {message.answer?.inference&&<div className="copilot-note inference"><span>INFERENCE</span><p>{message.answer.inference}</p></div>}
               {message.answer?.recommendation&&<div className="copilot-note recommendation"><span>NEXT STEP</span><p>{message.answer.recommendation}</p></div>}
-              {message.answer?.module&&modules.includes(message.answer.module)&&<button type="button" className="copilot-open-module" onClick={()=>navigate(message.answer!.module!)}>Open {message.answer.moduleLabel||message.answer.module}<b>→</b></button>}
+              {message.answer?.module&&modules.includes(message.answer.module)&&<button type="button" className="copilot-open-module" onClick={()=>navigate(message.answer!.module!)}>Abrir {message.answer.moduleLabel||message.answer.module}<b>→</b></button>}
               {message.answer&&<div className="copilot-answer-meta"><span>{message.answer.confidence} confidence</span>{message.answer.sources.slice(0,3).map(source=><b key={source}>{source}</b>)}</div>}
             </div>
-            {message.answer?.followUps&&message.answer.followUps.length>0&&<div className="copilot-followups">{message.answer.followUps.slice(0,2).map(prompt=><button type="button" key={prompt} disabled={busy||readOnlyPreview||mode==='checking'||mode==='error'} onClick={()=>ask(prompt)}>{prompt}</button>)}</div>}
+            {message.answer?.followUps&&message.answer.followUps.length>0&&<div className="copilot-followups">{message.answer.followUps.slice(0,2).map(prompt=><button type="button" key={prompt} disabled={busy||readOnlyPreview} onClick={()=>ask(prompt)}>{prompt}</button>)}</div>}
           </article>)}
           {busy&&<div className="copilot-thinking" role="status">Consultando tus datos…</div>}
           <div ref={endRef}/>
         </div>
 
-        <div className="copilot-suggestions">{prompts.map(prompt=><button type="button" key={prompt} disabled={busy||readOnlyPreview||mode==='checking'||mode==='error'} onClick={()=>ask(prompt)}>{prompt}</button>)}</div>
+        <div className="copilot-suggestions">{prompts.map(prompt=><button type="button" key={prompt} disabled={busy||readOnlyPreview} onClick={()=>ask(prompt)}>{prompt}</button>)}</div>
 
         <form className="copilot-composer" onSubmit={submit}>
-          <textarea ref={inputRef} rows={2} maxLength={4000} disabled={readOnlyPreview||mode==='checking'||mode==='error'} value={question} onChange={event=>setQuestion(event.target.value)} onKeyDown={keyDown} placeholder="Escribe tu pregunta… / Ask a question…" aria-label="Pregunta para OpsVista"/>
-          <button type="submit" disabled={!question.trim()||busy||readOnlyPreview||mode==='checking'||mode==='error'} aria-label="Enviar pregunta">↑</button>
+          <textarea ref={inputRef} rows={2} maxLength={4000} disabled={readOnlyPreview} value={question} onChange={event=>setQuestion(event.target.value)} onKeyDown={keyDown} placeholder="Escribe tu pregunta… / Ask a question…" aria-label="Pregunta para OpsVista"/>
+          <button type="submit" disabled={!question.trim()||busy||readOnlyPreview} aria-label="Enviar pregunta">↑</button>
         </form>
-        <footer className="copilot-footer"><span>Solo consulta · Revisa las fuentes antes de decidir. El chat se borra al salir.</span><button type="button" onClick={reset}>Nuevo chat</button></footer>
+        <footer className="copilot-footer"><span>Abrir módulos no consume IA. Las consultas de IA usan saldo de OpenAI. El chat se borra al salir.</span><button type="button" onClick={reset}>Nuevo chat</button></footer>
       </aside>
     </div>}
   </>;
