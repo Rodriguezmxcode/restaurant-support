@@ -1,6 +1,6 @@
 import type { SessionUser } from './authSession.js';
 import { CopilotError, copilotScope, easternToday, parseCopilotInput, parseCopilotQuery, type CopilotQuery } from './copilotPolicy.js';
-import type { CopilotAgentAnswer, CopilotSource } from '../shared/copilotAgent.js';
+import type { CopilotAgentAnswer, CopilotIssueCode, CopilotSource } from '../shared/copilotAgent.js';
 
 export type CopilotReadResult = { label: string; note: string; data: unknown };
 type ResponseItem = { type: string; name?: string; call_id?: string; arguments?: string; content?: { type: string; text?: string }[] };
@@ -11,19 +11,75 @@ export type CopilotDependencies = {
   now?: () => Date;
 };
 
-export async function openAIResponse(body: Record<string, unknown>, signal: AbortSignal): Promise<ModelResponse> {
-  const response = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST', signal,
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+const providerKinds: Record<string, CopilotIssueCode> = {
+  credit_balance_exhausted: 'openai_credit',
+  project_spend_limit_exceeded: 'openai_project_spend',
+  organization_spend_limit_exceeded: 'openai_organization_spend',
+  organization_usage_limit_exceeded: 'openai_usage',
+  insufficient_quota: 'openai_quota', billing_hard_limit_reached: 'openai_quota',
+  rate_limit_exceeded: 'openai_rate', slow_down: 'openai_rate',
+  invalid_api_key: 'openai_auth', model_not_found: 'openai_configuration',
+  server_is_overloaded: 'openai_unavailable',
+};
+const providerMessages: Record<Exclude<CopilotIssueCode, 'opsvista_limit'>, string> = {
+  openai_credit: 'OpenAI confirmó que la cuenta de API conectada a OpsVista no tiene créditos disponibles. El administrador debe revisar y recargar el saldo; esperar o repetir la pregunta no lo resuelve.',
+  openai_project_spend: 'El proyecto de OpenAI conectado a OpsVista alcanzó su límite de gasto. El administrador debe revisar ese límite en OpenAI; no se modificó automáticamente.',
+  openai_organization_spend: 'La organización de OpenAI conectada a OpsVista alcanzó su límite de gasto. El administrador debe revisar ese límite en OpenAI; no se modificó automáticamente.',
+  openai_usage: 'La cuenta de OpenAI conectada a OpsVista alcanzó su cuota de uso autorizada. El administrador debe revisar sus límites con OpenAI.',
+  openai_quota: 'OpenAI informó que la cuenta de API conectada a OpsVista no tiene cuota disponible. El administrador debe revisar el saldo y los límites de esa cuenta. Repetir la pregunta no restaura la cuota.',
+  openai_rate: 'OpenAI limitó temporalmente la velocidad de las consultas. Espera el tiempo indicado antes de reintentar.',
+  openai_auth: 'OpenAI rechazó la credencial configurada para OpsVista. El administrador debe revisar la conexión de IA.',
+  openai_configuration: 'El modelo o los permisos de OpenAI configurados para OpsVista necesitan revisión por el administrador.',
+  openai_unavailable: 'OpenAI no está disponible temporalmente. Intenta de nuevo más tarde; tus módulos siguen disponibles.',
+  openai_rejected: 'OpenAI rechazó la consulta, pero no indicó un motivo que OpsVista pueda identificar. El administrador debe revisar la conexión; todavía no se puede atribuir a falta de crédito.',
+};
+export function classifyOpenAIError(status: number, payload: unknown, retryHeader: string | null, now = Date.now()) {
+  const row = payload && typeof payload === 'object' ? (payload as { error?: { code?: unknown; type?: unknown } }).error : undefined;
+  const rawCode = typeof row?.code === 'string' ? row.code : '';
+  // Prefer precise billing codes over the broader insufficient_quota type.
+  const code = Object.hasOwn(providerKinds, rawCode) ? rawCode : 'unknown';
+  const kind: Exclude<CopilotIssueCode, 'opsvista_limit'> = (providerKinds[code] as Exclude<CopilotIssueCode, 'opsvista_limit'> | undefined)
+    || (row?.type === 'insufficient_quota' ? 'openai_quota' : row?.type === 'rate_limit_error' ? 'openai_rate'
+      : status === 401 ? 'openai_auth' : status === 403 || status === 400 || status === 404 ? 'openai_configuration'
+      : status >= 500 ? 'openai_unavailable' : 'openai_rejected');
+  const parsedSeconds = retryHeader && /^\d+(?:\.\d+)?$/.test(retryHeader.trim()) ? Number(retryHeader) : retryHeader ? (Date.parse(retryHeader) - now) / 1000 : NaN;
+  const retryable = kind === 'openai_rate' || kind === 'openai_unavailable';
+  const retryAfterSeconds = retryable ? Number.isFinite(parsedSeconds) ? Math.max(0, Math.ceil(parsedSeconds)) : 2 : undefined;
+  return { kind, providerCode: code, retryable, retryAfterSeconds,
+    error: new CopilotError(status === 429 ? 429 : 503, providerMessages[kind], { code: kind, retryAfterSeconds }),
+  };
+}
+function retryDelay(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason); return; }
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, milliseconds);
+    signal.addEventListener('abort', abort, { once: true });
   });
-  if (!response.ok) {
-    // Never return provider diagnostics, request headers, or credentials.
-    throw new CopilotError(response.status === 429 ? 429 : 503, response.status === 429
-      ? 'La conexión de IA alcanzó su límite de uso o crédito. Intenta más tarde.'
-      : 'No se pudo conectar con la IA. Tus módulos siguen disponibles.');
+}
+export async function openAIResponse(body: Record<string, unknown>, signal: AbortSignal): Promise<ModelResponse> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', signal,
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (response.ok) return await response.json() as ModelResponse;
+    const payload: unknown = await response.json().catch(() => null);
+    const failure = classifyOpenAIError(response.status, payload, response.headers.get('retry-after'));
+    const requestId = response.headers.get('x-request-id') || '';
+    // Log only allowlisted categories and a provider request ID. Never log a
+    // raw provider message, prompt, source data, headers or API credential.
+    console.warn('[Ask OpsVista] OpenAI request rejected', JSON.stringify({ status: response.status, code: failure.providerCode, kind: failure.kind, ...( /^req_[a-zA-Z0-9_-]{1,100}$/.test(requestId) ? { requestId } : {} ) }));
+    // One bounded retry for temporary failures. A longer server delay is passed
+    // back to the user; it must never be shortened to fit this request.
+    if (attempt === 0 && failure.retryable && failure.retryAfterSeconds! <= 3) {
+      await retryDelay(failure.retryAfterSeconds! * 1000 + 50 + Math.random() * 200, signal);
+      continue;
+    }
+    throw failure.error;
   }
-  return await response.json() as ModelResponse;
+  throw new CopilotError(503, providerMessages.openai_unavailable);
 }
 
 const finalFormat = { type: 'json_schema', name: 'opsvista_answer', strict: true, schema: {

@@ -23,7 +23,7 @@ export async function copilotEndpoint(req: Request, res: Response, user: Session
     return res.status(200).json(answer);
   } catch (error) {
     const known = error instanceof CopilotError;
-    if (known && error.status === 429) res.setHeader?.('Retry-After', '3600');
-    return res.status(known ? error.status : 503).json({ error: known ? error.message : 'No se pudo consultar el asistente. Intenta de nuevo.' });
+    if (known && error.details.retryAfterSeconds !== undefined) res.setHeader?.('Retry-After', String(error.details.retryAfterSeconds));
+    return res.status(known ? error.status : 503).json({ error: known ? error.message : 'No se pudo consultar el asistente. Intenta de nuevo.', ...(known ? error.details : {}) });
   }
 }

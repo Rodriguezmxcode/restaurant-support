@@ -1,6 +1,6 @@
 import type { SessionUser } from './authSession.js';
 import { hasLegacyWorkspace } from '../shared/tenantAccess.js';
-import type { CopilotDataset } from '../shared/copilotAgent.js';
+import type { CopilotDataset, CopilotIssueCode } from '../shared/copilotAgent.js';
 
 const restaurants = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'];
 const datasetsByRole: Record<SessionUser['role'], CopilotDataset[]> = {
@@ -13,7 +13,7 @@ const datasetsByRole: Record<SessionUser['role'], CopilotDataset[]> = {
 };
 
 export class CopilotError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public details: { code?: CopilotIssueCode; retryAfterSeconds?: number } = {}) { super(message); }
 }
 export function copilotScope(user: SessionUser) {
   if (!hasLegacyWorkspace(user) || !datasetsByRole[user.role]?.length) throw new CopilotError(403, 'El asistente no está habilitado para esta cuenta.');
