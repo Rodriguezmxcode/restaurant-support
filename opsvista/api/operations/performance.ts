@@ -1,6 +1,8 @@
 import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
+import { intradaySalary, verifiedHoursFallback } from '../../server/intradaySalary.js';
+import { getGoogleOperatingSchedules } from '../../server/googleBusinessProfile.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
@@ -48,23 +50,30 @@ export default async function handler(req:Req,res:Res){
     requested=requestedNames;
   }else if(!['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role))requested=user.locations;
   try{
+    const asOf=new Date();
+    const easternDate=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(asOf);
+    const wantsElapsed=asString(req.query?.salary_basis)==='elapsed'&&start===end&&(start===easternDate||start===addDays(easternDate,-1));
     const sameLaborRange=start===scheduleStart&&end===overtimeEnd;
-    const [toastLocations,weeklyEmployeeLabor,taskResult,scheduleResult]=await Promise.all([
+    const [toastLocations,weeklyEmployeeLabor,taskResult,scheduleResult,hoursResult]=await Promise.all([
       getToastPerformance(start,end,requested),
       sameLaborRange?Promise.resolve(null):getToastEmployeeLabor(scheduleStart,overtimeEnd,requested),
       includeTasks?getPerformanceTaskCompliance(start,end,requested).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})):Promise.resolve({data:null,error:''}),
       getSevenShiftsScheduleRisk(scheduleStart,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
+      wantsElapsed?getGoogleOperatingSchedules(requested??['Stamford','Fairfield','Orange','Avon','Southington','Danbury','Middletown','Newington']).then(schedules=>({schedules,error:''})).catch(()=>({schedules:verifiedHoursFallback(asOf),error:'Live Google hours unavailable. Using the dated Google Maps reference where available; special hours could not be checked.'})):Promise.resolve({schedules:{},error:''}),
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
     const overtimeEmployeeLabor=weeklyEmployeeLabor??toastLocations.flatMap(row=>row.employeeLabor);
     const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,overtimeEmployeeLabor):null,scheduleRiskError=scheduleResult.error;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
+    const candidateTiming=wantsElapsed?{...intradaySalary(start,toastLocations.map(row=>({...row,salaryLaborCost:salaryByLocation.get(row.location)?.salaryLaborCost??0,salaryConfigured:salaryByLocation.get(row.location)?.salaryConfigured??false})),asOf,hoursResult.schedules),hoursError:hoursResult.error}:null;
+    const salaryTiming=candidateTiming&&(start===easternDate||candidateTiming.rows.some(row=>row.status==='open'))?candidateTiming:null;
+    const timingByLocation=new Map(salaryTiming?.rows.map(row=>[row.location,row])??[]);
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
     const locations=toastLocations.map(row=>{
       const {employeeLabor:_,...publicRow}=row;
       const salaryRow=salaryByLocation.get(row.location);
-      const salaryLaborCost=salaryRow?.salaryLaborCost??0;
+      const salaryLaborCost=salaryTiming?.applied?timingByLocation.get(row.location)!.accruedSalary!:salaryRow?.salaryLaborCost??0;
       const totalLaborCost=row.hourlyLaborCost+salaryLaborCost;
       return {
         ...publicRow,
@@ -83,7 +92,7 @@ export default async function handler(req:Req,res:Res){
     }),{netSales:0,discountAmount:0,bonusDiscountAmount:0,uberEatsDiscountAmount:0,employeeMealDiscountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
       source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,scheduleStart,scheduleEnd,overtimeEnd,locations,
-      salaryLaborConfigured:salary.configured,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
+      salaryLaborConfigured:salary.configured,salaryTiming,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,
@@ -97,7 +106,7 @@ export default async function handler(req:Req,res:Res){
         splh:totals.hourlyHours?round(totals.netSales/totals.hourlyHours):null
       },
       notes:{
-        salaryLabor:salary.configured?'Weekly salaries allocated proportionally across the selected date range.':'Configure OPSVISTA_WEEKLY_SALARY_LABOR_JSON with the real weekly salary cost by location.',
+        salaryLabor:salaryTiming?.applied?'Salary allocated through the snapshot time using configured opening hours. Full-day salary is shown separately.':salaryTiming?'Full-day salary shown: operating hours or salary configuration need review.':salary.configured?'Weekly salaries allocated proportionally across the selected date range.':'Configure OPSVISTA_WEEKLY_SALARY_LABOR_JSON with the real weekly salary cost by location.',
         tasks:'Tasks require the 7shifts production feed.',
         overtime:'Overtime % is overtime hours divided by total hourly hours worked. Salaried hours and future scheduled exposure do not penalize the weekly bonus.',
         bonusDiscounts:'Weekly Bonus excludes applied Toast discounts identified as Uber Eats or employee meals. Total discounts remain unchanged in Sales and other modules.'

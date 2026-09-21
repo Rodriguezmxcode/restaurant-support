@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getGoogleBusinessCredentials, type GoogleBusinessCredentials } from './integrationStore.js';
+import { scheduleFromGoogle, type GoogleHoursLocation } from './googleOperatingHours.js';
+import type { OperatingSchedule } from '../shared/salaryTiming.js';
 
 const ACCOUNT_API = 'https://mybusinessaccountmanagement.googleapis.com/v1';
 const BUSINESS_INFO_API = 'https://mybusinessbusinessinformation.googleapis.com/v1';
@@ -135,13 +137,13 @@ async function accountName(credential: GoogleBusinessCredentials) {
   return account.name;
 }
 
-async function listLocations(account: string, credential: GoogleBusinessCredentials) {
-  const locations: GoogleLocation[] = [];
+async function listLocations(account: string, credential: GoogleBusinessCredentials, includeHours = false) {
+  const locations: GoogleHoursLocation[] = [];
   let pageToken = '';
   do {
-    const params = new URLSearchParams({ readMask: 'name,title,storeCode,storefrontAddress', pageSize: '100' });
+    const params = new URLSearchParams({ readMask: `name,title,storeCode,storefrontAddress${includeHours ? ',regularHours,specialHours,openInfo,metadata' : ''}`, pageSize: '100' });
     if (pageToken) params.set('pageToken', pageToken);
-    const payload = await googleJson<{ locations?: GoogleLocation[]; nextPageToken?: string }>(`${BUSINESS_INFO_API}/${account}/locations?${params}`, credential);
+    const payload = await googleJson<{ locations?: GoogleHoursLocation[]; nextPageToken?: string }>(`${BUSINESS_INFO_API}/${account}/locations?${params}`, credential);
     locations.push(...(payload.locations || []));
     pageToken = payload.nextPageToken || '';
   } while (pageToken);
@@ -219,6 +221,32 @@ function summarize(location: string, googleLocation: GoogleLocation | undefined,
 
 export async function googleBusinessProfileConfigured(organizationId = 'org-puerto-vallarta') {
   return Boolean(await credentials(organizationId));
+}
+
+const hoursCache = new Map<string, { expiresAt: number; locations: GoogleHoursLocation[]; verifiedAt: string }>();
+export async function getGoogleOperatingSchedules(scope: string[], organizationId = 'org-puerto-vallarta'): Promise<Record<string, OperatingSchedule>> {
+  let cached = hoursCache.get(organizationId);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    const credential = await credentials(organizationId);
+    if (!credential) throw new Error('Google Business Profile credentials are not configured');
+    const account = await accountName(credential);
+    const locations = await listLocations(account, credential, true);
+    cached = { locations, verifiedAt: new Date().toISOString(), expiresAt: Date.now() + 15 * 60_000 };
+    hoursCache.set(organizationId, cached);
+  }
+  const configured = configuredLocationMap();
+  const schedules: Record<string, OperatingSchedule> = {};
+  for (const name of scope) {
+    const canonical = [...OPSVISTA_LOCATIONS, 'Middletown', 'Newington'].find(item => normalized(name) === normalized(item) || normalized(name) === normalized(`Puerto Vallarta ${item}`));
+    if (!canonical) continue;
+    const explicit = configured[canonical];
+    const matches = cached.locations.filter(location => explicit ? location.name === explicit :
+      normalized(location.storefrontAddress?.locality ?? '') === normalized(canonical) && normalized(location.title ?? '').includes('puertovallarta'));
+    if (matches.length !== 1) continue;
+    const schedule = scheduleFromGoogle(matches[0], cached.verifiedAt);
+    if (schedule) schedules[name] = schedule;
+  }
+  return schedules;
 }
 
 export async function getGoogleReviewSummaries(start: string, end: string, scope?: string[], organizationId = 'org-puerto-vallarta') {
