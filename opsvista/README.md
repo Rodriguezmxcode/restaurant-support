@@ -6,6 +6,14 @@ This directory is the first version-controlled source base for migrating OpsVist
 
 The current OpsVista/PV Operations product is published from ChatGPT Sites. The exact original source project was not present in the connected GitHub account, Google Drive, or ChatGPT Library as a repository/ZIP. This migration therefore rebuilds the application shell from the documented production UI and operational requirements while preserving the existing Site until a controlled replacement is ready.
 
+## Module responsibilities
+
+Each visible module must have a distinct operational purpose and use verified data for that purpose. Shared records and filtered views belong inside the owning module, rather than separate navigation entries for the same screen.
+
+- **Pagos / Payments** owns payment requests, approval/rejection, check issuance records and payment history. **Finanzas** is removed from navigation and search results as a separate module; saved destinations and older links resolve to Pagos under the destination's existing permissions.
+- A future **Finanzas / Finance** module is reserved for a financial overview of sales, costs, expenses, profitability and location comparisons. It should be exposed when its own source-backed view is implemented; the payment queue is not a substitute for that view.
+- **Centro de acciones / Action Center** owns actions, priorities, responsibility and action history. The former Prioridades destination resolves to Action Center.
+
 ## Implemented in this branch
 
 ### Assisted onboarding for additional restaurant businesses
@@ -53,12 +61,10 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 - Locaciones
 - Ventas
 - Local Intelligence
-- Finanzas
 - Gastos
 - Horarios
 - Tasks
 - Action Center
-- Prioridades
 - Pagos
 - Transferencias
 - Restaurant365
