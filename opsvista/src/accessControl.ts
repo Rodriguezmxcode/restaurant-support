@@ -45,7 +45,7 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
-const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
+const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Finanzas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
@@ -85,7 +85,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   Administration: {
-    modules: ['Resumen','Gastos','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'],
+    modules: ['Resumen','Gastos','Action Center','Proyectos','Finanzas','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
@@ -117,7 +117,6 @@ export function permissionsFor(user: OpsVistaUser) { return rolePermissions[user
 // Compatibility aliases for retired duplicate navigation; destination permissions still apply.
 export function normalizeModule(module: OpsVistaModule): OpsVistaModule {
   if (module === 'Prioridades') return 'Action Center';
-  if (module === 'Finanzas') return 'Pagos';
   return module;
 }
 export function canAccessModule(user: OpsVistaUser, module: string) { return permissionsFor(user).modules.includes(normalizeModule(module as OpsVistaModule)); }
