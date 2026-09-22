@@ -123,14 +123,14 @@ const guides:Guide[] = [
   },
   {
     module:'Action Center', label:'Action Center',
-    keywords:['action center','accion','acciones','responsable','owner','seguimiento','follow up','alerta','problema','incident','incidente','prioridad','priority','mantenimiento','maintenance','reparacion','repair'],
+    keywords:['action center','centro de acciones','prioridades','priorities','accion','acciones','responsable','owner','seguimiento','follow up','alerta','problema','incident','incidente','prioridad','priority','mantenimiento','maintenance','reparacion','repair'],
     es:{
-      answer:'Action Center convierte un problema operativo en seguimiento: señal, causa probable, recomendación, responsable, fecha límite y verificación.',
+      answer:'El Centro de acciones reúne el seguimiento operativo y las prioridades. Usa Mis acciones, Alta prioridad, Vencidas, Sin asignar e Historial para consultar el mismo registro de acciones.',
       recommendation:'Crea o abre la acción, asigna al manager responsable y no la cierres hasta guardar evidencia del resultado.',
       followUps:['¿Qué acciones tengo asignadas?','¿Qué está vencido?'],
     },
     en:{
-      answer:'Action Center turns an operating problem into accountable follow-up: signal, likely cause, recommendation, owner, deadline, and verification.',
+      answer:'Action Center brings operational follow-up and priorities together. Use My actions, High priority, Overdue, Unassigned, and History to view the same action records.',
       recommendation:'Create or open the action, assign the responsible manager, and keep it open until the result is verified with evidence.',
       followUps:['Which actions are assigned to me?','What is overdue?'],
     },
