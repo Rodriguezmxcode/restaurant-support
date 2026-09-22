@@ -45,7 +45,7 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
-const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Finanzas','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
+const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Finanzas','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
@@ -67,13 +67,13 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   'Location Manager': {
-    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Pagos','Transferencias','Restaurant365'],
+    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Kitchen: {
-    modules: ['Resumen','Locaciones','Tasks','Bono semanal','Action Center','Proyectos','Prioridades','Transferencias'],
+    modules: ['Resumen','Locaciones','Tasks','Bono semanal','Action Center','Proyectos','Transferencias'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
@@ -91,7 +91,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Maintenance: {
-    modules: ['Resumen','Locaciones','Tasks','Action Center','Proyectos','Prioridades'],
+    modules: ['Resumen','Locaciones','Tasks','Action Center','Proyectos'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
@@ -114,7 +114,9 @@ export function currentAuthenticatedUser() {
 }
 
 export function permissionsFor(user: OpsVistaUser) { return rolePermissions[user.role]; }
-export function canAccessModule(user: OpsVistaUser, module: string) { return permissionsFor(user).modules.includes(module as OpsVistaModule); }
+// Keep saved navigation and older callers compatible with the consolidated module.
+export function normalizeModule(module: OpsVistaModule): OpsVistaModule { return module === 'Prioridades' ? 'Action Center' : module; }
+export function canAccessModule(user: OpsVistaUser, module: string) { return permissionsFor(user).modules.includes(normalizeModule(module as OpsVistaModule)); }
 
 export function activeLocationGrants(user: OpsVistaUser, now = new Date()) {
   const source = user.locationGrants?.length ? user.locationGrants : user.locations.map((location,index)=>({location,type:index===0?'Primary':'Additional'} as LocationAccessGrant));

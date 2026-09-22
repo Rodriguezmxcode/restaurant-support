@@ -131,7 +131,7 @@ async function searchPayments(query: string, allowedLocations: string[], section
     }));
 }
 
-async function searchActions(query: string, allowedLocations: string[], section: 'Action Center' | 'Prioridades'): Promise<GlobalSearchResult[]> {
+async function searchActions(query: string, allowedLocations: string[], section: 'Action Center'): Promise<GlobalSearchResult[]> {
   const payload = asRecord(await cachedJson('/api/workflows?resource=actions'));
   return asArray(payload.actions)
     .filter(action => locationAllowed(action.location, allowedLocations))
@@ -298,7 +298,7 @@ export async function searchLiveOpsVista(
   const jobs: Array<Promise<GlobalSearchResult[]>> = [];
   if (modules.includes('Gastos')) jobs.push(searchRamp(query, allowedLocations));
   if (modules.includes('Pagos') || modules.includes('Finanzas')) jobs.push(searchPayments(query, allowedLocations, modules.includes('Pagos') ? 'Pagos' : 'Finanzas'));
-  if (modules.includes('Action Center') || modules.includes('Prioridades')) jobs.push(searchActions(query, allowedLocations, modules.includes('Action Center') ? 'Action Center' : 'Prioridades'));
+  if (modules.includes('Action Center') || modules.includes('Prioridades')) jobs.push(searchActions(query, allowedLocations, 'Action Center'));
   if (modules.includes('Proyectos')) jobs.push(searchProjects(query, allowedLocations));
   if (modules.includes('Transferencias')) jobs.push(searchTransfers(query, allowedLocations));
   if (modules.includes('Tasks')) jobs.push(searchTasks(query, allowedLocations));
