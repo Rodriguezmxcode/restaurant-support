@@ -2,6 +2,25 @@
 
 Base URL: `https://restaurant-support.vercel.app`
 
+## PV Control web (interactive connection)
+
+Open OpsVista as Founder, then **Integraciones → PV Control → Abrir PV Control**.
+The web address is `https://restaurant-support.vercel.app/pv-control.html`.
+Choose up to 31 days and click **Sincronizar OpsVista**. The web view reads the
+six restaurants and Corporate Office using the existing signed OpsVista session;
+it does not require a separate proxy, server, API key, or Cloudflare account.
+This view is limited to locations and invoices. It does not migrate local PV
+Control records, import the old file's sample data, or enable accounting writes.
+
+The interactive `/api/pv-control/{health,locations,invoices}` routes require a
+same-origin browser request and the authorized Founder session on every call.
+They do not accept API keys as a substitute for a session. The page stores no
+credentials or invoice data in localStorage. Expired sessions require signing
+in again. Failed or partial downloads preserve the prior complete query;
+snapshot conflicts restart once. Unknown amounts remain unavailable.
+
+## External server integration
+
 This is a server-to-server, read-only API. It exports existing OpsVista data.
 It does **not** yet make PV Control the accounting source or replace R365.
 

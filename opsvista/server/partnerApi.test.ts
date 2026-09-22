@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { partnerApiEndpoint, partnerKeyEndpoint, parseInvoiceQuery, projectPartnerInvoices } from './partnerApi.js';
+import { partnerApiEndpoint, partnerKeyEndpoint, parseInvoiceQuery, projectPartnerInvoices, pvControlBrowserEndpoint } from './partnerApi.js';
 import { createPartnerKey, authenticatePartnerKey, listPartnerKeys, reservePartnerRequest, revokePartnerKey } from './partnerApiStore.js';
 import { PUERTO_VALLARTA_ORG as org } from '../shared/tenantAccess.js';
 import type { SessionUser } from './authSession.js';
@@ -80,6 +80,27 @@ test('key issuance requires Founder, the right tenant, same origin, and JSON', a
     const res = response(); await partnerKeyEndpoint({ ...base, headers: { ...base.headers, origin } }, res, founder); assert.equal(res.code, 403);
   }
   const res = response(); await partnerKeyEndpoint({ ...base, headers: { ...base.headers, 'content-type': 'text/plain' } }, res, founder); assert.equal(res.code, 415);
+});
+test('PV Control interactive connection requires a Founder session and same-origin request', async () => {
+  const base = { method: 'GET', headers: { 'sec-fetch-site': 'same-origin', 'x-pv-source': 'pv-control' }, query: { endpoint: 'health' } };
+  for (const [user, expected] of [[null, 401], [{ ...founder, role: 'Corporate' }, 403], [{ ...founder, role: 'Location Manager' }, 403], [{ ...founder, organizationId: 'other' }, 403]] as const) {
+    const res = response(); await pvControlBrowserEndpoint(base, res, user as SessionUser | null, deps); assert.equal(res.code, expected);
+  }
+  for (const headers of [{}, { ...base.headers, 'sec-fetch-site': 'cross-site' }, { ...base.headers, 'sec-fetch-site': 'same-site' }, { 'sec-fetch-site': 'same-origin' }]) {
+    const res = response(); await pvControlBrowserEndpoint({ ...base, headers }, res, founder, deps); assert.equal(res.code, 403);
+  }
+  const res = response(); await pvControlBrowserEndpoint(base, res, founder, deps);
+  assert.equal(res.code, 200); assert.equal(res.body.ok, true); assert.equal(res.headers['Cache-Control'], 'private, no-store');
+  assert.equal(Object.keys(res.headers).some(key => key.toLowerCase().startsWith('access-control')), false);
+});
+test('PV Control interactive export preserves invoice contract and rejects writes', async () => {
+  const base = { method: 'GET', headers: { 'sec-fetch-site': 'same-origin', 'x-pv-source': 'pv-control' }, query: params };
+  const res = response(); await pvControlBrowserEndpoint(base, res, founder, deps);
+  assert.equal(res.code, 200); assert.equal(res.body.data.length, 3); assert.equal(res.body.data[1].amount, null);
+  assert.equal(res.body.data[0].outstanding_amount, null); assert.equal(res.body.source.refresh_pending, true);
+  for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS']) { const result = response(); await pvControlBrowserEndpoint({ ...base, method }, result, founder, deps); assert.equal(result.code, 405); }
+  const unsupported = response(); await pvControlBrowserEndpoint({ ...base, query: { endpoint: 'payments' } }, unsupported, founder, deps); assert.equal(unsupported.code, 404);
+  const noSource = response(); await pvControlBrowserEndpoint(base, noSource, founder, { readInvoices: async () => { throw new Error('SECRET'); } }); assert.equal(noSource.code, 503); assert.doesNotMatch(JSON.stringify(noSource.body), /SECRET/);
 });
 test('real key storage hashes tokens, enforces expiry/revocation and a concurrent quota', async () => {
   process.env.OPSVISTA_DATABASE_URL = 'postgres://fixture';

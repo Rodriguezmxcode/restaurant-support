@@ -6,6 +6,10 @@
   "installCommand": "npm install",
   "rewrites": [
     {
+      "source": "/api/pv-control/:endpoint",
+      "destination": "/api/workflows?resource=pv_control_browser&endpoint=:endpoint"
+    },
+    {
       "source": "/api/v1/openapi.json",
       "destination": "/pv-control-openapi.json"
     },
