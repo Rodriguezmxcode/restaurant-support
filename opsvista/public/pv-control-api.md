@@ -12,6 +12,17 @@ it does not require a separate proxy, server, API key, or Cloudflare account.
 This view is limited to locations and invoices. It does not migrate local PV
 Control records, import the old file's sample data, or enable accounting writes.
 
+The updated local `pv-ap-control-3.html` connects from **APIs → Conectar OpsVista**.
+It opens this web view; sign in in the separate OpsVista tab if necessary,
+return, select **Probar conexión**, synchronize, then explicitly select
+**Enviar facturas a PV Control**. Keep the local file tab open. A MessageChannel
+ties the response to the initiating local document: the handshake checks the
+opener and random channel, the web side only accepts the opaque local origin,
+and invoice data is sent through the transferred port, never a wildcard target.
+The import is staged, validated and saved as a complete batch. It upserts by
+OpsVista ID while preserving unrelated local records. Imported invoices remain
+read-only and are excluded from local payable/cash totals and payment actions.
+
 The interactive `/api/pv-control/{health,locations,invoices}` routes require a
 same-origin browser request and the authorized Founder session on every call.
 They do not accept API keys as a substitute for a session. The page stores no

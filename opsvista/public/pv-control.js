@@ -2,12 +2,33 @@ import { collectInvoices } from './pv-control-sync.js';
 const el = id => document.getElementById(id);
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 let locations = [], batch = null;
+let localPort = null;
+const connectionChannel = new URLSearchParams(location.hash.slice(1)).get('pv_channel');
+// The local file has an opaque origin. Transfer a MessagePort after checking
+// opener + one-time channel; financial data never uses postMessage('*'). The
+// port belongs to the initiating document, so navigating it does not redirect data.
+if (window.opener && /^[a-f0-9]{32}$/.test(connectionChannel || '')) {
+  window.addEventListener('message', event => {
+    if (localPort || event.source !== window.opener || event.origin !== 'null' || event.data?.type !== 'pv-control-connect' || event.data.channel !== connectionChannel || event.ports.length !== 1) return;
+    localPort = event.ports[0];
+    localPort.onmessage = message => {
+      if (message.data?.type === 'pv-control-imported' && message.data.channel === connectionChannel) el('transfer-status').textContent = `${message.data.count} facturas recibidas por PV Control. Puedes cerrar esta ventana.`;
+      if (message.data?.type === 'pv-control-import-failed' && message.data.channel === connectionChannel) { el('transfer-status').textContent = 'PV Control no pudo guardar la consulta. Revisa la ventana del archivo local.'; el('send-local').disabled = false; }
+    };
+    localPort.start();
+    const dates = event.data.dates;
+    if (dates && /^\d{4}-\d{2}-\d{2}$/.test(dates.start) && /^\d{4}-\d{2}-\d{2}$/.test(dates.end)) { el('start').value = dates.start; el('end').value = dates.end; }
+    el('local-transfer').hidden = false;
+  });
+  window.opener.postMessage({ type: 'pv-control-ready', channel: connectionChannel }, '*');
+}
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 el('start').value = today.slice(0, 8) + '01'; el('end').value = today;
 
 function status(message, kind = '') { el('status').textContent = message; el('status').className = kind; }
 function lock(message) {
   batch = null; locations = [];
+  el('send-local').disabled = true;
   el('workspace').hidden = true; el('access').hidden = false;
   el('access-message').textContent = message;
   el('connection').textContent = 'Sesión requerida'; el('connection').className = 'badge';
@@ -67,6 +88,8 @@ el('sync-form').addEventListener('submit', async event => {
     const complete = await collectInvoices(request, { start: el('start').value, end: el('end').value }, count => status(`Consultando facturas… ${count} recibidas`));
     if (complete.rows.some(row => !locations.some(location => location.id === row.location_id))) throw new Error('La respuesta contiene una sucursal no reconocida.');
     batch = complete; render();
+    el('send-local').disabled = !localPort;
+    el('transfer-status').textContent = `${batch.rows.length} facturas del ${batch.start} al ${batch.end}. El envío incluye todas las sucursales del período, aunque apliques un filtro en la tabla.`;
     status(`${batch.rows.length} facturas consultadas.${batch.pending ? ' OpsVista está actualizando esta copia; vuelve a sincronizar más tarde.' : ''}`, 'success');
   } catch (error) { status(`${error.message}${batch ? ' Se conserva la consulta anterior.' : ''}`, 'error'); }
   finally { el('sync').disabled = false; }
@@ -74,5 +97,15 @@ el('sync-form').addEventListener('submit', async event => {
 el('retry').addEventListener('click', connect);
 el('location').addEventListener('change', render);
 el('search').addEventListener('input', render);
+el('send-local').addEventListener('click', async () => {
+  if (!localPort || !batch) return;
+  el('send-local').disabled = true;
+  try {
+    await request('health');
+    if (!batch) return;
+    localPort.postMessage({ type: 'pv-control-invoices', channel: connectionChannel, locations, batch });
+    el('transfer-status').textContent = 'Enviando la consulta al archivo local…';
+  } catch (error) { el('transfer-status').textContent = error.message; el('send-local').disabled = !batch; }
+});
 window.addEventListener('pageshow', event => { if (event.persisted) { lock('Verifica tu sesión para continuar.'); void connect(); } });
 void connect();
