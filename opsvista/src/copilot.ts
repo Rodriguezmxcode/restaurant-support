@@ -136,8 +136,14 @@ const guides:Guide[] = [
     },
   },
   {
+    module:'Finanzas', label:'Finanzas',
+    keywords:['finanzas','finance','pnl mensual','monthly pnl','resultado operativo'],
+    es:{answer:'Finanzas reúne P&L mensuales revisados por restaurante, con fuentes, base de nómina y costos corporativos pendientes. Sus datos permanecen dentro de Finanzas.',recommendation:'Abre Finanzas para importar o consultar los reportes y sus notas. Los cierres bancarios de los archivos son históricos.',followUps:['¿Dónde consulto el P&L mensual?']},
+    en:{answer:'Finance contains reviewed monthly restaurant P&L reports, sources, payroll bases and pending corporate costs. Its data stays within Finance.',recommendation:'Open Finance to import or review reports and source notes. Bank closing balances in the files are historical.',followUps:['Where can I review monthly P&L?']},
+  },
+  {
     module:'Pagos', label:'Pagos',
-    keywords:['pago','pagos','payment','payments','finanzas','finance','solicitud de pago','payment request','aprobar','approve','proveedor','vendor'],
+    keywords:['pago','pagos','payment','payments','solicitud de pago','payment request','aprobar','approve','proveedor','vendor'],
     es:{
       answer:'Las solicitudes de pago se crean y consultan en Pagos. Los managers solicitan; Corporate aprueba; Administration emite únicamente solicitudes aprobadas.',
       recommendation:'Selecciona la locación, captura beneficiario, importe y motivo, y envía la solicitud para aprobación. Consulta su estado e historial en Pagos.',

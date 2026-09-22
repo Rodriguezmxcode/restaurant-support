@@ -10,8 +10,12 @@ The current OpsVista/PV Operations product is published from ChatGPT Sites. The 
 
 Each visible module must have a distinct operational purpose and use verified data for that purpose. Shared records and filtered views belong inside the owning module, rather than separate navigation entries for the same screen.
 
-- **Pagos / Payments** owns payment requests, approval/rejection, check issuance records and payment history. **Finanzas** is removed from navigation and search results as a separate module; saved destinations and older links resolve to Pagos under the destination's existing permissions.
-- A future **Finanzas / Finance** module is reserved for a financial overview of sales, costs, expenses, profitability and location comparisons. It should be exposed when its own source-backed view is implemented; the payment queue is not a substitute for that view.
+- **Pagos / Payments** owns payment requests, approval/rejection, check issuance records and payment history.
+- **Finanzas / Finance** owns reviewed monthly P&L reports, restaurant comparisons, documented payroll bases, extraordinary items and dated historical bank closings. It is isolated: no Finance data or payroll adjustments feed other modules, bonuses, operating KPIs, payments, alerts or Ramp.
+- Finance is available to Puerto Vallarta Founder/Corporate/Administration; only Founder/Corporate can import. Actual financial files are private imports and must never be committed or bundled into client assets. Empty state contains no samples.
+- Upload the reviewed `opsvista-finance-v1` JSON in Finanzas and confirm the preview. The authenticated API (`/api/workflows?resource=finance`) validates source references, dates, cents, reconciliations and unique restaurant/month keys. It stores append-only versions in `opsvista_finance_versions`, scoped to the organization. Identical retries do not duplicate reports; stale review conflicts require refreshing. No original reports are deleted.
+- Reports remain provisional with incomplete corporate allocations. Already included Ramp is disclosed without reapplying it; extraordinary items are separate and missing values are not zero. Labor uses each source's basis; the prospective Finance criterion from September 2026 is actual calendar days (September: 30). Bank closings are historical file data, never a live balance feed.
+- Verify Finance with `node scripts/test-finance.mjs`, both typechecks and the build. Live data becomes available only after a signed-in authorized user confirms the import; deploying code does not seed private financial values.
 - **Centro de acciones / Action Center** owns actions, priorities, responsibility and action history. The former Prioridades destination resolves to Action Center.
 
 ## Implemented in this branch

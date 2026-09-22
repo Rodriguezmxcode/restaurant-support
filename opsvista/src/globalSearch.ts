@@ -297,7 +297,7 @@ export async function searchLiveOpsVista(
   if (normalize(query).length < 2 || !allowedLocations.length) return [];
   const jobs: Array<Promise<GlobalSearchResult[]>> = [];
   if (modules.includes('Gastos')) jobs.push(searchRamp(query, allowedLocations));
-  if (modules.includes('Pagos') || modules.includes('Finanzas')) jobs.push(searchPayments(query, allowedLocations, 'Pagos'));
+  if (modules.includes('Pagos')) jobs.push(searchPayments(query, allowedLocations, 'Pagos'));
   if (modules.includes('Action Center') || modules.includes('Prioridades')) jobs.push(searchActions(query, allowedLocations, 'Action Center'));
   if (modules.includes('Proyectos')) jobs.push(searchProjects(query, allowedLocations));
   if (modules.includes('Transferencias')) jobs.push(searchTransfers(query, allowedLocations));
