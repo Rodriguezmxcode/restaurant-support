@@ -34,7 +34,9 @@ export default function PvControlIntegrationPanel() {
   }
   const fieldStyle = { padding: 10, border: '1px solid #cbd5e1', borderRadius: 8, maxWidth: '100%' };
   return <section className="panel" style={{ marginBottom: 18 }}>
-    <div className="panel-header"><div><h2>PV Control · API de OpsVista</h2><p>Comparte locaciones y facturas con tu app contable. Acceso de lectura a los seis restaurantes y Corporate Office.</p></div><span className="count-pill">API V1</span></div>
+    <div className="panel-header"><div><h2>PV Control · conexión con OpsVista</h2><p>Comparte locaciones y facturas con tu app contable. Acceso de lectura a los seis restaurantes y Corporate Office.</p></div><span className="count-pill">API V1</span></div>
+    <p><a href="/pv-control.html" target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '12px 18px', borderRadius: 8, background: '#14283f', color: '#fff', textDecoration: 'none', fontWeight: 700 }}>Abrir PV Control · conectado a OpsVista</a></p>
+    <p>La versión web consulta locaciones y facturas con tu sesión de Founder. No requiere otra clave ni configurar un proxy. El archivo local anterior conserva sus propios datos.</p>
     <p>Las facturas provienen actualmente de R365. Esta conexión todavía no cambia la fuente contable ni confirma pagos.</p>
     <p><a href="/pv-control-api.md" target="_blank" rel="noreferrer">Instrucciones para conectar</a> · <a href="/api/v1/openapi.json" target="_blank" rel="noreferrer">Especificación OpenAPI</a></p>
     {error && <p role="alert" style={{ color: '#b91c1c' }}>{error}</p>}

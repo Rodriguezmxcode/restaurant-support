@@ -96,17 +96,41 @@ export async function partnerApiEndpoint(req: Request, res: Response, deps = par
     const key = await deps.authenticate(req.headers?.authorization);
     if (!key || key.organizationId !== PUERTO_VALLARTA_ORG) { res.setHeader?.('WWW-Authenticate', 'Bearer'); return fail(res, 401, 'invalid_api_key', 'Se requiere una clave de API válida.'); }
     if (!await deps.reserve(key.id)) { res.setHeader?.('Retry-After', '60'); return fail(res, 429, 'rate_limit', 'Límite de 30 solicitudes por minuto. Reintenta en 60 segundos.'); }
-    if (endpoint === 'locations') return res.status(200).json({ api_version: '1', organization_id: key.organizationId, scopes: partnerScopes, data: partnerLocations });
+    return await readPartnerData(req, res, key.organizationId, deps);
+  } catch { return fail(res, 503, 'unavailable', 'No se pudo consultar la fuente. Intenta de nuevo.'); }
+}
+
+// Shared projection, after the caller's own authentication boundary. The public
+// server-to-server endpoint above continues to require a real revocable API key.
+async function readPartnerData(req: Request, res: Response, org: string, deps: Pick<typeof partnerDependencies, 'readInvoices'>) {
+  const endpoint = value(req, 'endpoint');
+  try {
+    if (endpoint === 'locations') return res.status(200).json({ api_version: '1', organization_id: org, scopes: partnerScopes, data: partnerLocations });
     let query: ReturnType<typeof parseInvoiceQuery>;
     try { query = parseInvoiceQuery(req); } catch { return fail(res, 400, 'invalid_query', 'Usa start/end YYYY-MM-DD (máximo 31 días), location_id válido, approval_status all/approved/unapproved, limit 1–200 y offset 0–10000; conserva snapshot_at para páginas posteriores.'); }
-    const result = await deps.readInvoices(key.organizationId, query.start, query.end);
+    const result = await deps.readInvoices(org, query.start, query.end);
     if (!result.data) { res.setHeader?.('Retry-After', '60'); return fail(res, 503, 'source_unavailable', 'Sin copia disponible de R365. La sincronización está pendiente; reintenta más tarde.'); }
     const snapshot = result.data;
     if (snapshot.provider !== 'restaurant365-odata' || snapshot.period.start !== query.start || snapshot.period.endExclusive !== query.period.endExclusive || !snapshot.fetchedAt || !Array.isArray(snapshot.transactions)) throw new Error('Invalid source snapshot');
     if (query.snapshotAt && query.snapshotAt !== snapshot.fetchedAt) return fail(res, 409, 'snapshot_changed', 'La copia se actualizó. Reinicia la paginación con offset=0.');
-    return res.status(200).json({ api_version: '1', organization_id: key.organizationId, ...projectPartnerInvoices(snapshot, query),
+    return res.status(200).json({ api_version: '1', organization_id: org, ...projectPartnerInvoices(snapshot, query),
       source: { provider: 'restaurant365-odata', snapshot_at: snapshot.fetchedAt, refresh_pending: result.memory.pending, date_basis: 'transaction_date' },
       limitations: ['Approval does not confirm payment. Applied payments, remaining balances and receipt files are unavailable.', 'Invoice amounts are not outstanding balances. Dates filter transactions, not payment or approval dates.', 'This is an OpsVista export of R365 data; PV Control is not yet the accounting source.'],
     });
   } catch { return fail(res, 503, 'unavailable', 'No se pudo consultar la fuente. Intenta de nuevo.'); }
+}
+
+// Interactive PV Control hosted on this origin. This is NOT an unattended
+// service credential: every request requires the existing signed Founder session.
+export async function pvControlBrowserEndpoint(req: Request, res: Response, user: SessionUser | null, deps: Pick<typeof partnerDependencies, 'readInvoices'> = partnerDependencies) {
+  headers(res);
+  if (!user) return fail(res, 401, 'session_required', 'Inicia sesión en OpsVista y vuelve a probar la conexión.');
+  if (user.role !== 'Founder' || (user.organizationId && user.organizationId !== PUERTO_VALLARTA_ORG)) return fail(res, 403, 'forbidden', 'Esta conexión está disponible para Founder de Puerto Vallarta.');
+  if (req.method !== 'GET') { res.setHeader?.('Allow', 'GET'); return fail(res, 405, 'read_only', 'Esta conexión solo permite consultas.'); }
+  // Custom header + Fetch Metadata prevents cross-origin browser callers. No CORS.
+  if (req.headers?.['sec-fetch-site'] !== 'same-origin' || req.headers?.['x-pv-source'] !== 'pv-control') return fail(res, 403, 'forbidden_origin', 'Abre PV Control desde OpsVista.');
+  const endpoint = value(req, 'endpoint');
+  if (!['health', 'locations', 'invoices'].includes(endpoint)) return fail(res, 404, 'not_found', 'Ruta no disponible.');
+  if (endpoint === 'health') return res.status(200).json({ ok: true, api_version: '1', organization_id: PUERTO_VALLARTA_ORG, mode: 'interactive-read-only' });
+  return readPartnerData(req, res, PUERTO_VALLARTA_ORG, deps);
 }
