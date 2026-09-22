@@ -9,7 +9,7 @@ const output = await mkdtemp(join(tmpdir(), 'opsvista-partner-'));
 async function write(name, body) { const path = join(output, name); await mkdir(dirname(path), { recursive: true }); await writeFile(path, body); }
 try {
   await write('package.json', '{"type":"module"}');
-  for (const name of ['shared/tenantAccess', 'shared/partnerApi', 'server/partnerApiStore', 'server/partnerApi', 'server/partnerApi.test']) {
+  for (const name of ['shared/tenantAccess', 'shared/partnerApi', 'server/partnerApiStore', 'server/pvInvoiceStore', 'server/pvInvoiceEndpoint', 'server/partnerApi', 'server/partnerApi.test', 'server/pvInvoice.test']) {
     const fileName = join(root, `${name}.ts`);
     await write(`${name}.js`, ts.transpileModule(await readFile(fileName, 'utf8'), { fileName, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
   }
@@ -27,5 +27,6 @@ try {
     export const fixtureQuery=(q,values)=>database.query(q,values);
     export const closeFixture=()=>database.close();`);
   await write('server/partnerApi.test.js', (await readFile(join(output, 'server/partnerApi.test.js'), 'utf8')) + `\nimport {after} from 'node:test';import {closeFixture} from 'postgres';after(closeFixture);\n`);
-  process.exitCode = spawnSync(process.execPath, ['--test', join(output, 'server/partnerApi.test.js')], { stdio: 'inherit', timeout: 30000 }).status ?? 1;
+  await write('server/pvInvoice.test.js', (await readFile(join(output, 'server/pvInvoice.test.js'), 'utf8')) + `\nimport {after} from 'node:test';import {closeFixture} from 'postgres';after(closeFixture);\n`);
+  process.exitCode = spawnSync(process.execPath, ['--test', join(output, 'server/partnerApi.test.js'), join(output, 'server/pvInvoice.test.js')], { stdio: 'inherit', timeout: 30000 }).status ?? 1;
 } finally { await rm(output, { recursive: true, force: true }); }

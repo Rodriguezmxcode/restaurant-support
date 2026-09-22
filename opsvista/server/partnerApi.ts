@@ -6,6 +6,7 @@ import { cachedSource } from './sourceCache.js';
 import { loadSource } from './sourceLoaders.js';
 import { getIntegrationSnapshot } from './integrationStore.js';
 import type { Restaurant365ApSnapshot } from './restaurant365OData.js';
+import { pvInvoiceEndpoint } from './pvInvoiceEndpoint.js';
 
 type Request = { method?: string; headers?: Record<string, string | string[] | undefined>; query?: Record<string, string | string[]>; body?: Record<string, unknown> };
 type Response = { status: (code: number) => Response; json: (body: unknown) => void; setHeader?: (key: string, value: string) => void };
@@ -124,6 +125,7 @@ async function readPartnerData(req: Request, res: Response, org: string, deps: P
 // service credential: every request requires the existing signed Founder session.
 export async function pvControlBrowserEndpoint(req: Request, res: Response, user: SessionUser | null, deps: Pick<typeof partnerDependencies, 'readInvoices'> = partnerDependencies) {
   headers(res);
+  if (value(req, 'endpoint') === 'submissions') return pvInvoiceEndpoint(req, res, user);
   if (!user) return fail(res, 401, 'session_required', 'Inicia sesión en OpsVista y vuelve a probar la conexión.');
   if (user.role !== 'Founder' || (user.organizationId && user.organizationId !== PUERTO_VALLARTA_ORG)) return fail(res, 403, 'forbidden', 'Esta conexión está disponible para Founder de Puerto Vallarta.');
   if (req.method !== 'GET') { res.setHeader?.('Allow', 'GET'); return fail(res, 405, 'read_only', 'Esta conexión solo permite consultas.'); }
@@ -131,6 +133,6 @@ export async function pvControlBrowserEndpoint(req: Request, res: Response, user
   if (req.headers?.['sec-fetch-site'] !== 'same-origin' || req.headers?.['x-pv-source'] !== 'pv-control') return fail(res, 403, 'forbidden_origin', 'Abre PV Control desde OpsVista.');
   const endpoint = value(req, 'endpoint');
   if (!['health', 'locations', 'invoices'].includes(endpoint)) return fail(res, 404, 'not_found', 'Ruta no disponible.');
-  if (endpoint === 'health') return res.status(200).json({ ok: true, api_version: '1', organization_id: PUERTO_VALLARTA_ORG, mode: 'interactive-read-only' });
+  if (endpoint === 'health') return res.status(200).json({ ok: true, api_version: '1', organization_id: PUERTO_VALLARTA_ORG, mode: 'interactive', capabilities: ['r365:read', 'pv-invoices:receive'] });
   return readPartnerData(req, res, PUERTO_VALLARTA_ORG, deps);
 }

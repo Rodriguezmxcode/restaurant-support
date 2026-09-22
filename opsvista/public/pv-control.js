@@ -3,6 +3,7 @@ const el = id => document.getElementById(id);
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 let locations = [], batch = null;
 let localPort = null;
+let pvCandidate = null, pvSaving = false;
 const connectionChannel = new URLSearchParams(location.hash.slice(1)).get('pv_channel');
 // The local file has an opaque origin. Transfer a MessagePort after checking
 // opener + one-time channel; financial data never uses postMessage('*'). The
@@ -12,6 +13,7 @@ if (window.opener && /^[a-f0-9]{32}$/.test(connectionChannel || '')) {
     if (localPort || event.source !== window.opener || event.origin !== 'null' || event.data?.type !== 'pv-control-connect' || event.data.channel !== connectionChannel || event.ports.length !== 1) return;
     localPort = event.ports[0];
     localPort.onmessage = message => {
+      if (message.data?.type === 'pv-control-submit-preview' && message.data.channel === connectionChannel && !pvSaving) stagePvInvoice(message.data.invoice);
       if (message.data?.type === 'pv-control-imported' && message.data.channel === connectionChannel) el('transfer-status').textContent = `${message.data.count} facturas recibidas por PV Control. Puedes cerrar esta ventana.`;
       if (message.data?.type === 'pv-control-import-failed' && message.data.channel === connectionChannel) { el('transfer-status').textContent = 'PV Control no pudo guardar la consulta. Revisa la ventana del archivo local.'; el('send-local').disabled = false; }
     };
@@ -33,10 +35,11 @@ function lock(message) {
   el('access-message').textContent = message;
   el('connection').textContent = 'Sesión requerida'; el('connection').className = 'badge';
   el('rows').replaceChildren();
+  el('pv-inbox').replaceChildren();
   for (const id of ['count', 'amount', 'missing']) el(id).textContent = '—';
 }
-async function request(path) {
-  const response = await fetch('/api/pv-control/' + path, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-PV-Source': 'pv-control' }, signal: AbortSignal.timeout(120000) });
+async function request(path, data) {
+  const response = await fetch('/api/pv-control/' + path, { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'X-PV-Source': 'pv-control', ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(120000) });
   let body;
   try { body = await response.json(); } catch { throw new Error('OpsVista no devolvió una respuesta válida. Intenta de nuevo.'); }
   if (!response.ok) {
@@ -58,10 +61,59 @@ async function connect() {
     locations = result.data;
     el('location').replaceChildren(new Option('Todas las sucursales', ''), ...locations.map(location => new Option(location.name, location.id)));
     el('access').hidden = true; el('workspace').hidden = false;
-    el('connection').textContent = 'Conexión activa · solo lectura'; el('connection').className = 'badge connected';
+    el('connection').textContent = 'Conexión activa'; el('connection').className = 'badge connected';
+    if (pvCandidate) renderPvPreview();
+    void loadPvInbox();
   } catch (error) { lock(error.message); }
   finally { el('retry').disabled = false; }
 }
+function invoiceCells(row) {
+  return [row.transaction_date, locations.find(loc => loc.id === row.location_id)?.name || row.location_id, row.vendor_name, row.number, currency.format(row.amount), row.lane === 'receiving' ? 'Recepción' : 'Proveedor'];
+}
+function textRow(values) {
+  const tr = document.createElement('tr');
+  for (const value of values) { const td = document.createElement('td'); td.textContent = String(value ?? ''); tr.append(td); }
+  return tr;
+}
+function stagePvInvoice(invoice) {
+  // Only a preview is staged here. A separate user click performs the POST.
+  if (!invoice || invoice.source !== 'pv-control' || typeof invoice.client_id !== 'string' || !/^[a-f0-9-]{36}$/i.test(invoice.client_id) || typeof invoice.amount !== 'number' || !Number.isFinite(invoice.amount) || JSON.stringify(invoice).length > 16000) return;
+  pvCandidate = structuredClone(invoice);
+  el('pv-submit').disabled = false;
+  el('pv-submit-status').textContent = 'Revisa los datos y confirma el envío.';
+  renderPvPreview();
+}
+function renderPvPreview() {
+  el('pv-preview-row').replaceChildren(textRow(invoiceCells(pvCandidate)));
+  el('pv-preview-notes').textContent = [pvCandidate.key_item, pvCandidate.notes].filter(Boolean).join(' · ');
+  el('pv-preview').hidden = false;
+}
+async function loadPvInbox() {
+  el('pv-inbox-refresh').disabled = true;
+  try {
+    const result = await request('submissions');
+    if (result.organization_id !== 'org-puerto-vallarta' || !Array.isArray(result.data)) throw new Error('No se pudieron verificar las facturas recibidas.');
+    el('pv-inbox').replaceChildren(...result.data.map(row => textRow([...invoiceCells(row), 'Recibida · pendiente de revisión'])));
+    if (!result.data.length) { const row = textRow(['Todavía no has enviado facturas desde PV Control.']); row.firstChild.colSpan = 7; el('pv-inbox').append(row); }
+    el('pv-inbox-status').textContent = `${result.total} registros guardados · se muestran los ${result.data.length} más recientes.`;
+  } catch (error) { el('pv-inbox-status').textContent = error.message; }
+  finally { el('pv-inbox-refresh').disabled = false; }
+}
+el('pv-inbox-refresh').addEventListener('click', loadPvInbox);
+el('pv-submit').addEventListener('click', async () => {
+  if (!pvCandidate || pvSaving) return;
+  const invoice = pvCandidate;
+  pvSaving = true; el('pv-submit').disabled = true;
+  el('pv-submit-status').textContent = 'Guardando en OpsVista…';
+  try {
+    const result = await request('submissions', invoice);
+    if (result.organization_id !== 'org-puerto-vallarta' || result.client_id !== invoice.client_id || result.invoice?.receipt_status !== 'received' || !/^[a-f0-9-]{36}$/i.test(result.invoice.id) || !Number.isFinite(Date.parse(result.invoice.received_at))) throw new Error('No se pudo verificar la recepción. Reintenta el mismo envío.');
+    el('pv-submit-status').textContent = `${result.created ? 'Factura guardada' : 'La factura ya estaba guardada'} en OpsVista. Folio ${result.invoice.id}.`;
+    localPort?.postMessage({ type: 'pv-control-submitted', channel: connectionChannel, client_id: invoice.client_id, receipt_id: result.invoice.id, received_at: result.invoice.received_at });
+    void loadPvInbox();
+  } catch (error) { el('pv-submit-status').textContent = error.message; el('pv-submit').disabled = false; }
+  finally { pvSaving = false; }
+});
 function render() {
   if (!batch) return;
   const location = el('location').value, search = el('search').value.trim().toLowerCase();
