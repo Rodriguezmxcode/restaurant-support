@@ -137,15 +137,15 @@ const guides:Guide[] = [
   },
   {
     module:'Pagos', label:'Pagos',
-    keywords:['pago','pagos','payment','payments','solicitud de pago','payment request','aprobar','approve','proveedor','vendor'],
+    keywords:['pago','pagos','payment','payments','finanzas','finance','solicitud de pago','payment request','aprobar','approve','proveedor','vendor'],
     es:{
       answer:'Las solicitudes de pago se crean y consultan en Pagos. Los managers solicitan; Corporate aprueba; Administration emite únicamente solicitudes aprobadas.',
-      recommendation:'Adjunta el soporte, selecciona la locación correcta y envía la solicitud para aprobación. El historial queda en la bitácora.',
+      recommendation:'Selecciona la locación, captura beneficiario, importe y motivo, y envía la solicitud para aprobación. Consulta su estado e historial en Pagos.',
       followUps:['¿Cómo solicito un pago?','¿Dónde veo el estado del pago?'],
     },
     en:{
       answer:'Payment requests are created and tracked in Payments. Managers request, Corporate approves, and Administration issues only approved requests.',
-      recommendation:'Attach supporting evidence, select the correct location, and submit the request for approval.',
+      recommendation:'Select the location, enter the payee, amount and reason, then submit the request for approval. Track its status and history in Payments.',
       followUps:['How do I request a payment?','Where can I see payment status?'],
     },
   },
