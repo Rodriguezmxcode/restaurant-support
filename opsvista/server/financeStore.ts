@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 import { createHash } from 'node:crypto';
-import { financeKey, type FinanceImport, type SavedFinanceRecord } from '../shared/finance.js';
+import { financeKey, corporateFinanceKey, type FinanceImport, type SavedFinanceRecord, type SavedCorporateFinanceRecord } from '../shared/finance.js';
 
 let client: ReturnType<typeof postgres> | undefined;
 let ready: Promise<void> | undefined;
@@ -14,17 +14,25 @@ async function schema() {
     version_id bigserial primary key,
     organization_id text not null,
     record_key text not null,
+    report_kind text not null default 'restaurant' check (report_kind in ('restaurant','corporate')),
     revision text not null,
     payload jsonb not null,
     imported_by text not null,
     saved_at timestamptz not null default now()
-  )`.then(() => {}).catch(error => { ready = undefined; throw error; });
+  )`.then(async () => {
+    await db()`alter table opsvista_finance_versions add column if not exists report_kind text not null default 'restaurant'`;
+  }).catch(error => { ready = undefined; throw error; });
   await ready;
 }
 export class FinanceConflict extends Error {}
 export async function listFinance(organizationId: string): Promise<SavedFinanceRecord[]> {
   await schema();
-  const rows = await db()`select distinct on (record_key) payload,revision,saved_at from opsvista_finance_versions where organization_id=${organizationId} order by record_key,version_id desc`;
+  const rows = await db()`select distinct on (record_key) payload,revision,saved_at from opsvista_finance_versions where organization_id=${organizationId} and report_kind='restaurant' order by record_key,version_id desc`;
+  return rows.map(row => ({ record: row.payload, revision: row.revision, savedAt: new Date(row.saved_at).toISOString() }));
+}
+export async function listCorporateFinance(organizationId: string): Promise<SavedCorporateFinanceRecord[]> {
+  await schema();
+  const rows = await db()`select distinct on (record_key) payload,revision,saved_at from opsvista_finance_versions where organization_id=${organizationId} and report_kind='corporate' order by record_key,version_id desc`;
   return rows.map(row => ({ record: row.payload, revision: row.revision, savedAt: new Date(row.saved_at).toISOString() }));
 }
 // One transaction, serialized per tenant: retries are idempotent and stale
@@ -34,14 +42,15 @@ export async function saveFinance(organizationId: string, actor: string, batch: 
   return db().begin(async tx => {
     await tx`select pg_advisory_xact_lock(hashtext(${`finance:${organizationId}`}))`;
     let saved = 0, unchanged = 0;
-    for (const record of batch.records) {
-      const key = financeKey(record), payload = JSON.stringify(record);
+    const entries = [...batch.records.map(record => ({ key: financeKey(record), kind: 'restaurant', record })), ...batch.corporate.map(record => ({ key: corporateFinanceKey(record), kind: 'corporate', record }))];
+    for (const entry of entries) {
+      const { key, kind, record } = entry, payload = JSON.stringify(record);
       const revision = createHash('sha256').update(payload).digest('hex');
       const current = await tx`select revision from opsvista_finance_versions where organization_id=${organizationId} and record_key=${key} order by version_id desc limit 1`;
       const actual = current[0]?.revision ?? null;
       if (actual === revision) { unchanged++; continue; }
       if (!(key in expected) || expected[key] !== actual) throw new FinanceConflict('El reporte cambió desde la revisión. Actualiza Finanzas y vuelve a revisar el archivo.');
-      await tx`insert into opsvista_finance_versions (organization_id,record_key,revision,payload,imported_by) values (${organizationId},${key},${revision},${payload}::jsonb,${actor})`;
+      await tx`insert into opsvista_finance_versions (organization_id,record_key,report_kind,revision,payload,imported_by) values (${organizationId},${key},${kind},${revision},${payload}::jsonb,${actor})`;
       saved++;
     }
     return { saved, unchanged };

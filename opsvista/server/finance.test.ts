@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calendarDays, financeKey, parseFinanceImport, summarizeFinance, type FinanceRecord } from '../shared/finance.js';
-import { FinanceConflict, listFinance, saveFinance } from './financeStore.js';
+import { calendarDays, companyFinanceResult, financeImportKeys, financeKey, financeLocations, parseFinanceImport, summarizeFinance, type CorporateFinanceRecord, type FinanceRecord } from '../shared/finance.js';
+import { FinanceConflict, listCorporateFinance, listFinance, saveFinance } from './financeStore.js';
 import { financeEndpoint } from './financeEndpoint.js';
 import { canAccessModule, normalizeModule } from '../src/accessControl.js';
 import type { SessionUser } from './authSession.js';
@@ -41,7 +41,7 @@ test('Finance has its own restricted destination while payment and action routes
 });
 test('denies unsigned, wrong-role, cross-tenant and cross-origin operations before accessing storage', async () => {
   const payload = batch(sample()); const base = { method: 'POST', headers, query: { resource: 'finance' }, body: { batch: payload, expected: expected(payload.records) } };
-  const deps = { save: async () => { throw Error('must not write'); }, list: async () => { throw Error('must not read'); } };
+  const deps = { save: async () => { throw Error('must not write'); }, list: async () => { throw Error('must not read'); }, listCorporate: async () => { throw Error('must not read'); } };
   for (const [actor, status] of [[null, 401], [{ ...user, role: 'Location Manager' }, 403], [{ ...user, role: 'Administration' }, 403], [{ ...user, organizationId: 'other' }, 403], [{ ...user, role: 'Corporate', organizationId: undefined }, 403]] as const) {
     const res = response(); await financeEndpoint(base, res, actor as SessionUser | null, deps); assert.equal(res.code, status);
   }
@@ -49,7 +49,7 @@ test('denies unsigned, wrong-role, cross-tenant and cross-origin operations befo
   const wrongQuery = response(); await financeEndpoint({ ...base, query: { resource: 'finance', organizationId: 'other' } }, wrongQuery, user, deps); assert.equal(wrongQuery.code, 400);
   const missingReview = response(); await financeEndpoint({ ...base, body: { batch: payload, expected: {} } }, missingReview, user, deps); assert.equal(missingReview.code, 400);
   const invalid = response(); await financeEndpoint({ ...base, body: { batch: { ...payload, records: [sample({ operatingResult: 999 })] }, expected: expected(payload.records) } }, invalid, user, deps); assert.equal(invalid.code, 400);
-  const read = response(); await financeEndpoint({ method: 'GET', query: { resource: 'finance' } }, read, { ...user, role: 'Administration' }, { ...deps, list: async () => [] }); assert.equal(read.code, 200); assert.equal(read.headers['Cache-Control'], 'private, no-store');
+  const read = response(); await financeEndpoint({ method: 'GET', query: { resource: 'finance' } }, read, { ...user, role: 'Administration' }, { ...deps, list: async () => [], listCorporate: async () => [] }); assert.equal(read.code, 200); assert.equal(read.headers['Cache-Control'], 'private, no-store');
   const unavailable = response(); await financeEndpoint(base, unavailable, user, deps); assert.equal(unavailable.code, 503); assert.doesNotMatch(JSON.stringify(unavailable.body), /must not write/);
 });
 test('SQL storage is atomic, tenant-isolated, retry-safe and preserves old versions on correction', async () => {
@@ -78,4 +78,21 @@ test('real endpoint persists a valid batch and acknowledges identical retries on
   const first = response(); await financeEndpoint(request, first, user); assert.equal(first.code, 200); assert.equal(first.body.saved, 1);
   const retry = response(); await financeEndpoint(request, retry, user); assert.equal(retry.code, 200); assert.equal(retry.body.unchanged, 1);
   const edit = response(); await financeEndpoint({ ...request, body: { ...request.body, batch: batch(sample({ month: '2026-09', operatingExpenses: 320, operatingResult: 130 })) } }, edit, user); assert.equal(edit.code, 409);
+});
+test('corporate cost reconciles to its components and stays distinct until existing allocations are known', async () => {
+  const corporate: CorporateFinanceRecord = { month: '2026-08', currency: 'USD', status: 'provisional', totalExpenses: 75, labor: 50, operatingExpenses: 10, occupancy: 15, cogs: 0, otherExpenses: 0, alreadyAllocated: null, sourceLabel: 'User-provided fixture excerpt', notes: ['Corporate allocation pending.'] };
+  const records = financeLocations.map(location => sample({ location }));
+  const payload = parseFinanceImport({ format: 'opsvista-finance-v1', records, corporate: [corporate] });
+  assert.deepEqual(companyFinanceResult(records, corporate), { simpleDifference: 525, reconciledResult: null });
+  assert.deepEqual(companyFinanceResult(records, { ...corporate, alreadyAllocated: 25 }), { simpleDifference: 525, reconciledResult: 550 });
+  assert.equal(companyFinanceResult(records.slice(0, 5), corporate).simpleDifference, null);
+  assert.equal(companyFinanceResult(records, { ...corporate, month: '2026-09' }).simpleDifference, null);
+  for (const change of [{ totalExpenses: 80 }, { alreadyAllocated: 76 }, { alreadyAllocated: -1 }]) assert.throws(() => parseFinanceImport({ ...payload, corporate: [{ ...corporate, ...change }] }));
+  assert.throws(() => parseFinanceImport({ ...payload, corporate: [corporate, corporate] }));
+  const review = Object.fromEntries(financeImportKeys(payload).map(key => [key, null]));
+  assert.equal((await saveFinance('corporate-fixture', user.id, payload, review)).saved, 7);
+  assert.equal((await saveFinance('corporate-fixture', user.id, payload, review)).unchanged, 7);
+  assert.equal((await listFinance('corporate-fixture')).length, 6);
+  assert.equal((await listCorporateFinance('corporate-fixture'))[0].record.totalExpenses, 75);
+  assert.equal((await listCorporateFinance('unrelated')).length, 0);
 });

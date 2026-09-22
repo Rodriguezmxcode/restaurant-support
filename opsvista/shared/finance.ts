@@ -20,9 +20,18 @@ export type FinanceRecord = {
   source: { file: string; sha256: string; references: Record<string, string> };
   bank: { asOf: string; closingBalance: number; reference: string; note: string } | null;
 };
-export type FinanceImport = { format: 'opsvista-finance-v1'; records: FinanceRecord[] };
+export type CorporateFinanceRecord = {
+  month: string; currency: 'USD'; status: 'provisional';
+  totalExpenses: number; labor: number; operatingExpenses: number; occupancy: number; cogs: number; otherExpenses: number;
+  alreadyAllocated: number | null; // Portion of THIS corporate report already in restaurant P&L; null until reconciled.
+  sourceLabel: string; notes: string[];
+};
+export type FinanceImport = { format: 'opsvista-finance-v1'; records: FinanceRecord[]; corporate: CorporateFinanceRecord[] };
 export type SavedFinanceRecord = { record: FinanceRecord; revision: string; savedAt: string };
+export type SavedCorporateFinanceRecord = { record: CorporateFinanceRecord; revision: string; savedAt: string };
 export const financeKey = (record: Pick<FinanceRecord, 'location' | 'month'>) => `${record.location}:${record.month}`;
+export const corporateFinanceKey = (record: Pick<CorporateFinanceRecord, 'month'>) => `corporate:${record.month}`;
+export const financeImportKeys = (batch: FinanceImport) => [...batch.records.map(financeKey), ...batch.corporate.map(corporateFinanceKey)];
 export const toCents = (value: number) => Math.round(value * 100);
 export const financeMargin = (result: number, sales: number) => sales > 0 ? result / sales * 100 : null;
 export function calendarDays(month: string) {
@@ -45,8 +54,22 @@ function amount(value: unknown, signed = false): number {
   return toCents(value) / 100;
 }
 export function parseFinanceImport(value: unknown): FinanceImport {
-  const root = object(value, ['format', 'records']);
-  if (root.format !== 'opsvista-finance-v1' || !Array.isArray(root.records) || !root.records.length || root.records.length > 72) throw new Error('Selecciona un archivo de Finanzas con entre 1 y 72 reportes.');
+  const root = object(value);
+  if (Object.keys(root).some(key => !['format', 'records', 'corporate'].includes(key)) || root.format !== 'opsvista-finance-v1' || !Array.isArray(root.records) || root.records.length > 72) throw new Error('Selecciona un archivo de Finanzas válido.');
+  const rawCorporate = root.corporate ?? [];
+  if (!Array.isArray(rawCorporate) || rawCorporate.length > 12 || (!root.records.length && !rawCorporate.length)) throw new Error('Incluye al menos un reporte y hasta 12 meses corporativos.');
+  const corporateMonths = new Set<string>();
+  const corporate: CorporateFinanceRecord[] = rawCorporate.map(raw => {
+    const row = object(raw, ['month', 'currency', 'status', 'totalExpenses', 'labor', 'operatingExpenses', 'occupancy', 'cogs', 'otherExpenses', 'alreadyAllocated', 'sourceLabel', 'notes']);
+    const month = text(row.month, 7); calendarDays(month);
+    if (row.currency !== 'USD' || row.status !== 'provisional' || corporateMonths.has(month)) throw new Error('Reporte corporativo no válido o mes duplicado.');
+    corporateMonths.add(month);
+    if (!Array.isArray(row.notes) || !row.notes.length || row.notes.length > 20) throw new Error('Incluye las notas del corporativo.');
+    const result: CorporateFinanceRecord = { month, currency: 'USD', status: 'provisional', totalExpenses: amount(row.totalExpenses), labor: amount(row.labor), operatingExpenses: amount(row.operatingExpenses), occupancy: amount(row.occupancy), cogs: amount(row.cogs), otherExpenses: amount(row.otherExpenses), alreadyAllocated: row.alreadyAllocated === null ? null : amount(row.alreadyAllocated), sourceLabel: text(row.sourceLabel), notes: row.notes.map(note => text(note)) };
+    const components = result.labor + result.operatingExpenses + result.occupancy + result.cogs + result.otherExpenses;
+    if (Math.abs(toCents(components) - toCents(result.totalExpenses)) > 2 || (result.alreadyAllocated !== null && result.alreadyAllocated > result.totalExpenses)) throw new Error('El costo corporativo no concilia con su desglose o asignaciones.');
+    return result;
+  });
   const seen = new Set<string>();
   const records = root.records.map(raw => {
     const r = object(raw, ['location', 'month', 'currency', 'status', 'sales', 'cogs', 'labor', 'operatingExpenses', 'operatingResult', 'extraordinary', 'payrollBasis', 'corporateStatus', 'rampIncluded', 'notes', 'source', 'bank']);
@@ -80,7 +103,13 @@ export function parseFinanceImport(value: unknown): FinanceImport {
     seen.add(key);
     return record;
   });
-  return { format: 'opsvista-finance-v1', records: records.sort((a, b) => financeKey(a).localeCompare(financeKey(b))) };
+  return { format: 'opsvista-finance-v1', records: records.sort((a, b) => financeKey(a).localeCompare(financeKey(b))), corporate: corporate.sort((a, b) => a.month.localeCompare(b.month)) };
+}
+export function companyFinanceResult(records: FinanceRecord[], corporate: CorporateFinanceRecord | undefined) {
+  const complete = Boolean(corporate) && records.length === financeLocations.length && new Set(records.map(row => row.location)).size === financeLocations.length && records.every(row => row.month === corporate!.month);
+  const total = summarizeFinance(records).operatingResult;
+  const simpleDifference = complete && total !== null ? (toCents(total) - toCents(corporate!.totalExpenses)) / 100 : null;
+  return { simpleDifference, reconciledResult: simpleDifference !== null && corporate!.alreadyAllocated !== null ? (toCents(simpleDifference) + toCents(corporate!.alreadyAllocated)) / 100 : null };
 }
 export function summarizeFinance(records: FinanceRecord[]) {
   const sum = (key: 'sales' | 'cogs' | 'labor' | 'operatingExpenses' | 'operatingResult') => records.length ? records.reduce((total, row) => total + toCents(row[key]), 0) / 100 : null;

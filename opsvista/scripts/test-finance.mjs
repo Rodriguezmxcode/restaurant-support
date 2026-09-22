@@ -26,7 +26,7 @@ try {
     const render=records=>renderToStaticMarkup(createElement(I18nProvider,null,createElement(FinanceReport,{records})));
     test('Finance renders truthful empty, partial and provisional report states with escaped notes',()=>{
       const empty=render([]);assert.match(empty,/No reports imported yet/);assert.doesNotMatch(empty,/\\$0\\.00/);
-      const html=render([fixture]);assert.match(html,/Partial total/);assert.match(html,/30/);assert.match(html,/Historical bank closing balances/);assert.match(html,/Not disclosed/);assert.match(html,/No report for this period/);assert.match(html,/&lt;script&gt;unsafe/);assert.doesNotMatch(html,/<script>unsafe/);assert.match(html,/\\$100\\.00/);
+      const html=render([fixture]);assert.match(html,/Company result after corporate costs: pending/);assert.match(html,/Sum of reported results/);assert.match(html,/Partial total/);assert.match(html,/30/);assert.match(html,/Historical bank closing balances/);assert.match(html,/Not disclosed/);assert.match(html,/No report for this period/);assert.match(html,/&lt;script&gt;unsafe/);assert.doesNotMatch(html,/<script>unsafe/);assert.match(html,/\\$100\\.00/);
     });`);
   await write('node_modules/postgres/package.json', '{"type":"module","exports":"./index.js"}');
   await write('node_modules/postgres/index.js', `import {PGlite} from '@electric-sql/pglite';
