@@ -1,4 +1,4 @@
-# OpsVista → PV Control: API v1
+# PV Control ↔ OpsVista
 
 Base URL: `https://restaurant-support.vercel.app`
 
@@ -9,8 +9,8 @@ The web address is `https://restaurant-support.vercel.app/pv-control.html`.
 Choose up to 31 days and click **Sincronizar OpsVista**. The web view reads the
 six restaurants and Corporate Office using the existing signed OpsVista session;
 it does not require a separate proxy, server, API key, or Cloudflare account.
-This view is limited to locations and invoices. It does not migrate local PV
-Control records, import the old file's sample data, or enable accounting writes.
+The R365 consultation remains read-only. Separately, the page can receive a
+user-confirmed invoice from the local PV Control file into a persistent inbox.
 
 The updated local `pv-ap-control-3.html` connects from **APIs → Conectar OpsVista**.
 It opens this web view; sign in in the separate OpsVista tab if necessary,
@@ -29,6 +29,47 @@ They do not accept API keys as a substitute for a session. The page stores no
 credentials or invoice data in localStorage. Expired sessions require signing
 in again. Failed or partial downloads preserve the prior complete query;
 snapshot conflicts restart once. Unknown amounts remain unavailable.
+
+## PV Control → OpsVista: invoice inbox
+
+In the updated local file, use **Upload invoice** to enter the location, vendor,
+invoice number, invoice date and positive USD amount. Choose **A · Vendor** for
+the vendor invoice or **B · Receiving** for a receiving record. In **AP queue**,
+select **Send to OpsVista**. Review the preview in the new window and click
+**Confirmar y guardar en OpsVista**. The invoice is not sent until that click.
+
+OpsVista returns a receipt ID after a committed database insert. The local row
+then shows **Received in OpsVista**, and the web view shows the record under
+**Recibidas de PV Control**. The inbox lists the 100 most recently received
+records and its total count. A missing local acknowledgement can be recovered
+by repeating the same submission; it does not create another invoice.
+
+`GET /api/pv-control/submissions` lists the inbox. `POST` on the same route
+accepts one invoice with `client_id` (UUID), `source: "pv-control"`, `location_id`,
+`transaction_date`, `vendor_name`, `number`, positive `amount` with at most two
+decimals, `currency: "USD"`, `lane: "vendor" | "receiving"`, `key_item`, and `notes`.
+Maximum request size is 16 KiB. Both require the authorized Founder session,
+same-origin Fetch Metadata and `X-PV-Source: pv-control`; writes additionally
+require a matching HTTPS Origin and JSON. API keys cannot write to this inbox.
+
+Records are stored by organization with actor ID and receipt time. Stable local
+UUIDs and a vendor/number/location/lane uniqueness constraint prevent duplicates,
+including concurrent retries. Repeating identical content returns the existing
+receipt; changing existing content returns 409 `invoice_conflict`, preserving
+the original. Receiving records and vendor invoices retain their distinct lanes.
+
+Only native PV Control records can use the local Send action. R365 imports,
+example rows and intercompany transfers are excluded. Old native records need
+their invoice date completed in AP queue before sending. This feature sends
+header data and notes; it does not upload image/PDF bytes, post accounting entries,
+approve invoices, execute payments, or feed Price Watch, P&L or debt totals.
+The inbox contains no sample data.
+
+The local file also permanently retires AP examples. Each other module removes
+its tagged examples on its first real write. Known legacy seed fingerprints are
+migrated conservatively; changed/manual/imported records are preserved. Real
+writes in future modules must set `dataOrigin`, register the module in the data
+policy and use `save()`, so examples never return after a module is populated.
 
 ## External server integration
 
@@ -142,8 +183,9 @@ const result = await response.json();
 OpenAPI specification: `/api/v1/openapi.json`.
 No AI model is called by these endpoints.
 
-## Next phase: PV Control → OpsVista
+## Next phase: accounting source
 
-That direction requires a separately agreed PV Control API and stable mappings for
-entities, GL accounts, invoices, payment applications, credits, voids and documents.
-This API does not accept accounting writes and does not automatically cut over R365.
+The inbox establishes receipt of PV Control invoices. Replacing R365 as an
+accounting source still requires item lines, GL mappings, payment applications,
+credits, voids, documents and reconciled balances. Receipt does not automatically
+cut over R365 or make PV Control's local approval/payment fields authoritative.
