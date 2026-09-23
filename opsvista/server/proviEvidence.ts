@@ -102,8 +102,8 @@ export async function getProviEvidence(organizationId: string): Promise<StoredPr
   const byLocation = invoicesByLocation(sources), used = new Set<string>(), result: StoredProviEvidence[] = [];
   for (const row of rows) {
     const draft = row.payload as ProviEvidenceDraft;
-    const match = reconcileProviEvidence(draft, (byLocation.get(draft.location) || []).filter(invoice => !used.has(invoice.id)));
-    if (match.status === 'verified' && match.invoice) used.add(match.invoice.id);
+    const match = reconcileProviEvidence(draft, (byLocation.get(draft.location) || []).filter(invoice => !used.has(`${draft.location}:${invoice.id}`)));
+    if (match.status === 'verified' && match.invoice) used.add(`${draft.location}:${match.invoice.id}`);
     const sourceFiles = (Array.isArray(row.source_files) ? row.source_files : []).map((file: any) => ({ name: String(file.name || ''), mime: String(file.mime || '') }));
     result.push({ ...draft, id: String(row.evidence_id), documentId: String(row.document_id), savedAt: new Date(row.created_at).toISOString(), sourceFiles, match });
   }
@@ -118,21 +118,19 @@ export async function applyProviEvidenceToSources(organizationId: string, start:
     purchases: { ...source.purchases, invoices: [...source.purchases.invoices] },
     memory: source.memory ? { ...source.memory, sales: { ...source.memory.sales }, purchases: { ...source.memory.purchases } } : undefined,
   }));
-  const matchedInvoiceIds = new Set(evidence.filter(row => row.match.status === 'verified' && row.match.invoice).map(row => row.match.invoice!.id));
-  for (const source of adjusted) source.purchases.invoices = source.purchases.invoices.filter(invoice => !matchedInvoiceIds.has(invoice.id));
+  const matchedInvoiceIds = new Set(evidence.filter(row => row.match.status === 'verified' && row.match.invoice).map(row => `${row.location}:${row.match.invoice!.id}`));
+  for (const source of adjusted) source.purchases.invoices = source.purchases.invoices.filter(invoice => !matchedInvoiceIds.has(`${source.location}:${invoice.id}`));
 
   for (const row of evidence.filter(row => row.orderDate >= start && row.orderDate <= end)) {
     const target = adjusted.find(source => source.location === row.location && row.orderDate >= source.start && row.orderDate <= source.end);
     if (!target) continue;
     if (row.match.status === 'verified' && row.match.invoice?.amount !== null && row.match.invoice) {
       const invoice = row.match.invoice;
-      target.purchases.error = undefined;
       target.purchases.invoices.push({
         id: `provi-verified:${row.id}`, number: invoice.number || row.orderNumber || undefined, date: row.orderDate,
         vendor: invoice.vendor || row.vendor, approved: invoice.approved, amount: Math.abs(invoice.amount || 0), kind: 'invoice', suggested: true,
       });
     } else if (row.match.status === 'provisional') {
-      target.purchases.error = undefined;
       target.purchases.invoices.push({
         id: `provi-provisional:${row.id}`, number: row.orderNumber || undefined, date: row.orderDate,
         vendor: row.vendor, approved: false, amount: money(row.orderedAmount), kind: 'invoice', suggested: true,

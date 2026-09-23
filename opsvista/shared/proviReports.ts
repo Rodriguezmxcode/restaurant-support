@@ -13,6 +13,22 @@ export type ProviComparison = {
   invoices: BeverageInvoice[]; note: string;
 };
 export type StoredProviReport = ProviReport & { id: string; savedAt: string; comparison: ProviComparison };
+export type ProviBonusReference = {
+  start: string; end: string; spend: number | null; orders: number; savedAt: string;
+  periodMatches: boolean; reconciliationPending: boolean; covered: number; expected: number;
+  r365Net: number | null;
+};
+
+// One most-recent overlapping report per location; never add snapshots together
+// or apportion their aggregate spend into a different scoring period.
+export function proviBonusReference(reports: StoredProviReport[], location: string, start: string, end: string): ProviBonusReference | undefined {
+  const report = reports.filter(row => row.location === location && row.start <= end && row.end >= start)
+    .sort((a, b) => b.end.localeCompare(a.end) || b.savedAt.localeCompare(a.savedAt) || b.start.localeCompare(a.start))[0];
+  if (!report) return undefined;
+  return { start: report.start, end: report.end, spend: report.spend, orders: report.orders, savedAt: report.savedAt,
+    periodMatches: report.start === start && report.end === end, reconciliationPending: report.comparison.pending,
+    covered: report.comparison.covered, expected: report.comparison.expected, r365Net: report.comparison.net };
+}
 export type ProviResponse = { reports: StoredProviReport[]; canImport: boolean; error?: string };
 export const proviReportKey = (report: Pick<ProviReport, 'location' | 'start' | 'end'>) => `${report.location}:${report.start}:${report.end}`;
 const object = (value: unknown): Record<string, unknown> => {

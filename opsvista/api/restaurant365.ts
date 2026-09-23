@@ -50,7 +50,7 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
         const access=authorize(user,'bonus:read');
         if(!access.ok)return res.status(access.status).json({error:access.error,requestId});
         const start=query(req,'start'),end=query(req,'end');
-        if(!validBeverageRange(start,end,31))return res.status(400).json({error:'Selecciona un período válido de hasta 31 días.',requestId});
+        if(!validBeverageRange(start,end,56))return res.status(400).json({error:'Selecciona un período válido de hasta ocho semanas.',requestId});
         const score=await getBeverageScore(organizationId,start,end);
         return res.status(200).json(visibleBeverageScore(score,user));
       }

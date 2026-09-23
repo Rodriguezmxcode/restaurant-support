@@ -4,11 +4,14 @@ import { readSavedSources, registerSource, sourceKey, sourceMemory } from './sou
 import { authorize, serverLocationAllowed } from './authorization.js';
 import type { SessionUser } from './authSession.js';
 import { applyProviEvidenceToSources } from './proviEvidence.js';
+import { getProviReports } from './proviReports.js';
+import { proviBonusReference } from '../shared/proviReports.js';
 
 export function visibleBeverageScore(score: BeverageScoreResponse, user: SessionUser): BeverageScoreResponse {
   const canSeeAmounts = authorize(user, 'restaurant365:read').ok;
   return { ...score, rows: score.rows.filter(row => serverLocationAllowed(user, row.location)).map(row =>
-    canSeeAmounts ? row : { ...row, sales: null, purchases: null, pending: 0 }) };
+    canSeeAmounts ? row : { ...row, sales: null, purchases: null, pending: 0,
+      provi: row.provi ? { ...row.provi, spend: null, r365Net: null } : undefined }) };
 }
 
 // The scorecard reads persisted snapshots only. Source workers fetch new data.
@@ -33,8 +36,11 @@ export async function getBeverageScore(organizationId: string, start: string, en
       memory: { sales: sales ? sourceMemory(sales) : { stored: false, pending: true }, purchases: purchases ? sourceMemory(purchases) : { stored: false, pending: true } },
     });
   }
-  const effectiveSources = await applyProviEvidenceToSources(organizationId, start, end, sources);
+  const [effectiveSources, reports] = await Promise.all([
+    applyProviEvidenceToSources(organizationId, start, end, sources), getProviReports(organizationId),
+  ]);
   const score = scoreBeverages(beverageLocations.map(location => compareBeverages(location, effectiveSources, chunks.length)));
+  score.rows = score.rows.map(row => ({ ...row, provi: proviBonusReference(reports, row.location, start, end) }));
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const periodOpen = end >= today;
   return { start, end, ...score, periodOpen, provisional: score.provisional || periodOpen,

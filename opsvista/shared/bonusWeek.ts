@@ -1,5 +1,9 @@
 import { addDays } from './beverageMetrics.js';
 
+// Inclusive 56-day window ending with the bonus period. All other metrics
+// continue to use the operator's selected week/day/month.
+export const beverageBonusRange = (end: string) => ({ start: addDays(end, -55), end });
+
 export function easternDay(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }

@@ -1,10 +1,12 @@
 import { beverageLocations, money, rankBeverages, type BeverageComparison } from './beverageMetrics.js';
+import type { ProviBonusReference } from './proviReports.js';
 
 export type BeverageScoreRow = Pick<BeverageComparison, 'location' | 'sales' | 'purchases' | 'pending' | 'issues'> & {
   purchasePct: number | null;
   rank: number | null;
   points: number | null;
   comparable: boolean;
+  provi?: ProviBonusReference;
 };
 export type BeverageScoreResponse = {
   start: string; end: string; rows: BeverageScoreRow[];
