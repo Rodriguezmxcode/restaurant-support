@@ -19,7 +19,7 @@ type Props = { allowedLocations: string[] };
 const empty: TeamMember[] = [];
 
 export default function TeamView({ allowedLocations }: Props) {
-  const [members] = useState<TeamMember[]>(empty);
+  const [members,setMembers] = useState<TeamMember[]>(empty);
   const [query,setQuery]=useState('');
   const [location,setLocation]=useState('All');
   const [status,setStatus]=useState('Active');
@@ -38,6 +38,7 @@ export default function TeamView({ allowedLocations }: Props) {
       const response=await fetch('/api/team/toast-sync?mode=preview',{credentials:'include'});
       const body=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(body.error||'Toast roster sync is not configured yet.');
+      if(Array.isArray(body.employees))setMembers(body.employees.map((employee:any)=>({...employee,position:employee.position||employee.positions?.join(' / ')||'',additionalLocations:(employee.locations||[]).slice(1)})));
       setSyncMessage(`Review ready: ${body.newEmployees??0} new · ${body.updated??0} updated · ${body.deactivated??0} inactive · ${body.missingInformation??0} missing info`);
     }catch(error){setSyncMessage(error instanceof Error?error.message:'Toast roster sync is not configured yet.');}
     finally{setSyncing(false);}
