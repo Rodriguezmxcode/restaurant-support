@@ -10,6 +10,7 @@
     { "source": "/api/payments", "destination": "/api/workflows?resource=payments" },
     { "source": "/api/tasks/weekly", "destination": "/api/workflows?resource=tasks" },
     { "source": "/api/google-business/reviews", "destination": "/api/workflows?resource=google_reviews" },
-    { "source": "/api/local-intelligence", "destination": "/api/workflows?resource=local_intelligence" }
+    { "source": "/api/local-intelligence", "destination": "/api/workflows?resource=local_intelligence" },
+    { "source": "/api/team/toast-sync", "destination": "/api/operations/performance?team_roster=true" }
   ]
 }
