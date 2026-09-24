@@ -2,7 +2,7 @@ export type OpsVistaRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Onlin
 
 export type OpsVistaModule =
   | 'Resumen' | 'Locaciones' | 'Ventas' | 'Google Reviews' | 'Local Intelligence' | 'Finanzas' | 'Gastos'
-  | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';
+  | 'Team' | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';
 
 export type LocationAccessGrant = {
   location: string;
@@ -45,7 +45,7 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
-const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Finanzas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
+const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Finanzas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
@@ -67,7 +67,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   'Location Manager': {
-    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365'],
+    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
@@ -79,7 +79,7 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   HR: {
-    modules: ['Resumen','Locaciones','Horarios','Action Center','Proyectos','Configuración'],
+    modules: ['Resumen','Locaciones','Team','Horarios','Action Center','Proyectos','Configuración'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
