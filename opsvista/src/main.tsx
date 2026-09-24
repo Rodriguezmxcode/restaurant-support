@@ -6,6 +6,7 @@ import AuthGate from './AuthGate';
 import { I18nProvider } from './i18n';
 import MarketingSite from './MarketingSite';
 import './styles.css';
+import './team.css';
 import './maxDataTheme.css';
 import './rampComplianceOverdue.css';
 import './priceWatchBootstrap';
