@@ -35,7 +35,7 @@ export default function TeamView({ allowedLocations }: Props) {
   async function reviewToastChanges(){
     setSyncing(true);setSyncMessage('');
     try{
-      const response=await fetch('/api/team/toast-sync?mode=preview',{credentials:'include'});
+      const response=await fetch('/api/operations/performance?team_roster=true&start=2026-09-24&end=2026-09-24&include_tasks=false',{credentials:'include'});
       const body=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(body.error||'Toast roster sync is not configured yet.');
       if(Array.isArray(body.employees))setMembers(body.employees.map((employee:any)=>({...employee,position:employee.position||employee.positions?.join(' / ')||'',additionalLocations:(employee.locations||[]).slice(1)})));
