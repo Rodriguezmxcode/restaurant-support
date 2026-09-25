@@ -8,7 +8,7 @@ type ToastOrder={businessDate?:number;voided?:boolean;deleted?:boolean;excessFoo
 type ExternalReference={guid?:string;externalId?:string};
 type WageOverride={wage?:number;jobReference?:ExternalReference};
 type TimeEntry={guid?:string;deleted?:boolean;regularHours?:number;overtimeHours?:number;hourlyWage?:number|null;employeeReference?:ExternalReference;jobReference?:ExternalReference};
-type ToastEmployee={guid?:string;externalEmployeeId?:string;firstName?:string;chosenName?:string;lastName?:string;email?:string;deleted?:boolean;wageOverrides?:WageOverride[]};
+type ToastEmployee={guid?:string;externalEmployeeId?:string;firstName?:string;chosenName?:string;lastName?:string;email?:string;phoneNumber?:string;createdDate?:string;deleted?:boolean;wageOverrides?:WageOverride[]};
 type AccessibleRestaurant={restaurantGuid?:string;restaurantName?:string;locationName?:string};
 
 export type PerformanceLocation={
@@ -247,4 +247,12 @@ export async function getToastPerformance(start:string,end:string,requestedLocat
     const splh=laborTotals.hourlyHours?round(sales.netSales/laborTotals.hourlyHours):null;
     return {location,...sales,...laborTotals,discountPct,bonusDiscountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)};
   }));
+}
+
+
+export async function getToastEmployeeRoster(requestedLocations?:string[]){
+  const entries=await resolvedToastLocationEntries(requestedLocations);const jobsByRestaurant=new Map<string,Map<string,string>>();const merged=new Map<string,any>();
+  for(const [location,guid] of entries){let employees:ToastEmployee[];try{employees=await getEmployees(guid);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:'Toast employee request failed'}`);}let jobs:any[]=[];try{jobs=await standardToastRequest('/labor/v1/jobs',guid) as any[];}catch{}const jobsMap=new Map(jobs.map(j=>[String(j.guid||''),String(j.title||j.name||'')]));jobsByRestaurant.set(guid,jobsMap);
+    for(const employee of employees){const employeeGuid=String(employee.guid||'').trim();if(!employeeGuid)continue;const positions=Array.from(new Set((employee.wageOverrides||[]).map(w=>jobsMap.get(String(w.jobReference?.guid||''))).filter(Boolean))) as string[];const existing=merged.get(employeeGuid);if(existing){if(existing.location!==location&&!existing.additionalLocations.includes(location))existing.additionalLocations.push(location);existing.position=Array.from(new Set([...(existing.position?existing.position.split(' / '):[]),...positions])).filter(Boolean).join(' / ');if(!employee.deleted)existing.status='Active';continue;}merged.set(employeeGuid,{opsvistaEmployeeId:`OV-${employeeGuid.slice(0,8).toUpperCase()}`,toastEmployeeGuid:employeeGuid,externalEmployeeId:String(employee.externalEmployeeId||''),firstName:String(employee.chosenName||employee.firstName||''),lastName:String(employee.lastName||''),email:String(employee.email||''),phone:String(employee.phoneNumber||''),hireDate:String(employee.createdDate||'').slice(0,10),position:positions.join(' / '),location,additionalLocations:[],status:employee.deleted?'Inactive':'Active'});}}
+  return Array.from(merged.values());
 }
