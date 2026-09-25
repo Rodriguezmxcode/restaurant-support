@@ -4,6 +4,7 @@ import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { intradaySalary, verifiedHoursFallback } from '../../server/intradaySalary.js';
 import { getGoogleOperatingSchedules } from '../../server/googleBusinessProfile.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
+import { listTeamEmployees, syncTeamFromToast } from '../../server/teamStore.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
@@ -29,7 +30,10 @@ export default async function handler(req:Req,res:Res){
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
   if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
-  const start=asString(req.query?.start),end=asString(req.query?.end);
+  if(asString(req.query?.team_roster)==='true'){
+    try{const organizationId=user.organizationId||'org-puerto-vallarta';const sync=asString(req.query?.sync)==='true';const employees=sync?await syncTeamFromToast(organizationId,undefined):await listTeamEmployees(organizationId);return res.status(200).json({source:sync?'Toast Labor API → OpsVista Team':'OpsVista Team database',employees,count:employees.length});}catch(error){return res.status(502).json({error:error instanceof Error?error.message:'Team roster unavailable'});}
+  }
+    const start=asString(req.query?.start),end=asString(req.query?.end);
   const defaultSchedule=validDate(end)?operatingWeek(end):{start,end};
   const scheduleStart=asString(req.query?.schedule_start)||defaultSchedule.start,scheduleEnd=asString(req.query?.schedule_end)||defaultSchedule.end,overtimeEnd=asString(req.query?.overtime_end)||end;
   const requestedNames=locationList(asString(req.query?.locations)||asString(req.query?.location));
