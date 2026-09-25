@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export type TeamMember = {
   opsvistaEmployeeId: string;
@@ -20,6 +20,7 @@ const empty: TeamMember[] = [];
 
 export default function TeamView({ allowedLocations }: Props) {
   const [members,setMembers] = useState<TeamMember[]>(empty);
+  useEffect(()=>{let cancelled=false;fetch('/api/operations/performance?team_roster=true',{credentials:'include',cache:'no-store'}).then(r=>r.json()).then(body=>{if(!cancelled&&Array.isArray(body.employees))setMembers(body.employees)}).catch(()=>{});return()=>{cancelled=true};},[]);
   const [query,setQuery]=useState('');
   const [location,setLocation]=useState('All');
   const [status,setStatus]=useState('Active');
@@ -35,11 +36,11 @@ export default function TeamView({ allowedLocations }: Props) {
   async function reviewToastChanges(){
     setSyncing(true);setSyncMessage('');
     try{
-      const response=await fetch('/api/operations/performance?team_roster=true&start=2026-09-24&end=2026-09-24&include_tasks=false',{credentials:'include'});
+      const response=await fetch('/api/operations/performance?team_roster=true&sync=true',{credentials:'include'});
       const body=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(body.error||'Toast roster sync is not configured yet.');
-      if(Array.isArray(body.locations)){const map=new Map<string,any>();for(const loc of body.locations){for(const employee of loc.employeeLabor||[]){const guid=employee.employeeGuid;if(!guid)continue;const existing=map.get(guid);if(existing){if(!existing.additionalLocations.includes(loc.location)&&existing.location!==loc.location)existing.additionalLocations.push(loc.location);continue;}const parts=String(employee.employeeName||'').trim().split(/\\s+/);map.set(guid,{opsvistaEmployeeId:`OV-${guid.slice(0,8).toUpperCase()}`,toastEmployeeGuid:guid,firstName:parts.slice(0,-1).join(' ')||parts[0]||'',lastName:parts.length>1?parts.at(-1):'',position:'',phone:'',email:employee.email||'',hireDate:'',location:loc.location,additionalLocations:[],status:'Active'});} }setMembers(Array.from(map.values()));}
-      setSyncMessage(`Toast roster loaded: ${Array.isArray(body.locations)?body.locations.reduce((n:any,l:any)=>n+(l.employeeLabor?.length||0),0):0} employee-location records. Missing profile fields stay blank until Toast exposes them.`);
+      if(Array.isArray(body.employees))setMembers(body.employees);
+      setSyncMessage(`Toast sync complete: ${body.count??body.employees?.length??0} employees saved in OpsVista Team.`);
     }catch(error){setSyncMessage(error instanceof Error?error.message:'Toast roster sync is not configured yet.');}
     finally{setSyncing(false);}
   }
