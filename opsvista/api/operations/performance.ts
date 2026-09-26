@@ -4,10 +4,10 @@ import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { intradaySalary, verifiedHoursFallback } from '../../server/intradaySalary.js';
 import { getGoogleOperatingSchedules } from '../../server/googleBusinessProfile.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
-import { listTeamEmployees, syncTeamFromToast } from '../../server/teamStore.js';
+import { listTeamEmployees, syncTeamFromToast, updateTeamEmployee, teamEmployeeAudit } from '../../server/teamStore.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
-type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string}};
+type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string};body?:Record<string,unknown>};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 
 function asString(value:string|string[]|undefined){return Array.isArray(value)?value[0]:value||'';}
@@ -31,7 +31,11 @@ export default async function handler(req:Req,res:Res){
   if(!user)return res.status(401).json({error:'Authentication required'});
   if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
   if(asString(req.query?.team_roster)==='true'){
-    try{const organizationId=user.organizationId||'org-puerto-vallarta';const sync=asString(req.query?.sync)==='true';const employees=sync?await syncTeamFromToast(organizationId,undefined):await listTeamEmployees(organizationId);return res.status(200).json({source:sync?'Toast Labor API → OpsVista Team':'OpsVista Team database',employees,count:employees.length});}catch(error){return res.status(502).json({error:error instanceof Error?error.message:'Team roster unavailable'});}
+    try{const organizationId=user.organizationId||'org-puerto-vallarta';const guid=asString(req.query?.employee_guid);
+      if(req.method==='PUT'){if(!['Founder','Corporate','HR'].includes(user.role))return res.status(403).json({error:'Employee editing requires Corporate or HR access'});if(!guid)return res.status(400).json({error:'Employee GUID required'});const employee=await updateTeamEmployee(organizationId,guid,(req.body||{}) as any,{id:user.id,name:user.name});return res.status(200).json({employee});}
+      if(asString(req.query?.audit)==='true'){if(!guid)return res.status(400).json({error:'Employee GUID required'});return res.status(200).json({audit:await teamEmployeeAudit(organizationId,guid)});}
+      const sync=asString(req.query?.sync)==='true';const employees=sync?await syncTeamFromToast(organizationId,undefined):await listTeamEmployees(organizationId);return res.status(200).json({source:sync?'Toast Labor API → OpsVista Team':'OpsVista Team database',employees,count:employees.length});
+    }catch(error){return res.status(502).json({error:error instanceof Error?error.message:'Team roster unavailable'});}
   }
     const start=asString(req.query?.start),end=asString(req.query?.end);
   const defaultSchedule=validDate(end)?operatingWeek(end):{start,end};

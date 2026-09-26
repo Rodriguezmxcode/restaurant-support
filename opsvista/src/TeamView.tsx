@@ -1,75 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-
-export type TeamMember = {
-  opsvistaEmployeeId: string;
-  toastEmployeeGuid: string;
-  firstName: string;
-  lastName: string;
-  position: string;
-  phone?: string;
-  email?: string;
-  hireDate?: string;
-  location: string;
-  additionalLocations?: string[];
-  status: 'Active' | 'Inactive';
-};
-
-type Props = { allowedLocations: string[] };
-
-const empty: TeamMember[] = [];
-
-export default function TeamView({ allowedLocations }: Props) {
-  const [members,setMembers] = useState<TeamMember[]>(empty);
-  useEffect(()=>{let cancelled=false;fetch('/api/operations/performance?team_roster=true',{credentials:'include',cache:'no-store'}).then(r=>r.json()).then(body=>{if(!cancelled&&Array.isArray(body.employees))setMembers(body.employees)}).catch(()=>{});return()=>{cancelled=true};},[]);
-  const [query,setQuery]=useState('');
-  const [location,setLocation]=useState('All');
-  const [status,setStatus]=useState('Active');
-  const [syncing,setSyncing]=useState(false);
-  const [syncMessage,setSyncMessage]=useState('');
-
-  const visible=useMemo(()=>members.filter(member=>{
-    const q=query.trim().toLowerCase();
-    const matchesQuery=!q||[member.firstName,member.lastName,member.position,member.email,member.phone,member.toastEmployeeGuid].some(value=>value?.toLowerCase().includes(q));
-    return matchesQuery&&(location==='All'||member.location===location)&&(status==='All'||member.status===status);
-  }),[members,query,location,status]);
-
-  async function reviewToastChanges(){
-    setSyncing(true);setSyncMessage('');
-    try{
-      const response=await fetch('/api/operations/performance?team_roster=true&sync=true',{credentials:'include'});
-      const body=await response.json().catch(()=>({}));
-      if(!response.ok) throw new Error(body.error||'Toast roster sync is not configured yet.');
-      if(Array.isArray(body.employees))setMembers(body.employees);
-      setSyncMessage(`Toast sync complete: ${body.count??body.employees?.length??0} employees saved in OpsVista Team.`);
-    }catch(error){setSyncMessage(error instanceof Error?error.message:'Toast roster sync is not configured yet.');}
-    finally{setSyncing(false);}
-  }
-
-  return <div className="team-view">
-    <section className="team-summary">
-      <div><span>Total Employees</span><strong>{members.length}</strong></div>
-      <div><span>Active</span><strong>{members.filter(x=>x.status==='Active').length}</strong></div>
-      <div><span>New Hires</span><strong>—</strong></div>
-      <div><span>Missing Information</span><strong>{members.filter(x=>!x.email||!x.phone||!x.hireDate||!x.position).length}</strong></div>
-      <div><span>Inactive</span><strong>{members.filter(x=>x.status==='Inactive').length}</strong></div>
-    </section>
-
-    <section className="panel team-panel">
-      <div className="panel-header">
-        <div><h2>Employee Directory</h2><p>Toast is the official employee identity source. OpsVista keeps its own permanent internal ID for operational history.</p></div>
-        <button className="team-sync" onClick={reviewToastChanges} disabled={syncing}>{syncing?'Checking Toast…':'↻ Review Toast Changes'}</button>
-      </div>
-      {syncMessage&&<div className="team-sync-message">{syncMessage}</div>}
-      <div className="team-filters">
-        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search employee, position, email or Toast ID…" />
-        <select value={location} onChange={e=>setLocation(e.target.value)}><option>All</option>{allowedLocations.map(x=><option key={x}>{x}</option>)}</select>
-        <select value={status} onChange={e=>setStatus(e.target.value)}><option>All</option><option>Active</option><option>Inactive</option></select>
-      </div>
-      <div className="team-table-wrap">
-        <table className="team-table"><thead><tr><th>Employee</th><th>Position</th><th>Location</th><th>Phone</th><th>Email</th><th>Hire Date</th><th>Status</th><th>Toast ID</th></tr></thead>
-        <tbody>{visible.map(member=><tr key={member.opsvistaEmployeeId}><td><strong>{member.firstName} {member.lastName}</strong><small>{member.opsvistaEmployeeId}</small></td><td>{member.position}</td><td>{member.location}</td><td>{member.phone||'—'}</td><td>{member.email||'—'}</td><td>{member.hireDate||'—'}</td><td><span className={`team-status ${member.status.toLowerCase()}`}>{member.status}</span></td><td><code>{member.toastEmployeeGuid}</code></td></tr>)}
-        {!visible.length&&<tr><td colSpan={8} className="team-empty"><strong>No employee records loaded yet.</strong><span>Use “Review Toast Changes” once the Toast roster endpoint is connected. OpsVista will not create sample employees.</span></td></tr>}</tbody></table>
-      </div>
-    </section>
-  </div>;
+import { useEffect,useMemo,useState } from 'react';
+export type TeamMember={opsvistaEmployeeId:string;toastEmployeeGuid:string;externalEmployeeId?:string;firstName:string;lastName:string;position:string;phone?:string;email?:string;hireDate?:string;location:string;additionalLocations?:string[];status:'Active'|'Inactive';fieldSources?:Record<string,'Toast'|'OpsVista'|'Missing'>};
+const fields:[keyof TeamMember,string][]=[['firstName','First name'],['lastName','Last name'],['position','Position'],['phone','Phone'],['email','Email'],['hireDate','Hire date'],['location','Primary location'],['status','Status']];
+export default function TeamView({allowedLocations}:{allowedLocations:string[]}){
+ const [members,setMembers]=useState<TeamMember[]>([]),[query,setQuery]=useState(''),[location,setLocation]=useState('All'),[status,setStatus]=useState('Active'),[selected,setSelected]=useState<TeamMember|null>(null),[draft,setDraft]=useState<TeamMember|null>(null),[audit,setAudit]=useState<any[]>([]),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+ const load=()=>fetch('/api/operations/performance?team_roster=true',{credentials:'include',cache:'no-store'}).then(r=>r.json()).then(b=>Array.isArray(b.employees)&&setMembers(b.employees));
+ useEffect(()=>{load().catch(()=>{})},[]);
+ const visible=useMemo(()=>members.filter(m=>{const q=query.toLowerCase();return(!q||[m.firstName,m.lastName,m.position,m.email,m.phone,m.toastEmployeeGuid].some(v=>String(v||'').toLowerCase().includes(q)))&&(location==='All'||m.location===location||m.additionalLocations?.includes(location))&&(status==='All'||m.status===status)}),[members,query,location,status]);
+ async function sync(){setBusy(true);setMessage('');try{const r=await fetch('/api/operations/performance?team_roster=true&sync=true',{credentials:'include',cache:'no-store'}),b=await r.json();if(!r.ok)throw new Error(b.error);setMembers(b.employees||[]);setMessage(`Toast sync complete: ${b.count??0} employees. OpsVista edits were protected.`)}catch(e){setMessage(e instanceof Error?e.message:'Sync failed')}finally{setBusy(false)}}
+ async function open(m:TeamMember){setSelected(m);setDraft({...m,additionalLocations:[...(m.additionalLocations||[])]});const r=await fetch(`/api/operations/performance?team_roster=true&audit=true&employee_guid=${encodeURIComponent(m.toastEmployeeGuid)}`,{credentials:'include'});const b=await r.json();setAudit(b.audit||[])}
+ async function save(){if(!draft)return;setBusy(true);try{const patch:any={};for(const [k] of fields)if(draft[k]!==selected?.[k])patch[k]=draft[k];if(JSON.stringify(draft.additionalLocations)!==JSON.stringify(selected?.additionalLocations))patch.additionalLocations=draft.additionalLocations;const r=await fetch(`/api/operations/performance?team_roster=true&employee_guid=${encodeURIComponent(draft.toastEmployeeGuid)}`,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}),b=await r.json();if(!r.ok)throw new Error(b.error);setSelected(b.employee);setDraft(b.employee);await load();setMessage('Employee saved. Manual fields are protected from Toast sync.');await open(b.employee)}catch(e){setMessage(e instanceof Error?e.message:'Save failed')}finally{setBusy(false)}}
+ return <div className="team-view"><section className="team-summary"><div><span>Total Employees</span><strong>{members.length}</strong></div><div><span>Active</span><strong>{members.filter(x=>x.status==='Active').length}</strong></div><div><span>Multi-location</span><strong>{members.filter(x=>x.additionalLocations?.length).length}</strong></div><div><span>Missing Information</span><strong>{members.filter(x=>!x.email||!x.phone||!x.hireDate||!x.position).length}</strong></div><div><span>Inactive</span><strong>{members.filter(x=>x.status==='Inactive').length}</strong></div></section>
+ <section className="panel team-panel"><div className="panel-header"><div><h2>Employee Directory</h2><p>OpsVista employee master record. Toast stays linked by GUID; manual edits are protected.</p></div><button className="team-sync" onClick={sync} disabled={busy}>{busy?'Working…':'↻ Sync with Toast'}</button></div>{message&&<div className="team-sync-message">{message}</div>}<div className="team-filters"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search employee, position, email or Toast ID…"/><select value={location} onChange={e=>setLocation(e.target.value)}><option>All</option>{allowedLocations.map(x=><option key={x}>{x}</option>)}</select><select value={status} onChange={e=>setStatus(e.target.value)}><option>All</option><option>Active</option><option>Inactive</option></select></div><div className="team-table-wrap"><table className="team-table"><thead><tr><th>Employee</th><th>Position</th><th>Location</th><th>Phone</th><th>Email</th><th>Hire Date</th><th>Status</th></tr></thead><tbody>{visible.map(m=><tr key={m.toastEmployeeGuid} onClick={()=>open(m)} style={{cursor:'pointer'}}><td><strong>{m.firstName} {m.lastName}</strong><small>{m.opsvistaEmployeeId}</small></td><td>{m.position||'—'}</td><td>{m.location}{m.additionalLocations?.length?<small>+ {m.additionalLocations.join(', ')}</small>:null}</td><td>{m.phone||'—'}</td><td>{m.email||'—'}</td><td>{m.hireDate||'—'}</td><td><span className={`team-status ${m.status.toLowerCase()}`}>{m.status}</span></td></tr>)}</tbody></table></div></section>
+ {draft&&<section className="panel team-profile"><div className="panel-header"><div><h2>{draft.firstName} {draft.lastName}</h2><p>Employee Profile · Toast GUID is locked</p></div><button className="team-sync" onClick={save} disabled={busy}>Save Changes</button></div><div className="team-profile-grid"><label>Toast Employee GUID<input value={draft.toastEmployeeGuid} disabled/><small>Toast · Locked</small></label>{fields.map(([k,label])=><label key={String(k)}>{label}{k==='status'?<select value={String(draft[k]||'')} onChange={e=>setDraft({...draft,[k]:e.target.value} as TeamMember)}><option>Active</option><option>Inactive</option></select>:<input type={k==='hireDate'?'date':'text'} value={String(draft[k]||'')} onChange={e=>setDraft({...draft,[k]:e.target.value} as TeamMember)}/>}<small>{draft.fieldSources?.[String(k)]||'Missing'}</small></label>)}</div><h3>Activity History</h3><div className="team-audit">{audit.length?audit.map((a,i)=><div key={i}><strong>{a.fieldName}</strong> · {a.changedByName}<small>{new Date(a.changedAt).toLocaleString()}</small></div>):<p>No manual changes yet.</p>}</div></section>}</div>
 }
