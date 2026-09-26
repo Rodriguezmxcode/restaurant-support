@@ -4,7 +4,7 @@ import { allocateSalaryLabor } from '../../server/salaryLabor.js';
 import { intradaySalary, verifiedHoursFallback } from '../../server/intradaySalary.js';
 import { getGoogleOperatingSchedules } from '../../server/googleBusinessProfile.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
-import { listTeamEmployees, syncTeamFromToast, updateTeamEmployee, teamEmployeeAudit } from '../../server/teamStore.js';
+import { listTeamEmployees, syncTeamFromToast, updateTeamEmployee, teamEmployeeAudit, teamWorkforceMetrics } from '../../server/teamStore.js';
 import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string};body?:Record<string,unknown>};
@@ -34,7 +34,7 @@ export default async function handler(req:Req,res:Res){
     try{const organizationId=user.organizationId||'org-puerto-vallarta';const guid=asString(req.query?.employee_guid);
       if(req.method==='PUT'){if(!['Founder','Corporate','HR'].includes(user.role))return res.status(403).json({error:'Employee editing requires Corporate or HR access'});if(!guid)return res.status(400).json({error:'Employee GUID required'});const employee=await updateTeamEmployee(organizationId,guid,(req.body||{}) as any,{id:user.id,name:user.name});return res.status(200).json({employee});}
       if(asString(req.query?.audit)==='true'){if(!guid)return res.status(400).json({error:'Employee GUID required'});return res.status(200).json({audit:await teamEmployeeAudit(organizationId,guid)});}
-      const sync=asString(req.query?.sync)==='true';const employees=sync?await syncTeamFromToast(organizationId,undefined):await listTeamEmployees(organizationId);return res.status(200).json({source:sync?'Toast Labor API → OpsVista Team':'OpsVista Team database',employees,count:employees.length});
+      const sync=asString(req.query?.sync)==='true';const employees=sync?await syncTeamFromToast(organizationId,undefined):await listTeamEmployees(organizationId);const days=Math.max(1,Math.min(3650,Number(asString(req.query?.metrics_days)||90)||90));const metrics=await teamWorkforceMetrics(organizationId,days);return res.status(200).json({source:sync?'Toast Labor API → OpsVista Team':'OpsVista Team database',employees,count:employees.length,metrics});
     }catch(error){return res.status(502).json({error:error instanceof Error?error.message:'Team roster unavailable'});}
   }
     const start=asString(req.query?.start),end=asString(req.query?.end);
