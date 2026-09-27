@@ -29,7 +29,7 @@
 .app-shell[data-design="fresh"][data-user-role="HR"] { --ov-role: #7354a8; --ov-role-light: #e0cffc; }
 .app-shell[data-design="fresh"][data-user-role="Online Reputation Manager"] { --ov-role: #2769a5; --ov-role-light: #bbddff; }
 .app-shell[data-design="fresh"] .sidebar { background: var(--ov-navy); border-color: #345060; }
-.app-shell[data-design="fresh"] .brand-mark { background: var(--ov-teal); border-radius: 15px; box-shadow: 0 4px 14px #0b1f2a28; }
+.app-shell[data-design="fresh"] .brand-mark { background: #0f2037; object-fit: contain; border-radius: 12px; box-shadow: 0 4px 14px #0b1f2a28; }
 .app-shell[data-design="fresh"] .brand span,
 .app-shell[data-design="fresh"] .brand small { color: #b4cbd4; }
 .app-shell[data-design="fresh"] .sidebar nav { gap: 5px; }
@@ -140,3 +140,48 @@
 
 .app-shell[data-design="fresh"] .overview-kpi-label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
 .app-shell[data-design="fresh"] .overview-kpi-review { font-size: .75rem; font-weight: 600; color: var(--ov-review); background: var(--ov-review-soft); padding: 3px 8px; border-radius: 999px; }
+
+/* The overview gives charts priority; detailed ledgers stay a click away. */
+.app-shell[data-design="fresh"]:has(.overview-dashboard-visual) { background: #f2f5fa; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual { gap: 18px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-filter-panel { border-color: #dfe5ef; padding: 15px 18px; border-radius: 15px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-source-strip { background: transparent; border-top: 1px solid #edf0f5; border-radius: 0; padding: 9px 0 0; margin-top: 10px; color: #637286; font-size: 11px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-source-strip[data-error="true"] { color: #a3442f; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis { gap: 18px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi { min-height: 140px; border: 1px solid #dfe5ef; border-radius: 17px; gap: 7px; box-shadow: none; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-value { color: #152d4c; font-size: clamp(1.6rem,2.6vw,2.25rem); }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-note { font-size: 11px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-action { font-size: 11px; color: #3663a6; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child { background: #152d4c; border-color: #152d4c; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child .overview-kpi-value { color: white; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child :is(.overview-kpi-label,.overview-kpi-note) { color: #cedcee; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child .overview-kpi-action { color: #7ddad5; }
+.app-shell[data-design="fresh"] .overview-disclosure { background: white; border: 1px solid #dfe5ef; border-radius: 14px; min-width: 0; }
+.app-shell[data-design="fresh"] .overview-disclosure>summary { cursor: pointer; padding: 16px 20px; font-size: 13px; font-weight: 650; color: #152d4c; }
+.app-shell[data-design="fresh"] .overview-disclosure>summary small { font-weight: 400; color: #637286; margin-left: 12px; font-size: 11px; }
+.app-shell[data-design="fresh"] .overview-disclosure[open]>summary { border-bottom: 1px solid #e9edf4; }
+.app-shell[data-design="fresh"] .overview-disclosure-body { padding: 16px; }
+.app-shell[data-design="fresh"] .overview-disclosure .salary-timing { border: 0; margin: 0; box-shadow: none; }
+.app-shell[data-design="fresh"] .overview-disclosure .overview-live-table { border: 0; border-radius: 0 0 14px 14px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-data-source { background: transparent; color: #637286; border-radius: 0; padding: 0 2px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-data-source-label { display: none; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-data-source strong { color: #637286; font-size: 11px; }
+.app-shell[data-design="fresh"] .overview-dashboard-visual .overview-data-source p { color: #637286; font-size: 11px; }
+@media(max-width:850px) {
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-filter-controls { gap: 7px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child { grid-column: auto; }
+  .app-shell[data-design="fresh"] .overview-disclosure>summary small { display: block; margin: 6px 0 0 16px; }
+}
+@media(max-width:600px) {
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi { padding: 14px; min-height: 128px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi:first-child { grid-column: 1/-1; min-height: 0; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-value { font-size: 1.5rem; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-label { font-size: 12px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-primary-kpis .overview-kpi-note { font-size: 10px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-filter-heading>div:first-child { display: none; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-filter-controls>:is(select,details) { flex-basis: 115px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-filter-controls .overview-period-select { font-size: 13px; padding: 8px; }
+  .app-shell[data-design="fresh"] .overview-dashboard-visual .overview-source-strip { font-size: 10px; gap: 4px; }
+}
