@@ -1,3 +1,5 @@
+import type { LaborCostSource, LaborReportStatus } from '../shared/laborCostSource.js';
+import { applyToastReportedCosts, getToastLaborReport } from './toastLaborReporting.js';
 import { nextDate } from '../shared/overtimePeriod.js';
 import { standardToastConfigured,standardToastRequest,toastLocations } from './toastClient.js';
 
@@ -13,6 +15,9 @@ type ToastEmployee={guid?:string;externalEmployeeId?:string;firstName?:string;ch
 type AccessibleRestaurant={restaurantGuid?:string;restaurantName?:string;locationName?:string};
 
 export type PerformanceLocation={
+  laborCostSource?:LaborCostSource;
+  laborReportStatus?:LaborReportStatus;
+  laborReportRetrievedAt?:string;
   location:string;
   netSales:number;
   discountAmount:number;
@@ -47,6 +52,9 @@ export type ToastEmployeeLabor={
   regularLaborCost:number;
   overtimeLaborCost:number;
   overtimeCostComplete:boolean;
+  overtimeCostSource?:LaborCostSource;
+  laborReportStatus?:LaborReportStatus;
+  laborReportRetrievedAt?:string;
   employmentType:'hourly'|'salary'|'unknown';
   totalLaborCost:number;
   wageSource:'time_entry'|'employee_override'|'unavailable';
@@ -173,8 +181,8 @@ export function summarizeEmployeeLabor(entries:TimeEntry[],employees:ToastEmploy
     // Current employee overrides cannot establish a historical overtime payment.
     const overtimeLaborCost=row.overtimeLaborCost;
     const overtimeCostComplete=!row.missingOvertimeRate;
-    const employmentType:ToastEmployeeLabor['employmentType']=row.hourlyEntries?'hourly':row.salaryEntries?'salary':'unknown';
-    return {employeeGuid:row.employeeGuid,externalEmployeeId:row.externalEmployeeId,employeeName:row.employeeName,email:row.email,location:row.location,regularHours:row.regularHours,overtimeHours:row.overtimeHours,totalHours,hourlyWage,regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),totalLaborCost:round(regularLaborCost+overtimeLaborCost),overtimeCostComplete,employmentType,wageSource};
+    const employmentType:ToastEmployeeLabor['employmentType']=row.hourlyEntries&&row.salaryEntries?'unknown':row.hourlyEntries?'hourly':row.salaryEntries?'salary':'unknown';
+    return {employeeGuid:row.employeeGuid,externalEmployeeId:row.externalEmployeeId,employeeName:row.employeeName,email:row.email,location:row.location,regularHours:row.regularHours,overtimeHours:row.overtimeHours,totalHours,hourlyWage,regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),totalLaborCost:round(regularLaborCost+overtimeLaborCost),overtimeCostComplete,overtimeCostSource:overtimeCostComplete?'time_entry_estimate':'unavailable',employmentType,wageSource};
   });
 }
 
@@ -226,27 +234,40 @@ export async function resolvedToastLocationEntries(requestedLocations?:string[])
 
 export async function getToastEmployeeLabor(start:string,end:string,requestedLocations?:string[]):Promise<ToastEmployeeLabor[]>{
   const entries=await resolvedToastLocationEntries(requestedLocations);
+  const reportPromise=getToastLaborReport(start,end,entries.map(([,guid])=>guid));
   const output=await Promise.all(entries.map(async ([location,guid])=>{
     let labor:TimeEntry[],employees:ToastEmployee[];
     try{[labor,employees]=await Promise.all([getLaborForRange(guid,start,end),getEmployees(guid)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:'Toast request failed'}`);}
-    return summarizeEmployeeLabor(labor,employees,location);
+    const report=await reportPromise;
+    const result=applyToastReportedCosts(summarizeEmployeeLabor(labor,employees,location),report,guid);
+    return result.rows.map(row=>({...row,laborReportStatus:result.status,laborReportRetrievedAt:report.retrievedAt}));
   }));
   return output.flat();
 }
 
 export async function getToastPerformance(start:string,end:string,requestedLocations?:string[]):Promise<PerformanceLocation[]>{
   const entries=await resolvedToastLocationEntries(requestedLocations);
+  const reportPromise=getToastLaborReport(start,end,entries.map(([,guid])=>guid));
   return Promise.all(entries.map(async ([location,guid])=>{
     let orders:ToastOrder[],labor:TimeEntry[],employees:ToastEmployee[];
     try{[orders,labor,employees]=await Promise.all([getOrdersForRange(guid,start,end),getLaborForRange(guid,start,end),getEmployees(guid)]);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:"Toast request failed"}`);}
     const sales=summarizeOrders(orders,start,end);
+    const report=await reportPromise;
+    const result=applyToastReportedCosts(summarizeEmployeeLabor(labor,employees,location),report,guid);
+    const employeeLabor=result.rows.map(row=>({...row,laborReportStatus:result.status,laborReportRetrievedAt:report.retrievedAt}));
     const laborTotals=summarizeLabor(labor);
+    if(result.source==='toast_reported'){
+      const hourly=employeeLabor.filter(row=>row.employmentType==='hourly');
+      laborTotals.regularLaborCost=round(hourly.reduce((sum,row)=>sum+row.regularLaborCost,0));
+      laborTotals.overtimeLaborCost=round(hourly.reduce((sum,row)=>sum+row.overtimeLaborCost,0));
+      laborTotals.hourlyLaborCost=round(laborTotals.regularLaborCost+laborTotals.overtimeLaborCost);
+    }
     const discountPct=sales.netSales?round(sales.discountAmount/sales.netSales*100):0;
     const bonusDiscountPct=sales.netSales?round(sales.bonusDiscountAmount/sales.netSales*100):0;
     const voidPct=sales.netSales?round(sales.voidAmount/sales.netSales*100):0;
     const laborPct=sales.netSales?round(laborTotals.hourlyLaborCost/sales.netSales*100):0;
     const splh=laborTotals.hourlyHours?round(sales.netSales/laborTotals.hourlyHours):null;
-    return {location,...sales,...laborTotals,discountPct,bonusDiscountPct,voidPct,laborPct,splh,employeeLabor:summarizeEmployeeLabor(labor,employees,location)};
+    return {location,...sales,...laborTotals,discountPct,bonusDiscountPct,voidPct,laborPct,splh,employeeLabor,laborCostSource:result.source,laborReportStatus:result.status,laborReportRetrievedAt:report.retrievedAt};
   }));
 }
 

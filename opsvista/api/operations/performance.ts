@@ -6,7 +6,7 @@ import { intradaySalary, verifiedHoursFallback } from '../../server/intradaySala
 import { getGoogleOperatingSchedules } from '../../server/googleBusinessProfile.js';
 import { getToastEmployeeLabor, getToastPerformance } from '../../server/toastPerformance.js';
 import { listTeamEmployees, syncTeamFromToast, updateTeamEmployee, teamEmployeeAudit } from '../../server/teamStore.js';
-import { applyToastLaborToScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
+import { applyToastLaborToScheduleRisk, toastOnlyScheduleRisk, getSevenShiftsScheduleRisk, weeklyTaskCompliance } from '../../server/sevenShiftsClient.js';
 
 type Req={method?:string;query?:Record<string,string|string[]>;headers?:{cookie?:string};body?:Record<string,unknown>};
 type Res={status:(code:number)=>Res;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -81,7 +81,8 @@ export default async function handler(req:Req,res:Res){
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
     const overtimeEmployeeLabor=weeklyEmployeeLabor??toastLocations.flatMap(row=>row.employeeLabor);
-    const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,overtimeEmployeeLabor):null,scheduleRiskError=scheduleResult.error;
+    const scheduleBase=scheduleResult.data??toastOnlyScheduleRisk(scheduleStart,scheduleEnd,toastLocations.map(row=>row.location),overtimeEnd,asOf);
+    const scheduleRisk=applyToastLaborToScheduleRisk(scheduleBase,overtimeEmployeeLabor),scheduleRiskError=scheduleResult.error;
     const payrollResult=scheduleRisk?await getOvertimePayrollReference('org-puerto-vallarta',scheduleStart,scheduleEnd,overtimeEnd,scheduleRisk.locations.map(row=>row.location)).then(data=>({data,error:''})).catch(()=>({data:null,error:'Payroll reference unavailable'})):{data:null,error:''};
     const reconciledScheduleRisk=scheduleRisk?{...scheduleRisk,payrollReference:payrollResult.data,payrollReferenceError:payrollResult.error}:null;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
