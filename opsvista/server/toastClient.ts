@@ -10,9 +10,9 @@ const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function cleanHost(value:string|undefined){return (value||'').replace(/\/$/,'');}
 
-async function authenticate(host:string,clientId:string,clientSecret:string,cache:TokenCache|undefined){
+async function authenticate(host:string,clientId:string,clientSecret:string,cache:TokenCache|undefined,signal?:AbortSignal){
   if(cache&&cache.expiresAt>Date.now()+60_000)return cache;
-  const response=await fetch(`${host}/authentication/v1/authentication/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId,clientSecret,userAccessType:'TOAST_MACHINE_CLIENT'})});
+  const response=await fetch(`${host}/authentication/v1/authentication/login`,{method:'POST',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId,clientSecret,userAccessType:'TOAST_MACHINE_CLIENT'})});
   if(!response.ok)throw new Error(`Toast authentication failed (${response.status})`);
   const body=await response.json() as ToastAuthResponse;
   const accessToken=body.token?.accessToken;
@@ -78,13 +78,17 @@ export async function standardToastRequest(path:string,restaurantGuid?:string){
 }
 
 export async function analyticsToastRequest(path:string,init?:RequestInit){
+  return (await analyticsToastResponse(path,init)).data;
+}
+
+export async function analyticsToastResponse(path:string,init?:RequestInit){
   const host=cleanHost(process.env.TOAST_ANALYTICS_API_HOST);
   const clientId=process.env.TOAST_ANALYTICS_CLIENT_ID||'';
   const clientSecret=process.env.TOAST_ANALYTICS_CLIENT_SECRET||'';
   if(!host||!clientId||!clientSecret)throw new Error('Toast Analytics API environment variables are not configured');
-  analyticsToken=await authenticate(host,clientId,clientSecret,analyticsToken);
+  analyticsToken=await authenticate(host,clientId,clientSecret,analyticsToken,init?.signal??undefined);
   const headers:Record<string,string>={Authorization:`Bearer ${analyticsToken.accessToken}`,'Content-Type':'application/json',...((init?.headers||{}) as Record<string,string>)};
   const response=await fetch(`${host}${path}`,{...init,headers});
-  if(!response.ok)throw new Error(`Toast Analytics request failed (${response.status}) for ${path}`);
-  return response.json();
+  if(!response.ok){if(response.status===401)analyticsToken=undefined;throw new Error(`Toast Analytics request failed (${response.status}) for ${path}`);}
+  return {status:response.status,data:await response.json() as unknown};
 }
