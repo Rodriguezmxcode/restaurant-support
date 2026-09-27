@@ -14,7 +14,8 @@
     "test:source-sync": "node scripts/test-source-sync.mjs",
     "test:salary-timing": "node scripts/test-salary-timing.mjs",
     "test:copilot": "node scripts/test-copilot.mjs",
-    "test:partner-api": "node scripts/test-partner-api.mjs"
+    "test:partner-api": "node scripts/test-partner-api.mjs",
+    "test:web-push": "node scripts/test-web-push.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -24,12 +25,14 @@
     "react-dom": "latest",
     "typescript": "5.9.3",
     "vite": "latest",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^24.13.4",
     "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react-dom": "latest",
+    "@types/web-push": "^3.6.4"
   }
 }

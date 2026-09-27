@@ -1,3 +1,4 @@
+import { sendWebPushToUsers } from './webPushStore.js';
 import postgres from 'postgres';
 import type { SessionUser } from './authSession.js';
 import type { ActionRecord } from './actionStore.js';
@@ -245,9 +246,11 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
   const pushUserIds = recipientRows.filter(row => row.push_enabled !== false).map(row => String(row.id));
   const devices = pushUserIds.length ? await db`select token,user_id from opsvista_mobile_devices
     where organization_id=${organization(actor)} and user_id in ${db(pushUserIds)} and active=true` : [];
+  const webPush = await sendWebPushToUsers(pushUserIds,actor,{actionId:input.actionId,category:input.category,tag:input.eventKey});
   const email = await sendEmail(input.eventKey,input.title,input.body,recipientRows,actor,input.actionId);
   await db`update opsvista_operational_notifications set email_recipients=${email.accepted} where event_key=${input.eventKey}`;
-  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, email };
+  if (webPush.accepted) await db`update opsvista_operational_notifications set push_devices=${webPush.accepted} where event_key=${input.eventKey}`;
+  if (!devices.length) return { sent: true, pushAccepted: webPush.accepted > 0, devices: webPush.devices, email, webPush };
   const messages = devices.map(row => ({
     to: String(row.token), sound: 'default', title: input.title, body: input.body,
     priority: 'high', channelId: 'opsvista-actions',
@@ -258,10 +261,10 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
     if (process.env.EXPO_ACCESS_TOKEN) headers.Authorization = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
     const response = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) });
     if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
-    await db`update opsvista_operational_notifications set push_devices=${devices.length} where event_key=${input.eventKey}`;
-    return { sent: true, pushAccepted: true, devices: devices.length, email };
+    await db`update opsvista_operational_notifications set push_devices=${devices.length + webPush.accepted} where event_key=${input.eventKey}`;
+    return { sent: true, pushAccepted: true, devices: devices.length + webPush.devices, email, webPush };
   } catch (error) {
-    return { sent: true, pushAccepted: false, devices: devices.length, email, warning: error instanceof Error ? error.message : 'Push unavailable' };
+    return { sent: true, pushAccepted: webPush.accepted > 0, devices: devices.length + webPush.devices, email, webPush, warning: error instanceof Error ? error.message : 'Push unavailable' };
   }
 }
 
@@ -288,7 +291,12 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
   if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
   const pushEnabled = recipientRows.some(row => row.push_enabled !== false);
   const devices = pushEnabled ? await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true` : [];
-  if (!devices.length) return { sent: true, pushAccepted: false, devices: 0, email, acceptBy: acceptBy.toISOString() };
+  const webPush = await sendWebPushToUsers(pushEnabled ? [action.ownerId] : [],actor,{actionId:action.id,category:'action',tag:`action:${action.id}`});
+  if (webPush.accepted) {
+    await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
+    await appendEvent(action.id,action.ownerId,action.ownerName,'Push accepted',actor,`${webPush.accepted} web push accepted`);
+  }
+  if (!devices.length) return { sent: true, pushAccepted: webPush.accepted > 0, devices: webPush.devices, email, webPush, acceptBy: acceptBy.toISOString() };
   const messages = devices.map(row => ({
     to: String(row.token), sound: 'default', title: `${action.location}: ${action.title}`,
     body: action.recommendation, priority: 'high', channelId: 'opsvista-actions',
@@ -301,9 +309,9 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id, action.ownerId, action.ownerName, 'Push accepted', actor, `${devices.length} registered device${devices.length === 1 ? '' : 's'}`);
-    return { sent: true, pushAccepted: true, devices: devices.length, email, acceptBy: acceptBy.toISOString() };
+    return { sent: true, pushAccepted: true, devices: devices.length + webPush.devices, email, webPush, acceptBy: acceptBy.toISOString() };
   } catch (error) {
-    return { sent: true, pushAccepted: false, devices: devices.length, email, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
+    return { sent: true, pushAccepted: webPush.accepted > 0, devices: devices.length + webPush.devices, email, webPush, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
   }
 }
 

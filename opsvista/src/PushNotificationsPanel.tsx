@@ -1,0 +1,100 @@
+import { useEffect, useState } from 'react';
+import { useI18n } from './i18n';
+import { applicationServerKey, needsHomeScreen, pushRegistration, pushRequest, supportsWebPush } from './webPush';
+import './pushNotifications.css';
+
+export default function PushNotificationsPanel() {
+  const { t, language } = useI18n();
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [publicKey, setPublicKey] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [message, setMessage] = useState('');
+  const [failed, setFailed] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission>(() => 'Notification' in window ? Notification.permission : 'default');
+  const install = needsHomeScreen(), supported = supportsWebPush();
+  useEffect(() => {
+    if (!supported || install) { setLoading(false); return; }
+    let cancelled = false;
+    Promise.all([pushRequest(), pushRegistration()]).then(async ([config, registration]) => {
+      const subscription = await registration.pushManager.getSubscription();
+      const status = subscription ? await pushRequest({ action: 'status', endpoint: subscription.endpoint }) : { registered: false };
+      if (!cancelled) { setPublicKey(config.publicKey); setEnabled(Boolean(status.registered && config.pushEnabled && Notification.permission === 'granted')); }
+    }).catch(() => { if (!cancelled) { setFailed(true); setMessage('unavailable'); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [supported, install]);
+
+  async function enable() {
+    setBusy(true); setFailed(false); setMessage('');
+    try {
+      // Called before any network await: iOS requires a direct user gesture.
+      const granted = await Notification.requestPermission();
+      setPermission(granted);
+      if (granted !== 'granted') { setMessage(granted === 'denied' ? 'denied' : 'dismissed'); return; }
+      const registration = await pushRegistration();
+      let subscription = await registration.pushManager.getSubscription();
+      const key = applicationServerKey(publicKey);
+      if (subscription?.options.applicationServerKey && Array.from(new Uint8Array(subscription.options.applicationServerKey)).join() !== Array.from(key).join()) {
+        await subscription.unsubscribe(); subscription = null;
+      }
+      subscription ||= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await pushRequest({ action: 'subscribe', subscription: subscription.toJSON(), locale: language });
+      setEnabled(true); setMessage('enabled');
+    } catch { setFailed(true); setMessage('unavailable'); }
+    finally { setBusy(false); }
+  }
+  async function disable() {
+    setBusy(true); setFailed(false); setMessage('');
+    try {
+      const registration = await navigator.serviceWorker.getRegistration('/');
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        await pushRequest({ action: 'unsubscribe', endpoint: subscription.endpoint });
+        await subscription.unsubscribe();
+      }
+      setEnabled(false); setMessage('disabled');
+    } catch { setFailed(true); setMessage('unavailable'); }
+    finally { setBusy(false); }
+  }
+  async function test() {
+    setBusy(true); setFailed(false); setMessage('');
+    try {
+      const registration = await navigator.serviceWorker.getRegistration('/');
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!subscription) { setEnabled(false); setMessage('not_registered'); return; }
+      const result = await pushRequest({ action: 'test', endpoint: subscription.endpoint });
+      setMessage(result.accepted ? 'accepted' : result.reason); setFailed(!result.accepted);
+      if (result.reason === 'not_registered' || result.reason === 'push_disabled') setEnabled(false);
+    } catch { setFailed(true); setMessage('unavailable'); }
+    finally { setBusy(false); }
+  }
+  const messages: Record<string, string> = {
+    enabled: t('Enabled on this device. Send a test to check delivery.', 'Activadas en este dispositivo. Envía una prueba para comprobar la entrega.'),
+    disabled: t('Notifications turned off on this device.', 'Notificaciones desactivadas en este dispositivo.'),
+    accepted: t('The push service accepted your test. Check your notifications to confirm it arrived.', 'El servicio push aceptó tu prueba. Revisa tus notificaciones para confirmar que llegó.'),
+    rate_limited: t('Wait 30 seconds before sending another test.', 'Espera 30 segundos antes de enviar otra prueba.'),
+    denied: t('Notifications are blocked. Allow them in this device’s browser or notification settings, then try again.', 'Las notificaciones están bloqueadas. Permítelas en los ajustes del navegador o de notificaciones de este dispositivo y vuelve a intentar.'),
+    dismissed: t('Permission was not granted. You can try again when you are ready.', 'No se concedió el permiso. Puedes volver a intentarlo cuando quieras.'),
+    unavailable: t('Could not connect notifications. Reload OpsVista and try again.', 'No se pudieron conectar las notificaciones. Recarga OpsVista y vuelve a intentar.'),
+    not_registered: t('Activate notifications on this device first.', 'Primero activa las notificaciones en este dispositivo.'),
+    push_disabled: t('Activate notifications again to receive the test.', 'Vuelve a activar las notificaciones para recibir la prueba.'),
+    delivery_unconfirmed: t('Delivery could not be confirmed. Try turning notifications off and on again.', 'No se pudo confirmar el envío. Intenta desactivar y volver a activar las notificaciones.'),
+  };
+  return <section id="opsvista-push-panel" className="push-panel" aria-labelledby="push-title" aria-busy={busy || loading}>
+    <div className="push-heading"><div><h2 id="push-title">{t('Push notifications', 'Notificaciones push')}</h2>
+      <p>{t('Receive updates for your account, even when OpsVista is closed.', 'Recibe las actualizaciones de tu cuenta aunque OpsVista esté cerrada.')}</p></div>
+      <span className="push-status">{loading ? t('Checking…', 'Consultando…') : enabled ? t('On · this device', 'Activadas · este dispositivo') : t('Off · this device', 'Desactivadas · este dispositivo')}</span></div>
+    {install ? <div className="push-help"><strong>{t('First, add OpsVista to your Home Screen', 'Primero, añade OpsVista a tu pantalla de inicio')}</strong><ol>
+      <li>{t('Open this page in Safari and tap Share.', 'Abre esta página en Safari y toca Compartir.')}</li>
+      <li>{t('Choose Add to Home Screen, keep Open as Web App enabled if shown, and tap Add.', 'Elige Agregar a pantalla de inicio, conserva Abrir como app web si aparece y toca Agregar.')}</li>
+      <li>{t('Open the OpsVista icon, sign in, and return to Notifications → Enable notifications → Allow.', 'Abre el icono de OpsVista, inicia sesión y vuelve a Notificaciones → Activar notificaciones → Permitir.')}</li>
+    </ol><p>{t('Requires iOS or iPadOS 16.4 or later.', 'Requiere iOS o iPadOS 16.4 o posterior.')}</p></div>
+      : !supported ? <p>{t('This browser does not support push notifications. Open OpsVista in a compatible browser over HTTPS.', 'Este navegador no admite notificaciones push. Abre OpsVista en un navegador compatible mediante HTTPS.')}</p>
+      : <div className="push-controls"><button type="button" disabled={loading || busy || !publicKey} onClick={() => void (enabled ? disable() : enable())}>{busy ? t('Processing…', 'Procesando…') : enabled ? t('Turn off on this device', 'Desactivar en este dispositivo') : t('Enable notifications', 'Activar notificaciones')}</button>
+        <button type="button" className="push-secondary" disabled={busy || !enabled} onClick={() => void test()}>{t('Send me a test', 'Enviarme una prueba')}</button></div>}
+    {permission === 'denied' && <p className="push-feedback" role="status">{messages.denied}</p>}
+    {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
+    <p className="push-privacy">{t('Details stay inside OpsVista. Each device needs its own permission; signing out disconnects notifications on this device.', 'Los detalles se consultan dentro de OpsVista. Cada dispositivo requiere su propio permiso; cerrar sesión desconecta las notificaciones de este dispositivo.')}</p>
+  </section>;
+}
