@@ -609,12 +609,12 @@ export async function taskDailySummary(locationId:number,locationName:string,dat
 
 function datesInclusive(start:string,end:string){const out:string[]=[];const d=new Date(`${start}T00:00:00Z`),last=new Date(`${end}T00:00:00Z`);for(;d<=last;d.setUTCDate(d.getUTCDate()+1))out.push(d.toISOString().slice(0,10));return out;}
 
-export async function weeklyTaskCompliance(start:string,end:string,locationNames?:string[]){
+export async function weeklyTaskCompliance(start:string,end:string,locationNames?:string[],withDetail=true){
   const all=await listSevenShiftsLocations();
   const wanted=locationNames?.length?all.filter(l=>locationNames.some(n=>n.localeCompare(l.name,undefined,{sensitivity:'base'})===0)):all;
   const dates=datesInclusive(start,end);
   const locations:SevenShiftsLocationWeek[]=[];
-  const includeDetail=wanted.length===1;
+  const includeDetail=withDetail&&wanted.length===1;
   for(const loc of wanted){
     const days:SevenShiftsTaskDay[]=await Promise.all(dates.map(date=>taskDailySummary(loc.id,loc.name,date,includeDetail)));
     const total=days.reduce((s,d)=>s+d.total,0),completed=days.reduce((s,d)=>s+d.completed,0);const accountability=days.flatMap(d=>d.accountability);
