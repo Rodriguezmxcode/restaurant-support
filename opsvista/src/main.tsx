@@ -9,6 +9,7 @@ import './styles.css';
 import './team.css';
 import './maxDataTheme.css';
 import './rampComplianceOverdue.css';
+import './freshTheme.css';
 import './priceWatchBootstrap';
 
 const isMarketingHost=typeof window!=='undefined'&&(['getopsvista.com','www.getopsvista.com'].includes(window.location.hostname.toLowerCase())||new URLSearchParams(window.location.search).get('marketing')==='1');
