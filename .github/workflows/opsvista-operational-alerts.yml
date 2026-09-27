@@ -1,0 +1,66 @@
+name: OpsVista operational alerts
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/opsvista-operational-alerts.yml']
+permissions:
+  id-token: write
+  contents: read
+concurrency:
+  group: opsvista-operational-alerts
+  cancel-in-progress: false
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check operational sources and deliver due alerts
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          // No checkout, permanent token, customer data, or notification text in logs.
+          const verify = process.env.GITHUB_EVENT_NAME === 'push';
+          const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+          const locations = ['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
+          const jobs = [];
+          for (const job of ['performance','overtime','tasks','bonus']) {
+            const earliest = {performance:17,overtime:15,tasks:21,bonus:9}[job];
+            if (verify || (hour >= earliest && hour < 23)) for (const location of locations) jobs.push({job,location});
+          }
+          if (verify || (hour >= 9 && hour < 23)) for (const job of ['logbook','reviews','ramp','prices']) jobs.push({job});
+          // Authenticate a quiet-hours heartbeat too, so status distinguishes a
+          // functioning scheduler from one that stopped running.
+          if (!jobs.length) jobs.push({job:'reviews'});
+          let cursor = 0, failures = 0;
+          async function worker() {
+            while (cursor < jobs.length) {
+              const {job,location} = jobs[cursor++];
+              try {
+                const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+                tokenUrl.searchParams.set('audience','opsvista-operational-alerts');
+                const identity = await fetch(tokenUrl, {headers:{Authorization:`Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`},signal:AbortSignal.timeout(15000)});
+                if (!identity.ok) throw new Error(`identity HTTP ${identity.status}`);
+                const {value:token} = await identity.json();
+                if (!token) throw new Error('missing identity');
+                console.log(`::add-mask::${token}`);
+                const url = new URL('https://restaurant-support.vercel.app/api/workflows');
+                url.searchParams.set('resource','scheduled_alerts'); url.searchParams.set('job',job);
+                if (location) url.searchParams.set('location',location);
+                if (verify) url.searchParams.set('verify','1');
+                const response = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(125000)});
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                if (!result.ok) throw new Error('check incomplete');
+                console.log(`${job}${location ? ':'+location : ''}: ${verify ? 'verified without sending' : result.quiet ? 'quiet hours' : result.busy ? 'already checked' : 'checked'}`);
+              } catch (error) {
+                failures++;
+                console.log(`::warning::${job}${location ? ':'+location : ''}: ${error.message}. Other checks continue; the next run retries.`);
+              }
+            }
+          }
+          await Promise.all([worker(),worker()]);
+          if (failures) throw new Error(`${failures} source check(s) unavailable; see individual job status in OpsVista.`);
+          JS
