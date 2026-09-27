@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { LiveRow, SevenShiftsResponse } from './OperationalOverview';
 import type { OpsVistaModule } from './accessControl';
+import { findOverviewTaskCompliance } from './overviewTaskCompliance';
 import './overviewExplorer.css';
 
 export type OverviewMetric = 'sales' | 'hourly' | 'salary' | 'labor' | 'tasks' | 'voids' | 'discounts';
@@ -23,7 +24,7 @@ export function overviewMetricRows(metric: OverviewMetric, rows: LiveRow[], task
   return rows.map(row => {
     const share = (value: number) => row.netSales > 0 && valid(value) ? `${percent(value)} de ventas` : 'Porcentaje no disponible sin ventas positivas';
     if (metric === 'tasks') {
-      const task = tasks?.locations.find(item => item.location === row.location);
+      const task = findOverviewTaskCompliance(tasks, row.location);
       const usable = task && task.total > 0 && valid(task.compliancePct);
       return { location: row.location, value: usable ? task.compliancePct : null, attention: Boolean(usable && task.compliancePct < 80), detail: task ? `${task.completed} de ${task.total} completadas · ${Math.max(0, task.total - task.completed)} por completar` : 'Sin datos de 7shifts para esta locación' };
     }

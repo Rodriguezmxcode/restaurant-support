@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useI18n } from './i18n';
 import type { LiveRow, SevenShiftsResponse } from './OperationalOverview';
 import type { OverviewMetric } from './OverviewExplorer';
+import { findOverviewTaskCompliance } from './overviewTaskCompliance';
 import './overviewCharts.css';
 
 type Totals = Omit<LiveRow, 'location'>;
@@ -61,7 +62,7 @@ export default function OverviewCharts({ rows, totals, tasks, salaryConfigured, 
   const issues = rows.flatMap(row => {
     const result: { location: string; metric: OverviewMetric; label: string }[] = [];
     if (salaryConfigured && (laborRate(row) ?? 0) > 30) result.push({ location: row.location, metric: 'labor', label: `Labor ${pct(laborRate(row))}` });
-    const task = tasks?.locations.find(item => item.location === row.location);
+    const task = findOverviewTaskCompliance(tasks, row.location);
     if (task && task.total > 0 && finite(task.compliancePct) && task.compliancePct < 80) result.push({ location: row.location, metric: 'tasks', label: `Tasks ${pct(task.compliancePct)}` });
     if (row.netSales > 0 && finite(row.voidPct) && row.voidPct > .5) result.push({ location: row.location, metric: 'voids', label: `Voids ${row.voidPct.toFixed(2)}%` });
     if (row.netSales > 0 && finite(row.discountPct) && row.discountPct > 2) result.push({ location: row.location, metric: 'discounts', label: `${t('Discounts', 'Descuentos')} ${row.discountPct.toFixed(2)}%` });
@@ -110,10 +111,10 @@ export default function OverviewCharts({ rows, totals, tasks, salaryConfigured, 
           <header className="ov-chart-heading"><div><span className="ov-section-label">{t('EXECUTION', 'EJECUCIÓN')}</span><h3>{t('Tasks by location', 'Tasks por locación')}</h3></div><span className="ov-chart-count">{t('Goal', 'Meta')} ≥80%</span></header>
           <div className="ov-task-total"><strong>{pct(taskRate)}</strong><span>{tasks ? `${tasks.totals.completed} / ${tasks.totals.total} ${t('completed', 'completadas')}` : t('7shifts data unavailable', 'Datos de 7shifts no disponibles')}</span></div>
           <div className="ov-task-rings">{rows.map(row => {
-            const task = tasks?.locations.find(item => item.location === row.location);
+            const task = findOverviewTaskCompliance(tasks, row.location);
             const rate = task && task.total > 0 && finite(task.compliancePct) ? task.compliancePct : null;
-            return <button type="button" key={row.location} onClick={() => onExplore('tasks', row.location)} disabled={!task} className="ov-task-location" aria-label={`${row.location}: ${rate === null ? t('No tasks recorded', 'Sin tareas registradas') : pct(rate)}. ${t('View tasks', 'Ver tareas')}`}>
-              <span className="ov-ring-wrap"><Ring value={rate} tone={rate === null ? 'neutral' : rate < 80 ? 'coral' : 'teal'} /><strong>{rate === null ? '—' : `${rate.toFixed(0)}%`}</strong></span><span>{row.location}</span><small>{task && task.total > 0 ? `${task.completed}/${task.total}` : t('No tasks', 'Sin tareas')}{rate !== null && rate < 80 ? ` · ${t('Review', 'Revisar')}` : ''}</small>
+            return <button type="button" key={row.location} onClick={() => onExplore('tasks', row.location)} disabled={!task} className="ov-task-location" aria-label={`${row.location}: ${!task ? t('No task data for this location', 'Sin datos de Tasks para esta locación') : rate === null ? t('No tasks recorded', 'Sin tareas registradas') : pct(rate)}. ${t('View tasks', 'Ver tareas')}`}>
+              <span className="ov-ring-wrap"><Ring value={rate} tone={rate === null ? 'neutral' : rate < 80 ? 'coral' : 'teal'} /><strong>{rate === null ? '—' : `${rate.toFixed(0)}%`}</strong></span><span>{row.location}</span><small>{task && task.total > 0 ? `${task.completed}/${task.total}` : task ? t('No tasks', 'Sin tareas') : t('No data', 'Sin datos')}{rate !== null && rate < 80 ? ` · ${t('Review', 'Revisar')}` : ''}</small>
             </button>;
           })}</div>
           <footer className="ov-chart-footnote">{t('Tasks still open may be included in the incomplete count.', 'Las tareas por completar pueden incluir tareas todavía abiertas.')}</footer>
