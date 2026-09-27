@@ -251,7 +251,7 @@ export async function getToastPerformance(start:string,end:string,requestedLocat
 
 
 export async function getToastEmployeeRoster(requestedLocations?:string[]){
-  const entries=await resolvedToastLocationEntries(requestedLocations);const merged=new Map<string,any>();const nonHumanGuid=new Set(['a012dfb9-2a2e-4a71-996a-e39e6485fe51']);
+  const entries=await resolvedToastLocationEntries(requestedLocations);const merged=new Map<string,any>();const nonHumanGuid=new Set(['a012dfb9-2a2e-4a71-996a-e39e6485fe51','920b90bb-bb12-4c2f-81ad-72b0e6f3f7a0']);
   const identity=(e:ToastEmployee)=>{const external=String(e.externalEmployeeId||'').trim().toLowerCase();const email=String(e.email||'').trim().toLowerCase();const phone=String(e.phoneNumber||'').replace(/\D/g,'');const name=`${String(e.chosenName||e.firstName||'').trim()}|${String(e.lastName||'').trim()}`.toLowerCase();return external?`external:${external}`:email?`email:${email}`:phone?`phone:${phone}`:`name:${name}`;};
   for(const [location,guid] of entries){let employees:ToastEmployee[];try{employees=await getEmployees(guid);}catch(error){throw new Error(`${location}: ${error instanceof Error?error.message:'Toast employee request failed'}`);}let jobs:any[]=[];try{jobs=await standardToastRequest('/labor/v1/jobs',guid) as any[];}catch{}const jobsMap=new Map(jobs.map(j=>[String(j.guid||''),String(j.title||j.name||'')]));
     for(const employee of employees){const employeeGuid=String(employee.guid||'').trim();if(!employeeGuid||nonHumanGuid.has(employeeGuid.toLowerCase()))continue;const key=identity(employee);const positions=Array.from(new Set((employee.wageOverrides||[]).map(w=>jobsMap.get(String(w.jobReference?.guid||''))).filter(Boolean))) as string[];const existing=merged.get(key);
