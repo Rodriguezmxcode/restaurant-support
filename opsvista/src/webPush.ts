@@ -10,8 +10,9 @@ export async function pushRequest(body?: Record<string, unknown>) {
   const response = await fetch(pushApi, { credentials: 'include', cache: 'no-store', ...(body ? {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   } : {}), signal: AbortSignal.timeout(20000) });
-  if (!response.ok) throw new Error('push_request_failed');
-  return response.json();
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(response.status === 401 ? 'session_expired' : result.code === 'account_access' ? 'account_access' : 'push_request_failed');
+  return result;
 }
 export async function pushRegistration() {
   await navigator.serviceWorker.register('/opsvista-sw.js', { scope: '/', updateViaCache: 'none' });

@@ -20,7 +20,7 @@ export default function PushNotificationsPanel() {
       const subscription = await registration.pushManager.getSubscription();
       const status = subscription ? await pushRequest({ action: 'status', endpoint: subscription.endpoint }) : { registered: false };
       if (!cancelled) { setPublicKey(config.publicKey); setEnabled(Boolean(status.registered && config.pushEnabled && Notification.permission === 'granted')); }
-    }).catch(() => { if (!cancelled) { setFailed(true); setMessage('unavailable'); } })
+    }).catch(error => { if (!cancelled) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [supported, install]);
@@ -41,7 +41,7 @@ export default function PushNotificationsPanel() {
       subscription ||= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
       await pushRequest({ action: 'subscribe', subscription: subscription.toJSON(), locale: language });
       setEnabled(true); setMessage('enabled');
-    } catch { setFailed(true); setMessage('unavailable'); }
+    } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); }
     finally { setBusy(false); }
   }
   async function disable() {
@@ -54,7 +54,7 @@ export default function PushNotificationsPanel() {
         await subscription.unsubscribe();
       }
       setEnabled(false); setMessage('disabled');
-    } catch { setFailed(true); setMessage('unavailable'); }
+    } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); }
     finally { setBusy(false); }
   }
   async function test() {
@@ -66,7 +66,7 @@ export default function PushNotificationsPanel() {
       const result = await pushRequest({ action: 'test', endpoint: subscription.endpoint });
       setMessage(result.accepted ? 'accepted' : result.reason); setFailed(!result.accepted);
       if (result.reason === 'not_registered' || result.reason === 'push_disabled') setEnabled(false);
-    } catch { setFailed(true); setMessage('unavailable'); }
+    } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); }
     finally { setBusy(false); }
   }
   const messages: Record<string, string> = {
@@ -77,6 +77,8 @@ export default function PushNotificationsPanel() {
     denied: t('Notifications are blocked. Allow them in this device’s browser or notification settings, then try again.', 'Las notificaciones están bloqueadas. Permítelas en los ajustes del navegador o de notificaciones de este dispositivo y vuelve a intentar.'),
     dismissed: t('Permission was not granted. You can try again when you are ready.', 'No se concedió el permiso. Puedes volver a intentarlo cuando quieras.'),
     unavailable: t('Could not connect notifications. Reload OpsVista and try again.', 'No se pudieron conectar las notificaciones. Recarga OpsVista y vuelve a intentar.'),
+    session_expired: t('Your session expired. Sign in again to connect notifications.', 'Tu sesión venció. Inicia sesión de nuevo para conectar las notificaciones.'),
+    account_access: t('Your account access could not be verified. Sign in again; if this continues, contact OpsVista support.', 'No se pudo verificar el acceso de tu cuenta. Inicia sesión de nuevo; si continúa, contacta a soporte de OpsVista.'),
     not_registered: t('Activate notifications on this device first.', 'Primero activa las notificaciones en este dispositivo.'),
     push_disabled: t('Activate notifications again to receive the test.', 'Vuelve a activar las notificaciones para recibir la prueba.'),
     delivery_unconfirmed: t('Delivery could not be confirmed. Try turning notifications off and on again.', 'No se pudo confirmar el envío. Intenta desactivar y volver a activar las notificaciones.'),
