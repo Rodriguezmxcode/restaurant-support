@@ -26,11 +26,11 @@ jobs:
           const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
           const locations = ['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
           const jobs = [];
-          for (const job of ['performance','overtime','tasks','bonus']) {
-            const earliest = {performance:17,overtime:15,tasks:21,bonus:9}[job];
+          for (const job of ['performance','overtime','tasks']) {
+            const earliest = {performance:17,overtime:15,tasks:21}[job];
             if (verify || (hour >= earliest && hour < 23)) for (const location of locations) jobs.push({job,location});
           }
-          if (verify || (hour >= 9 && hour < 23)) for (const job of ['logbook','reviews','ramp','prices']) jobs.push({job});
+          if (verify || (hour >= 9 && hour < 23)) for (const job of ['logbook','reviews','ramp','prices','bonus']) jobs.push({job});
           // Authenticate a quiet-hours heartbeat too, so status distinguishes a
           // functioning scheduler from one that stopped running.
           if (!jobs.length) jobs.push({job:'reviews'});
@@ -51,8 +51,8 @@ jobs:
                 if (location) url.searchParams.set('location',location);
                 if (verify) url.searchParams.set('verify','1');
                 const response = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(125000)});
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const result = await response.json();
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(`HTTP ${response.status}${['connection_required','source_limit','source_timeout','source_permissions','source_unavailable'].includes(result.reason) ? ': '+result.reason : ''}`);
                 if (!result.ok) throw new Error('check incomplete');
                 console.log(`${job}${location ? ':'+location : ''}: ${verify ? 'verified without sending' : result.quiet ? 'quiet hours' : result.busy ? 'already checked' : 'checked'}`);
               } catch (error) {
