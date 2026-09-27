@@ -14,8 +14,7 @@
     "test:source-sync": "node scripts/test-source-sync.mjs",
     "test:salary-timing": "node scripts/test-salary-timing.mjs",
     "test:copilot": "node scripts/test-copilot.mjs",
-    "test:partner-api": "node scripts/test-partner-api.mjs",
-    "prebuild": "node scripts/audit-toast-labor.mjs"
+    "test:partner-api": "node scripts/test-partner-api.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
