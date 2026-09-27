@@ -63,7 +63,7 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
   }
   if (job === 'tasks') {
     const { weeklyTaskCompliance } = await import('./sevenShiftsClient.js');
-    const result = await weeklyTaskCompliance(day, day, scope);
+    const result = await weeklyTaskCompliance(day, day, scope, false);
     if (!result.locations.length) throw new Error('No task locations');
     for (const row of result.locations) if (row.total > 0 && row.incomplete > 0) add(row.locationName, `${row.locationName} · Tasks pendientes`, `${day} · ${row.incomplete} de ${row.total} tareas siguen pendientes a las ${hour}:00 Connecticut. Confirma responsables y completa las tareas del turno antes del cierre.`, 'Evidence Audit');
   }
@@ -106,7 +106,7 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
     const week = closedBonusWeek(now), alcoholRange = beverageBonusRange(week.end);
     const [{ getToastPerformance }, { weeklyTaskCompliance, listSevenShiftsLogbook }, { getGoogleReviewSummaries }, { getBeverageScore }] = await Promise.all([import('./toastPerformance.js'), import('./sevenShiftsClient.js'), import('./googleBusinessProfile.js'), import('./beverageScore.js')]);
     const [performance, tasks, logs, reviews, beverage] = await Promise.all([
-      getToastPerformance(week.start, week.end, scope), weeklyTaskCompliance(week.start, week.end, scope), listSevenShiftsLogbook(week.start, week.end, scope), getGoogleReviewSummaries(week.start, week.end, scope), getBeverageScore(alertOrganization, alcoholRange.start, alcoholRange.end),
+      getToastPerformance(week.start, week.end, scope), weeklyTaskCompliance(week.start, week.end, scope, false), listSevenShiftsLogbook(week.start, week.end, scope), getGoogleReviewSummaries(week.start, week.end, scope), getBeverageScore(alertOrganization, alcoholRange.start, alcoholRange.end),
     ]);
     let waiting = false;
     for (const loc of scope) {
@@ -128,7 +128,7 @@ export async function runScheduledAlertJob(job: AlertJob, location?: string, now
   // Every send window starts after 09:00 ET; 06:00Z is before that in both
   // standard and daylight time and after the preceding day's final check.
   const daily = ['overtime','logbook','ramp','prices','bonus'].includes(job);
-  const key = `${verifyOnly ? 'verify:' : ''}${job}${location ? `:${location}` : ''}`, token = await claimAlertJob(key, now, daily ? `${day}T06:00:00Z` : undefined);
+  const key = `${verifyOnly ? 'verify:' : ''}${job}${location ? `:${location}` : ''}`, token = await claimAlertJob(key, now, daily || verifyOnly ? `${day}T06:00:00Z` : undefined, verifyOnly ? 1 : 20);
   if (!token) return { ok: true, busy: true, alerts: 0, accepted: 0 };
   if (!verifyOnly && !alertJobDue(job, now)) {
     await finishAlertJob(key, token, 'quiet', 'Outside this rule’s Connecticut notification window.', now);
@@ -141,13 +141,18 @@ export async function runScheduledAlertJob(job: AlertJob, location?: string, now
       return { ok: true, verified: true, alerts: result.alerts.length, accepted: 0 };
     }
     const directory = await listManagedUsers(alertOrganization);
-    let accepted = 0;
-    for (const alert of result.alerts) accepted += await saveAndDeliverAlert(alert, scheduledRecipients(alert, directory, now));
-    await finishAlertJob(key, token, result.waiting ? 'waiting' : 'ok', result.note || 'Source checked successfully.', now);
+    let accepted = 0, retryPending = false;
+    for (const alert of result.alerts) {
+      const delivery = await saveAndDeliverAlert(alert, scheduledRecipients(alert, directory, now));
+      accepted += delivery.accepted; retryPending ||= delivery.retryPending;
+    }
+    await finishAlertJob(key, token, retryPending ? 'retrying' : result.waiting ? 'waiting' : 'ok', retryPending ? 'Push service unavailable; pending recipients will retry.' : result.note || 'Source checked successfully.', now);
     return { ok: true, alerts: result.alerts.length, accepted };
-  } catch {
-    await finishAlertJob(key, token, 'unavailable', 'Source unavailable or incomplete; no assumptions were made. A later check will retry.', now);
-    return { ok: false, alerts: 0, accepted: 0 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const reason = /not configured|credentials|no est[aá] conectado/i.test(message) ? 'connection_required' : /429|limit/i.test(message) ? 'source_limit' : /timeout|abort|timed out/i.test(message) ? 'source_timeout' : /403|permission|forbidden/i.test(message) ? 'source_permissions' : 'source_unavailable';
+    await finishAlertJob(key, token, 'unavailable', reason, now);
+    return { ok: false, reason, alerts: 0, accepted: 0 };
   }
 }
 
@@ -159,7 +164,7 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   if (!await authorizedSourceSync(req.headers?.authorization, 'alerts')) return res.status(401).json({ error: 'Unauthorized' });
   const job = req.query?.job, location = req.query?.location;
   if (typeof job !== 'string' || !alertJobs.includes(job as AlertJob) || (location !== undefined && (typeof location !== 'string' || !alertLocations.includes(location as typeof alertLocations[number])))) return res.status(400).json({ error: 'Invalid alert job' });
-  if (['performance', 'overtime', 'tasks', 'bonus'].includes(job) !== Boolean(location)) return res.status(400).json({ error: 'Invalid alert scope' });
+  if (job !== 'bonus' && ['performance', 'overtime', 'tasks'].includes(job) !== Boolean(location)) return res.status(400).json({ error: 'Invalid alert scope' });
   const result = await runScheduledAlertJob(job as AlertJob, location as string | undefined, new Date(), req.query?.verify === '1');
   return res.status(result.ok ? 200 : 503).json(result);
 }

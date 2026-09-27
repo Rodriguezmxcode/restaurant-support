@@ -32,18 +32,18 @@ async function ready() {
   })().catch(error => { schema = undefined; throw error; });
   await schema;
 }
-export async function claimAlertJob(job: string, now = new Date(), successSince?: string) {
+export async function claimAlertJob(job: string, now = new Date(), successSince?: string, minimumMinutes = 20) {
   await ready(); const sql = db(), token = randomUUID();
   const rows = await sql`insert into opsvista_alert_jobs(organization_id,job,lease_token,lease_until,checked_at,status)
     values(${alertOrganization},${job},${token},${new Date(now.getTime()+180000).toISOString()},${now.toISOString()},'checking')
     on conflict(organization_id,job) do update set lease_token=excluded.lease_token,lease_until=excluded.lease_until,checked_at=excluded.checked_at,status='checking'
     where (opsvista_alert_jobs.lease_until is null or opsvista_alert_jobs.lease_until<${now.toISOString()})
-      and (opsvista_alert_jobs.checked_at is null or opsvista_alert_jobs.checked_at<${new Date(now.getTime()-20*60000).toISOString()})
+      and (opsvista_alert_jobs.checked_at is null or opsvista_alert_jobs.checked_at<${new Date(now.getTime()-minimumMinutes*60000).toISOString()})
       and (${!successSince} or opsvista_alert_jobs.success_at is null or opsvista_alert_jobs.success_at<${successSince || now.toISOString()}::timestamptz)
     returning job`;
   return rows.length ? token : null;
 }
-export async function finishAlertJob(job: string, token: string, status: 'ok' | 'quiet' | 'waiting' | 'unavailable', note: string, now = new Date()) {
+export async function finishAlertJob(job: string, token: string, status: 'ok' | 'quiet' | 'waiting' | 'retrying' | 'unavailable', note: string, now = new Date()) {
   await ready();
   await db()`update opsvista_alert_jobs set lease_until=null,status=${status},note=${note},
     success_at=case when ${status}='ok' then ${now.toISOString()}::timestamptz else success_at end
@@ -65,12 +65,13 @@ export async function saveAndDeliverAlert(alert: OperationalAlert, recipients: s
     if (!claim.length) continue;
     const result = await sendWebPushToUsers([userId], alertActor, { category: alert.kind, tag: `opsvista:${alert.key}` });
     const status = result.accepted > 0 ? 'accepted' : ('unavailable' in result && result.unavailable) || result.devices > 0 ? 'retry' : 'no_device';
-    await sql`update opsvista_alert_deliveries set status=${status},lease_until=null,
+    await sql`update opsvista_alert_deliveries set status=case when ${status}='retry' and attempts>=3 then 'failed' else ${status} end,lease_until=null,
       accepted_at=case when ${status}='accepted' then now() else null end
       where organization_id=${alertOrganization} and event_key=${alert.key} and user_id=${userId}`;
     accepted += result.accepted;
   }
-  return accepted;
+  const pending = await sql`select user_id from opsvista_alert_deliveries where organization_id=${alertOrganization} and event_key=${alert.key} and status in ('pending','retry') and attempts<3 limit 1`;
+  return { accepted, retryPending: pending.length > 0 };
 }
 export async function alertInbox(user: SessionUser, allowedLocations: string[] | null) {
   await ready(); const sql = db(), org = user.organizationId || alertOrganization;
