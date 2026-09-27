@@ -28,6 +28,15 @@ export async function webPushEndpoint(req: Request, res: Response, user: Session
     if (req.method !== 'POST') { res.setHeader?.('Allow', 'GET, POST'); return res.status(405).json({ error: 'Method not allowed' }); }
     if (!isSameOriginPushRequest(req.headers)) return res.status(403).json({ error: 'Same-origin JSON request required' });
     const action = req.body?.action;
+    if (action === 'inbox') {
+      const { alertInbox } = await import('./operationalAlertStore.js');
+      const allowedLocations = account.role === 'Location Manager'
+        ? account.locationGrants?.length
+          ? account.locationGrants.filter(grant => !grant.expiresAt || Date.parse(grant.expiresAt) > Date.now()).map(grant => grant.location)
+          : account.locations || []
+        : null;
+      return res.status(200).json(await alertInbox(user, allowedLocations));
+    }
     const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint : '';
     if (action === 'subscribe') {
       let subscription;

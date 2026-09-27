@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
 import { applicationServerKey, needsHomeScreen, pushRegistration, pushRequest, supportsWebPush } from './webPush';
 import './pushNotifications.css';
+import OperationalAlertInbox from './OperationalAlertInbox';
 
 export default function PushNotificationsPanel() {
   const { t, language } = useI18n();
@@ -98,5 +99,6 @@ export default function PushNotificationsPanel() {
     {permission === 'denied' && <p className="push-feedback" role="status">{messages.denied}</p>}
     {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
     <p className="push-privacy">{t('Details stay inside OpsVista. Each device needs its own permission; signing out disconnects notifications on this device.', 'Los detalles se consultan dentro de OpsVista. Cada dispositivo requiere su propio permiso; cerrar sesión desconecta las notificaciones de este dispositivo.')}</p>
+    <OperationalAlertInbox />
   </section>;
 }
