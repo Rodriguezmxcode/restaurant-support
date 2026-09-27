@@ -34,6 +34,7 @@ try {
     }
     export default function postgres(){return query}
   `);
+  await writeFile(join(temp,'pushMfaStore.js'), 'export async function pushMfaDevice(){return null}');
   await writeFile(join(temp,'managementStore.js'), `import {db} from './testDb.js'; export async function getManagedUser(id){return (await db.query('select * from opsvista_management_users where id=$1',[id])).rows[0]}`);
   await writeFile(join(temp,'organizationStore.js'), `import {db} from './testDb.js'; export async function getOrganizationMembership(id){const row=(await db.query('select organization_id from test_memberships where user_id=$1',[id])).rows[0];return row?{organizationId:row.organization_id}:null}`);
   await writeFile(join(temp,'actionNotificationStore.js'), `import {db} from './testDb.js'; export async function getNotificationPreferences(user){const row=(await db.query('select * from opsvista_notification_preferences where user_id=$1 and organization_id=$2',[user.id,user.organizationId])).rows[0];return {emailEnabled:true,pushEnabled:row?.push_enabled??true,smsEnabled:false}};export async function updateNotificationPreferences(value,user){await db.query('update opsvista_notification_preferences set push_enabled=$1 where user_id=$2 and organization_id=$3',[value.pushEnabled,user.id,user.organizationId]);return value}`);

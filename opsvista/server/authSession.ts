@@ -25,7 +25,8 @@ type AuthUserRecord = SessionUser & {
   passwordHash: string;
 };
 
-type SessionPayload = SessionUser & { exp: number; iat: number };
+export type PushAssurance = { sessionId: string; deviceId: string; verifiedAt: number };
+type SessionPayload = SessionUser & { exp: number; iat: number; pushAssurance?: PushAssurance };
 
 const COOKIE_NAME = 'opsvista_session';
 // Supabase owns the long-lived browser session. This short server session is
@@ -53,7 +54,7 @@ function parseCookies(raw?: string) {
     if (index < 0) continue;
     const key = pair.slice(0, index).trim();
     const value = pair.slice(index + 1).trim();
-    if (key) result[key] = decodeURIComponent(value);
+    if (key) { try { result[key] = decodeURIComponent(value); } catch { /* Ignore malformed cookies. */ } }
   }
   return result;
 }
@@ -124,17 +125,18 @@ export async function authenticateUser(email: string, password: string): Promise
   };
 }
 
-export function issueSession(user: SessionUser) {
+export function issueSession(user: SessionUser, pushAssurance?: PushAssurance) {
   const now = Math.floor(Date.now() / 1000);
   // Organization locations are fetched for the UI; do not duplicate a potentially
   // large location catalog in the signed browser cookie.
   const { organizationLocations: _organizationLocations, ...identity } = user;
-  const payload: SessionPayload = { ...identity, iat: now, exp: now + SESSION_TTL_SECONDS };
+  const exp = pushAssurance ? Math.min(now + SESSION_TTL_SECONDS, Math.floor(pushAssurance.verifiedAt / 1000) + 12 * 60 * 60) : now + SESSION_TTL_SECONDS;
+  const payload: SessionPayload = { ...identity, ...(pushAssurance ? { pushAssurance } : {}), iat: now, exp };
   const body = b64url(JSON.stringify(payload));
   return `${body}.${sign(body)}`;
 }
 
-export function readSession(cookieHeader?: string): SessionUser | null {
+function readSessionPayload(cookieHeader?: string): SessionPayload | null {
   const token = parseCookies(cookieHeader)[COOKIE_NAME];
   if (!token) return null;
   const key = configuredSecret();
@@ -147,10 +149,17 @@ export function readSession(cookieHeader?: string): SessionUser | null {
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
     if (!payload.exp || payload.exp <= Math.floor(Date.now() / 1000)) return null;
-    const { exp: _exp, iat: _iat, ...user } = payload;
-    return user;
+    return payload;
   } catch { return null; }
 }
+
+export function readSession(cookieHeader?: string): SessionUser | null {
+  const payload = readSessionPayload(cookieHeader);
+  if (!payload) return null;
+  const { exp: _exp, iat: _iat, pushAssurance: _proof, ...user } = payload;
+  return user;
+}
+export function readPushAssurance(cookieHeader?: string) { return readSessionPayload(cookieHeader)?.pushAssurance; }
 
 export function sessionCookie(token: string) {
   return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;

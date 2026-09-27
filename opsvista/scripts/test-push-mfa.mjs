@@ -1,0 +1,156 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createECDH, randomBytes } from 'node:crypto';
+import ts from 'typescript';
+import webpush from 'web-push';
+
+const temp = await mkdtemp(join(process.cwd(), 'node_modules/.push-mfa-test-'));
+const savedEnv = { secret: process.env.OPSVISTA_SESSION_SECRET, db: process.env.OPSVISTA_DATABASE_URL };
+const originalSend = webpush.sendNotification;
+let db;
+try {
+  process.env.OPSVISTA_SESSION_SECRET = 'test-only-signing-secret-never-for-production';
+  process.env.OPSVISTA_DATABASE_URL = 'postgres://test-only';
+  await writeFile(join(temp, 'package.json'), '{"type":"module"}');
+  for (const name of ['pushMfaStore', 'webPushStore', 'webPushDelivery', 'authSession', 'webPushEndpoint']) {
+    const source = (await readFile(new URL(`../server/${name}.ts`, import.meta.url), 'utf8')).replace("from 'postgres'", "from './testDb.js'");
+    await writeFile(join(temp, `${name}.js`), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
+  }
+  for (const name of ['session', 'login']) {
+    const source = (await readFile(new URL(`../api/auth/${name}.ts`, import.meta.url), 'utf8')).replaceAll('../../server/', './');
+    await writeFile(join(temp, `${name}.js`), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
+  }
+  await writeFile(join(temp, 'testDb.js'), `
+    import { PGlite } from '@electric-sql/pglite';
+    export const db = new PGlite();
+    function wrap(conn) {
+      function sql(strings,...values) {
+        const params=[];let text=strings[0];
+        values.forEach((value,i)=>{params.push(value);text+='$'+params.length+strings[i+1]});
+        return conn.query(text,params).then(result=>result.rows);
+      }
+      sql.json=value=>JSON.stringify(value);
+      sql.unsafe=text=>conn.exec(text);
+      sql.begin=fn=>conn.transaction(tx=>fn(wrap(tx)));
+      return sql;
+    }
+    export default function postgres(){return wrap(db)}
+  `);
+  await writeFile(join(temp, 'managementStore.js'), `export const users=new Map(); export async function getManagedUser(id){return [...users.values()].find(user=>user.id===id)};export async function getManagedUserByEmail(email){return users.get(email)}`);
+  await writeFile(join(temp, 'accountStore.js'), 'export async function authenticateStoredCredential(){return null}');
+  await writeFile(join(temp, 'organizationStore.js'), `export async function getOrganizationMembership(id){return {organizationId:id==='carol'?'org-b':'org-a'}}`);
+  await writeFile(join(temp, 'actionNotificationStore.js'), `export async function getNotificationPreferences(){return {pushEnabled:true}};export async function updateNotificationPreferences(){}`);
+  await writeFile(join(temp, 'supabaseAuth.js'), `export let identity;export function setIdentity(value){identity=value};export async function verifySupabaseIdentity(){return identity}`);
+  db = (await import(join(temp, 'testDb.js'))).db;
+  const store = await import(join(temp, 'pushMfaStore.js'));
+  const auth = await import(join(temp, 'authSession.js'));
+  const { default: handler } = await import(join(temp, 'session.js'));
+  const { default: legacy } = await import(join(temp, 'login.js'));
+  const { setIdentity } = await import(join(temp, 'supabaseAuth.js'));
+  const { users } = await import(join(temp, 'managementStore.js'));
+  const { webPushEndpoint } = await import(join(temp, 'webPushEndpoint.js'));
+  const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
+  const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
+  const subscription = id => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${id}`, keys });
+  const user = id => ({ id, email: `${id}@example.invalid`, name: id, role: id==='founder'?'Founder':'Location Manager', title: 'Manager', active: true, locations: [], organizationId: id === 'carol' ? 'org-b' : 'org-a' });
+  for (const id of ['alice', 'bob', 'carol', 'founder']) users.set(user(id).email, user(id));
+  const alice=user('alice'), bob=user('bob'), carol=user('carol');
+  const sent=[];
+  webpush.sendNotification=async(sub,payload,options)=>{sent.push({sub,payload:JSON.parse(payload),options});return {statusCode:201}};
+  const lastCode=()=>sent.at(-1).payload.body.match(/\b\d{6}\b/)[0];
+  const resetLimit=async actor=>db.query("update opsvista_push_mfa_limits set last_sent_at=now()-interval '2 minutes',send_count=0,recovery_attempts=0 where user_id=$1",[actor.id]);
+  const headers={host:'test.local',origin:'https://test.local','content-type':'application/json'};
+  const identify=(actor,{sessionId='session-a',aal='aal1',hasVerifiedMfa=false,passwordVerified=true}={})=>setIdentity({email:actor.email,sessionId,aal,hasVerifiedMfa,passwordVerified});
+  const request=async(body,extra={},endpoint=handler)=>{let status,output;const responseHeaders={};await endpoint({method:'POST',headers,...extra,body:{accessToken:'verified-by-provider-stub',...body}},{status(value){status=value;return this},json(value){output=value},setHeader(key,value){responseHeaders[key]=value}});return {status,body:output,headers:responseHeaders}};
+  identify(alice);
+  assert.equal((await request({})).status,401);
+  assert.equal((await request({action:'mfa_status'})).body.method,'push_enroll');
+  assert.equal((await request({action:'push_enroll_start',subscription:subscription('alice')},{headers:{...headers,origin:'https://evil.invalid'}})).status,403);
+  identify(alice,{hasVerifiedMfa:true});
+  assert.equal((await request({action:'push_enroll_start',subscription:subscription('alice')})).status,403);
+  identify(alice,{passwordVerified:false});
+  assert.equal((await request({action:'push_enroll_start',subscription:subscription('alice')})).status,401);
+  identify(alice);
+  const pending=await request({action:'push_enroll_start',subscription:subscription('alice'),locale:'es'});
+  assert.equal(pending.status,200);const code=lastCode();
+  assert.ok(!JSON.stringify(pending.body).includes(code));
+  assert.equal(sent.at(-1).options.TTL,300);assert.equal(sent.at(-1).payload.kind,'login');
+  assert.equal((await request({})).status,401);
+  const enrollment=await request({action:'push_enroll_verify',challengeId:pending.body.challengeId,code});
+  assert.equal(enrollment.status,200);assert.equal(enrollment.body.recoveryCodes.length,8);
+  assert.equal((await store.pushMfaDevice(alice)).endpoint,subscription('alice').endpoint);
+  assert.equal((await request({action:'mfa_status'})).body.method,'push');
+  const cookie=enrollment.headers['Set-Cookie'];
+  assert.equal((await request({}, {headers:{...headers,cookie}})).status,200);
+  identify(alice,{sessionId:'new-session'});
+  assert.equal((await request({}, {headers:{...headers,cookie}})).status,401);
+  identify(alice,{aal:'aal2',hasVerifiedMfa:true,sessionId:'attacker-added-totp'});
+  assert.equal((await request({})).status,401);
+  assert.equal((await request({action:'push_enroll_start',subscription:subscription('attacker')})).status,403);
+  identify(bob);
+  assert.equal((await request({}, {headers:{...headers,cookie}})).status,401);
+  assert.equal((await request({action:'push_enroll_start',subscription:subscription('alice')})).body.code,'device_in_use');
+  identify(alice);
+  assert.equal((await request({action:'push_enroll_verify',challengeId:pending.body.challengeId,code}, {headers:{...headers,cookie}})).body.code,'invalid_code');
+  console.log('PASS initial enrollment, no session before possession proof, CSRF, existing-factor protection, token binding, one-time enrollment and private code delivery');
+  await resetLimit(alice);
+  const challenge=await store.startPushChallenge(alice,'session-a'); const loginCode=lastCode();
+  await assert.rejects(store.verifyPushChallenge(alice,'other-session',challenge.challengeId,loginCode,'login'),{code:'invalid_code'});
+  await assert.rejects(store.verifyPushChallenge(carol,'session-a',challenge.challengeId,loginCode,'login'),{code:'invalid_code'});
+  const concurrent=await Promise.allSettled([store.verifyPushChallenge(alice,'session-a',challenge.challengeId,loginCode,'login'),store.verifyPushChallenge(alice,'session-a',challenge.challengeId,loginCode,'login')]);
+  assert.equal(concurrent.filter(r=>r.status==='fulfilled').length,1);
+  await resetLimit(alice);
+  const locked=await store.startPushChallenge(alice,'session-a');const lockedCode=lastCode();const badCode=lockedCode==='000000'?'111111':'000000';
+  for(let i=0;i<5;i++)await assert.rejects(store.verifyPushChallenge(alice,'session-a',locked.challengeId,badCode,'login'));
+  await assert.rejects(store.verifyPushChallenge(alice,'session-a',locked.challengeId,lockedCode,'login'));
+  await resetLimit(alice);
+  const expired=await store.startPushChallenge(alice,'session-a');const expiredCode=lastCode();
+  await db.query("update opsvista_push_mfa_challenges set expires_at=now()-interval '1 second' where id=$1",[expired.challengeId]);
+  await assert.rejects(store.verifyPushChallenge(alice,'session-a',expired.challengeId,expiredCode,'login'));
+  await resetLimit(alice);
+  const prior=await store.startPushChallenge(alice,'session-a');const priorCode=lastCode();
+  await resetLimit(alice);await store.startPushChallenge(alice,'session-a');
+  await assert.rejects(store.verifyPushChallenge(alice,'session-a',prior.challengeId,priorCode,'login'));
+  await assert.rejects(store.startPushChallenge(alice,'new-session'),{code:'rate_limited'});
+  console.log('PASS expiry, attempt cap, replay/concurrent redemption, cross-account/session rejection and account-wide resend limits');
+  await resetLimit(alice);
+  const recovery=enrollment.body.recoveryCodes[0];
+  const recovered=await store.verifyRecoveryCode(alice,'recovered-session',recovery);
+  assert.equal(recovered.sessionId,'recovered-session');
+  await assert.rejects(store.verifyRecoveryCode(alice,'recovered-session',recovery),{code:'invalid_recovery_code'});
+  await assert.rejects(store.verifyRecoveryCode(bob,'session-a',enrollment.body.recoveryCodes[1]),{code:'invalid_recovery_code'});
+  assert.equal(await store.validPushAssurance(alice,'recovered-session',recovered),true);
+  assert.equal(await store.validPushAssurance(alice,'wrong-session',recovered),false);
+  assert.equal(await store.validPushAssurance(alice,'recovered-session',{...recovered,verifiedAt:Date.now()-13*3600000}),false);
+  const stored=(await db.query('select recovery_hashes from opsvista_push_mfa_devices where user_id=$1',['alice'])).rows[0];
+  assert.ok(!JSON.stringify(stored).includes(recovery.replaceAll('-','')));
+  const replacement=await store.startPushChallenge(alice,'recovered-session',{subscription:subscription('replacement'),locale:'en'});
+  await store.verifyPushChallenge(alice,'recovered-session',replacement.challengeId,lastCode(),'enroll');
+  assert.equal(await store.validPushAssurance(alice,'recovered-session',recovered),false);
+  console.log('PASS one-use recovery codes, account binding, hashed storage, proof expiry and phone replacement invalidation');
+  identify(user('founder'));
+  assert.equal((await request({action:'mfa_status'})).body.method,'authenticator');
+  for(const action of ['push_start','push_verify','push_enroll_start','push_enroll_verify','recovery_verify']) assert.equal((await request({action})).status,403);
+  assert.equal((await request({})).status,401);
+  identify(user('founder'),{aal:'aal2',hasVerifiedMfa:true});
+  assert.equal((await request({})).status,200);
+  assert.equal((await request({}, {}, legacy)).status,410);
+  assert.equal(auth.readSession('opsvista_session=%invalid'),null);
+  assert.equal(auth.readSession(cookie).pushAssurance,undefined);
+  console.log('PASS Founder Authenticator requirement, retired password-only route and no proof leakage');
+  const pushResponse=async actor=>{let output,status;await webPushEndpoint({method:'POST',headers,body:{action:'unsubscribe',endpoint:subscription('replacement').endpoint}},{status(value){status=value;return this},json(value){output=value},setHeader(){}},actor);return {body:output,status}};
+  assert.equal((await pushResponse(alice)).body.retainSubscription,true);
+  assert.equal((await pushResponse(bob)).body.retainSubscription,false);
+  await resetLimit(alice);
+  webpush.sendNotification=async()=>{throw {statusCode:410}};
+  await assert.rejects(store.startPushChallenge(alice,'session-a'),{code:'delivery_unconfirmed'});
+  const remaining=(await db.query("select count(*)::int as count from opsvista_push_mfa_challenges where user_id='alice' and session_id='session-a' and used_at is null and expires_at>now()" )).rows[0].count;
+  assert.equal(remaining,0);
+  console.log('PASS logout preserves only the owner’s security factor and delivery failure never authenticates');
+} finally {
+  webpush.sendNotification=originalSend;
+  if(savedEnv.secret===undefined)delete process.env.OPSVISTA_SESSION_SECRET;else process.env.OPSVISTA_SESSION_SECRET=savedEnv.secret;
+  if(savedEnv.db===undefined)delete process.env.OPSVISTA_DATABASE_URL;else process.env.OPSVISTA_DATABASE_URL=savedEnv.db;
+  await db?.close();await rm(temp,{recursive:true,force:true});
+}

@@ -32,7 +32,8 @@ export async function detachPushOnLogout() {
   const registration = await navigator.serviceWorker.getRegistration('/');
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return;
-  // Revoke the browser capability even if the server is temporarily unavailable.
-  try { await pushRequest({ action: 'unsubscribe', endpoint: subscription.endpoint }); }
-  finally { await subscription.unsubscribe(); }
+  // Keep the separately enrolled security factor available after sign-out.
+  // If the server is unavailable, do not destroy a potentially required factor.
+  const result = await pushRequest({ action: 'unsubscribe', endpoint: subscription.endpoint });
+  if (!result.retainSubscription) await subscription.unsubscribe();
 }

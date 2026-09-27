@@ -62,6 +62,17 @@ async function signingKeys(): Promise<PushKeys> {
 }
 export async function webPushPublicKey() { return (await signingKeys()).publicKey; }
 
+// Security delivery uses an independently verified device, never the operational
+// subscriber list or its preference settings. The code is never logged.
+export async function sendLoginPush(subscription: Parameters<typeof deliverWebPush>[0], code: string, locale: string, challengeId: string) {
+  const es = locale === 'es';
+  return deliverWebPush(subscription, await signingKeys(), {
+    title: es ? 'OpsVista · Código de acceso' : 'OpsVista · Sign-in code',
+    body: es ? `Tu código es ${code}. Vence en 5 minutos. No lo compartas. Si no intentaste entrar, ignora este aviso.` : `Your code is ${code}. Expires in 5 minutes. Do not share it. If you did not try to sign in, ignore this notice.`,
+    urgency: 'high', tag: `opsvista-login-${challengeId}`, url: '/?login=1', ttlSeconds: 300, kind: 'login',
+  });
+}
+
 export async function webPushRegistered(endpoint: string, user: SessionUser) {
   await ensureSchema();
   const rows = await sql()`select endpoint from opsvista_web_push_subscriptions where endpoint=${endpoint}

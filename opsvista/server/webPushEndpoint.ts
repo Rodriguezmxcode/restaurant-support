@@ -4,6 +4,7 @@ import { getOrganizationMembership } from './organizationStore.js';
 import { getNotificationPreferences, updateNotificationPreferences } from './actionNotificationStore.js';
 import { isSameOriginPushRequest, validateWebSubscription } from './webPushDelivery.js';
 import { registerWebPush, removeWebPush, testWebPush, webPushPublicKey, webPushRegistered } from './webPushStore.js';
+import { pushMfaDevice } from './pushMfaStore.js';
 
 type Request = { method?: string; headers?: Record<string, string | string[] | undefined>; body?: Record<string, unknown> };
 type Response = { status: (code: number) => Response; json: (body: unknown) => void; setHeader?: (name: string, value: string) => void };
@@ -48,7 +49,11 @@ export async function webPushEndpoint(req: Request, res: Response, user: Session
     }
     if (!endpoint || endpoint.length > 4096) return res.status(400).json({ error: 'Device endpoint required' });
     if (action === 'status') return res.status(200).json({ registered: await webPushRegistered(endpoint, user) });
-    if (action === 'unsubscribe') { await removeWebPush(endpoint, user); return res.status(200).json({ registered: false }); }
+    if (action === 'unsubscribe') {
+      const retainSubscription = user.role !== 'Founder' && (await pushMfaDevice(user))?.endpoint === endpoint;
+      await removeWebPush(endpoint, user);
+      return res.status(200).json({ registered: false, retainSubscription });
+    }
     if (action === 'test') {
       if (!(await getNotificationPreferences(user)).pushEnabled) return res.status(200).json({ accepted: false, reason: 'push_disabled' });
       return res.status(200).json(await testWebPush(endpoint, user));
