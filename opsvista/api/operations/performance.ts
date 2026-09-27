@@ -1,3 +1,4 @@
+import { getOvertimePayrollReference, parsePayrollReference, savePayrollReference } from '../../server/overtimePayrollReference.js';
 import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
@@ -26,10 +27,19 @@ async function getPerformanceTaskCompliance(start:string,end:string,requested?:s
 }
 
 export default async function handler(req:Req,res:Res){
-  if(req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
+  res.setHeader?.('Cache-Control','private, no-store');
+  if(!['GET','POST'].includes(req.method||'')){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
   if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
+  if(['POST'].includes(req.method||'')){
+    if(asString(req.query?.payroll_reference)!=='true')return res.status(405).json({error:'Method not allowed'});
+    if(!['Founder','Corporate','HR'].includes(user.role))return res.status(403).json({error:'Payroll imports require Corporate or HR access'});
+    let reference;
+    try{reference=parsePayrollReference(req.body);}catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Invalid payroll reference'});}
+    try{await savePayrollReference('org-puerto-vallarta',reference,user.id);return res.status(200).json({saved:true,start:reference.start,end:reference.end});}
+    catch{return res.status(503).json({error:'Payroll reference could not be saved. Please try again.'});}
+  }
   if(asString(req.query?.team_roster)==='true'){
     try{const organizationId=user.organizationId||'org-puerto-vallarta';const guid=asString(req.query?.employee_guid);
       if(req.method==='PUT'){if(!['Founder','Corporate','HR'].includes(user.role))return res.status(403).json({error:'Employee editing requires Corporate or HR access'});if(!guid)return res.status(400).json({error:'Employee GUID required'});const employee=await updateTeamEmployee(organizationId,guid,(req.body||{}) as any,{id:user.id,name:user.name});return res.status(200).json({employee});}
@@ -66,12 +76,14 @@ export default async function handler(req:Req,res:Res){
       getToastPerformance(start,end,requested),
       sameLaborRange?Promise.resolve(null):getToastEmployeeLabor(scheduleStart,overtimeEnd,requested),
       includeTasks?getPerformanceTaskCompliance(start,end,requested).then(data=>({data,error:''})).catch(taskError=>({data:null,error:taskError instanceof Error?taskError.message:'7shifts data unavailable'})):Promise.resolve({data:null,error:''}),
-      getSevenShiftsScheduleRisk(scheduleStart,scheduleEnd,requested).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
+      getSevenShiftsScheduleRisk(scheduleStart,scheduleEnd,requested,overtimeEnd,asOf).then(data=>({data,error:''})).catch(scheduleError=>({data:null,error:scheduleError instanceof Error?scheduleError.message:'7shifts schedule data unavailable'})),
       wantsElapsed?getGoogleOperatingSchedules(requested??['Stamford','Fairfield','Orange','Avon','Southington','Danbury','Middletown','Newington']).then(schedules=>({schedules,error:''})).catch(()=>({schedules:verifiedHoursFallback(asOf),error:'Live Google hours unavailable. Using the dated Google Maps reference where available; special hours could not be checked.'})):Promise.resolve({schedules:{},error:''}),
     ]);
     const taskCompliance=taskResult.data,taskComplianceError=taskResult.error;
     const overtimeEmployeeLabor=weeklyEmployeeLabor??toastLocations.flatMap(row=>row.employeeLabor);
     const scheduleRisk=scheduleResult.data?applyToastLaborToScheduleRisk(scheduleResult.data,overtimeEmployeeLabor):null,scheduleRiskError=scheduleResult.error;
+    const payrollResult=scheduleRisk?await getOvertimePayrollReference('org-puerto-vallarta',scheduleStart,scheduleEnd,overtimeEnd,scheduleRisk.locations.map(row=>row.location)).then(data=>({data,error:''})).catch(()=>({data:null,error:'Payroll reference unavailable'})):{data:null,error:''};
+    const reconciledScheduleRisk=scheduleRisk?{...scheduleRisk,payrollReference:payrollResult.data,payrollReferenceError:payrollResult.error}:null;
     const salary=allocateSalaryLabor(start,end,toastLocations.map(row=>row.location));
     const salaryByLocation=new Map(salary.rows.map(row=>[row.location,row]));
     const candidateTiming=wantsElapsed?{...intradaySalary(start,toastLocations.map(row=>({...row,salaryLaborCost:salaryByLocation.get(row.location)?.salaryLaborCost??0,salaryConfigured:salaryByLocation.get(row.location)?.salaryConfigured??false})),asOf,hoursResult.schedules),hoursError:hoursResult.error}:null;
@@ -100,7 +112,7 @@ export default async function handler(req:Req,res:Res){
     }),{netSales:0,discountAmount:0,bonusDiscountAmount:0,uberEatsDiscountAmount:0,employeeMealDiscountAmount:0,voidAmount:0,hourlyHours:0,overtimeHours:0,regularLaborCost:0,overtimeLaborCost:0,hourlyLaborCost:0,salaryLaborCost:0,totalLaborCost:0});
     return res.status(200).json({
       source:'Toast Standard API + 7shifts schedule + OpsVista salary allocation',start,end,scheduleStart,scheduleEnd,overtimeEnd,locations,
-      salaryLaborConfigured:salary.configured,salaryTiming,taskCompliance,taskComplianceError,scheduleRisk,scheduleRiskError,
+      salaryLaborConfigured:salary.configured,salaryTiming,taskCompliance,taskComplianceError,scheduleRisk:reconciledScheduleRisk,scheduleRiskError,
       totals:{
         ...Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,round(v)])),
         discountPct:totals.netSales?round(totals.discountAmount/totals.netSales*100):0,

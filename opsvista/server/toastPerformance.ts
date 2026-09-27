@@ -1,3 +1,4 @@
+import { nextDate } from '../shared/overtimePeriod.js';
 import { standardToastConfigured,standardToastRequest,toastLocations } from './toastClient.js';
 
 type ToastDiscount={discountAmount?:number;processingState?:string;name?:string;externalId?:string;appliedPromoCode?:string;discountPlu?:string;discount?:ExternalReference;appliedDiscountReason?:{name?:string;description?:string;comment?:string}};
@@ -45,14 +46,14 @@ export type ToastEmployeeLabor={
   hourlyWage:number|null;
   regularLaborCost:number;
   overtimeLaborCost:number;
+  overtimeCostComplete:boolean;
+  employmentType:'hourly'|'salary'|'unknown';
   totalLaborCost:number;
   wageSource:'time_entry'|'employee_override'|'unavailable';
 };
 
 const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
 const ymd=(iso:string)=>Number(iso.replaceAll('-',''));
-const rangeStart=(iso:string)=>`${iso}T00:00:00.000Z`;
-function dayAfter(iso:string){const d=new Date(`${iso}T00:00:00.000Z`);d.setUTCDate(d.getUTCDate()+1);return d.toISOString();}
 
 function discountIdentity(discount:ToastDiscount){
   return [discount.name,discount.externalId,discount.appliedPromoCode,discount.discountPlu,discount.discount?.externalId,discount.appliedDiscountReason?.name,discount.appliedDiscountReason?.description,discount.appliedDiscountReason?.comment].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -121,26 +122,20 @@ async function getOrdersForRange(restaurantGuid:string,start:string,end:string){
   return all;
 }
 
-async function getLaborForRange(restaurantGuid:string,start:string,end:string){
-  // Toast rejects time-entry windows longer than 30 days. Calendar months can
-  // contain 31 days, so keep the user-facing range intact and read it through
-  // adjacent half-open chunks: [start, endDate). This avoids gaps and overlap.
-  const entries:TimeEntry[]=[];
-  const seen=new Set<string>();
-  for(let cursor=start;cursor<=end;){
-    const maximumChunkEnd=new Date(`${cursor}T00:00:00.000Z`);
-    maximumChunkEnd.setUTCDate(maximumChunkEnd.getUTCDate()+29);
-    const maximumChunkEndDate=maximumChunkEnd.toISOString().slice(0,10);
-    const chunkEnd=maximumChunkEndDate<end?maximumChunkEndDate:end;
-    const query=new URLSearchParams({startDate:rangeStart(cursor),endDate:dayAfter(chunkEnd),includeArchived:'false'});
-    const chunk=await standardToastRequest(`/labor/v1/timeEntries?${query.toString()}`,restaurantGuid) as TimeEntry[];
-    for(const entry of Array.isArray(chunk)?chunk:[]){
+export async function getLaborForRange(restaurantGuid:string,start:string,end:string){
+  // Toast's businessDate applies the restaurant's own closeout hour and timezone.
+  // UTC midnight windows can include the previous evening and omit the last one.
+  const entries:TimeEntry[]=[];const seen=new Set<string>();
+  for(let date=start;date<=end;date=nextDate(date)){
+    const query=new URLSearchParams({businessDate:String(ymd(date))});
+    const rows=await standardToastRequest(`/labor/v1/timeEntries?${query}`,restaurantGuid) as TimeEntry[];
+    for(const entry of Array.isArray(rows)?rows:[]){
+      if(entry.deleted)continue;
       const guid=String(entry.guid||'').trim();
       if(guid&&seen.has(guid))continue;
       if(guid)seen.add(guid);
       entries.push(entry);
     }
-    cursor=dayAfter(chunkEnd).slice(0,10);
   }
   return entries;
 }
@@ -152,18 +147,21 @@ async function getEmployees(restaurantGuid:string){
 function validToastHourlyWage(value:unknown){const wage=Number(value);return Number.isFinite(wage)&&wage>0&&wage<=250?wage:0;}
 function employeeName(employee:ToastEmployee|undefined,guid:string){return [employee?.chosenName||employee?.firstName,employee?.lastName].filter(Boolean).join(' ').trim()||`Toast employee ${guid.slice(0,8)}`;}
 
-function summarizeEmployeeLabor(entries:TimeEntry[],employees:ToastEmployee[],location:string):ToastEmployeeLabor[]{
-  type Acc={employeeGuid:string;externalEmployeeId:string;employeeName:string;email:string;location:string;regularHours:number;overtimeHours:number;wageHours:number;weightedWage:number;regularLaborCost:number;overtimeLaborCost:number;overrideWages:number[]};
+export function summarizeEmployeeLabor(entries:TimeEntry[],employees:ToastEmployee[],location:string):ToastEmployeeLabor[]{
+  type Acc={employeeGuid:string;externalEmployeeId:string;employeeName:string;email:string;location:string;regularHours:number;overtimeHours:number;wageHours:number;weightedWage:number;regularLaborCost:number;overtimeLaborCost:number;overrideWages:number[];missingOvertimeRate:boolean;hourlyEntries:number;salaryEntries:number};
   const employeeMap=new Map(employees.filter(employee=>employee.guid).map(employee=>[String(employee.guid),employee]));
   const rows=new Map<string,Acc>();
-  const ensure=(guid:string)=>{const employee=employeeMap.get(guid);let row=rows.get(guid);if(!row){row={employeeGuid:guid,externalEmployeeId:String(employee?.externalEmployeeId||''),employeeName:employeeName(employee,guid),email:String(employee?.email||''),location,regularHours:0,overtimeHours:0,wageHours:0,weightedWage:0,regularLaborCost:0,overtimeLaborCost:0,overrideWages:(employee?.wageOverrides||[]).map(override=>validToastHourlyWage(override.wage)).filter(Boolean)};rows.set(guid,row);}return row;};
+  const ensure=(guid:string)=>{const employee=employeeMap.get(guid);let row=rows.get(guid);if(!row){row={employeeGuid:guid,externalEmployeeId:String(employee?.externalEmployeeId||''),employeeName:employeeName(employee,guid),email:String(employee?.email||''),location,regularHours:0,overtimeHours:0,wageHours:0,weightedWage:0,regularLaborCost:0,overtimeLaborCost:0,missingOvertimeRate:false,hourlyEntries:0,salaryEntries:0,overrideWages:(employee?.wageOverrides||[]).map(override=>validToastHourlyWage(override.wage)).filter(Boolean)};rows.set(guid,row);}return row;};
   for(const entry of entries){
     if(entry.deleted)continue;
     const guid=String(entry.employeeReference?.guid||'').trim();if(!guid)continue;
     const row=ensure(guid),regular=Number(entry.regularHours||0),overtime=Number(entry.overtimeHours||0),hours=regular+overtime;
     row.regularHours+=regular;row.overtimeHours+=overtime;
-    const wage=validToastHourlyWage(entry.hourlyWage);
-    if(wage&&hours>0){row.wageHours+=hours;row.weightedWage+=wage*hours;row.regularLaborCost+=regular*wage;row.overtimeLaborCost+=overtime*wage*1.5;}
+    const validRate=typeof entry.hourlyWage==='number'&&Number.isFinite(entry.hourlyWage)&&entry.hourlyWage>=0&&entry.hourlyWage<=250;
+    if(hours>0){if(entry.hourlyWage===null)row.salaryEntries++;else if(validRate)row.hourlyEntries++;}
+    if(overtime>0&&!validRate)row.missingOvertimeRate=true;
+    const wage=validRate?entry.hourlyWage!:0;
+    if(validRate&&hours>0){row.wageHours+=hours;row.weightedWage+=wage*hours;row.regularLaborCost+=regular*wage;row.overtimeLaborCost+=overtime*wage*1.5;}
   }
   for(const employee of employees)if(employee.guid&&!employee.deleted)ensure(String(employee.guid));
   return Array.from(rows.values()).map(row=>{
@@ -172,8 +170,11 @@ function summarizeEmployeeLabor(entries:TimeEntry[],employees:ToastEmployee[],lo
     const wageSource:ToastEmployeeLabor['wageSource']=row.wageHours?'time_entry':hourlyWage!==null?'employee_override':'unavailable';
     const totalHours=row.regularHours+row.overtimeHours;
     const regularLaborCost=row.wageHours?row.regularLaborCost:hourlyWage!==null?row.regularHours*hourlyWage:0;
-    const overtimeLaborCost=row.wageHours?row.overtimeLaborCost:hourlyWage!==null?row.overtimeHours*hourlyWage*1.5:0;
-    return {employeeGuid:row.employeeGuid,externalEmployeeId:row.externalEmployeeId,employeeName:row.employeeName,email:row.email,location:row.location,regularHours:round(row.regularHours),overtimeHours:round(row.overtimeHours),totalHours:round(totalHours),hourlyWage:hourlyWage===null?null:round(hourlyWage),regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),totalLaborCost:round(regularLaborCost+overtimeLaborCost),wageSource};
+    // Current employee overrides cannot establish a historical overtime payment.
+    const overtimeLaborCost=row.overtimeLaborCost;
+    const overtimeCostComplete=!row.missingOvertimeRate;
+    const employmentType:ToastEmployeeLabor['employmentType']=row.hourlyEntries?'hourly':row.salaryEntries?'salary':'unknown';
+    return {employeeGuid:row.employeeGuid,externalEmployeeId:row.externalEmployeeId,employeeName:row.employeeName,email:row.email,location:row.location,regularHours:row.regularHours,overtimeHours:row.overtimeHours,totalHours,hourlyWage,regularLaborCost:round(regularLaborCost),overtimeLaborCost:round(overtimeLaborCost),totalLaborCost:round(regularLaborCost+overtimeLaborCost),overtimeCostComplete,employmentType,wageSource};
   });
 }
 
