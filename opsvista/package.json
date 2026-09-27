@@ -15,7 +15,8 @@
     "test:salary-timing": "node scripts/test-salary-timing.mjs",
     "test:copilot": "node scripts/test-copilot.mjs",
     "test:partner-api": "node scripts/test-partner-api.mjs",
-    "test:web-push": "node scripts/test-web-push.mjs"
+    "test:web-push": "node scripts/test-web-push.mjs",
+    "test:operational-alerts": "node scripts/test-operational-alerts.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
