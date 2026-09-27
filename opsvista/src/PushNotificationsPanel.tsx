@@ -98,7 +98,7 @@ export default function PushNotificationsPanel() {
         <button type="button" className="push-secondary" disabled={busy || !enabled} onClick={() => void test()}>{t('Send me a test', 'Enviarme una prueba')}</button></div>}
     {permission === 'denied' && <p className="push-feedback" role="status">{messages.denied}</p>}
     {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
-    <p className="push-privacy">{t('Details stay inside OpsVista. Each device needs its own permission; signing out disconnects notifications on this device.', 'Los detalles se consultan dentro de OpsVista. Cada dispositivo requiere su propio permiso; cerrar sesión desconecta las notificaciones de este dispositivo.')}</p>
+    <p className="push-privacy">{t('Notifications show the location, alert and priority. Full details are available inside OpsVista. Signing out disconnects this device.', 'Las notificaciones muestran la locación, la alerta y su prioridad. Consulta el detalle completo dentro de OpsVista. Cerrar sesión desconecta este dispositivo.')}</p>
     <OperationalAlertInbox />
   </section>;
 }

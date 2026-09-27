@@ -23,14 +23,17 @@ export function validateWebSubscription(value: unknown): WebSubscription {
   return { endpoint: url.href, keys: { p256dh, auth } };
 }
 
-export function pushPayload(input: { actionId?: string; category?: string; tag?: string; test?: boolean }, locale = 'en') {
+export function pushPayload(input: { actionId?: string; category?: string; tag?: string; test?: boolean; title?: string; body?: string; priority?: 'high' | 'normal' | 'low' }, locale = 'en') {
   const es = locale === 'es';
-  // Lock screens never expose names, sales, payroll or task contents.
+  // Operational previews are explicitly requested by the workspace owner.
+  const clean = (value: string | undefined, max: number) => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const label = input.priority === 'high' ? (es ? 'Alta prioridad' : 'High priority') : input.priority === 'low' ? (es ? 'Actualización' : 'Update') : (es ? 'Atención' : 'Attention');
   return {
-    title: 'OpsVista',
+    title: input.test ? 'OpsVista · Test' : clean(input.title, 110) ? `OpsVista · ${label} · ${clean(input.title, 110)}` : 'OpsVista',
     body: input.test
       ? es ? 'Notificaciones activadas. Esta es tu prueba de OpsVista.' : 'Notifications enabled. This is your OpsVista test.'
-      : es ? 'Tienes una actualización operativa. Abre OpsVista para revisarla.' : 'You have an operational update. Open OpsVista to review it.',
+      : clean(input.body, 280) || (es ? 'Tienes una actualización operativa. Abre OpsVista para revisarla.' : 'You have an operational update. Open OpsVista to review it.'),
+    urgency: input.priority === 'high' ? 'high' as const : 'normal' as const,
     tag: input.tag || 'opsvista-update',
     url: input.actionId ? `/?action=${encodeURIComponent(input.actionId)}` : '/?notifications=1',
   };
@@ -39,7 +42,7 @@ export function pushPayload(input: { actionId?: string; category?: string; tag?:
 export async function deliverWebPush(subscription: WebSubscription, keys: PushKeys, payload: ReturnType<typeof pushPayload>, send = webpush.sendNotification) {
   try {
     const result = await send(validateWebSubscription(subscription), JSON.stringify(payload), {
-      vapidDetails: { subject: 'https://getopsvista.com', ...keys }, TTL: 3600, urgency: 'normal', timeout: 10000,
+      vapidDetails: { subject: 'https://getopsvista.com', ...keys }, TTL: 3600, urgency: payload.urgency, timeout: 10000,
     });
     return { accepted: result.statusCode >= 200 && result.statusCode < 300, expired: false };
   } catch (error) {
