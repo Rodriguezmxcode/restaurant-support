@@ -46,6 +46,12 @@ try {
     insert into opsvista_management_users values ('founder','org-puerto-vallarta',true,'Founder'),('inactive-founder','org-puerto-vallarta',false,'Founder'),('no-membership','org-a',true,'Location Manager');
     insert into opsvista_notification_preferences values ('alice','org-a',true),('bob','org-a',false),('carol','org-b',true),('disabled','org-a',true);`);
   const delivery = await import(join(temp,'webPushDelivery.js'));
+  const preview = delivery.pushPayload({title:'Orange · Voids',body:'Voids 0.80% (>0.50%). Revisar anulaciones.',priority:'high'},'es');
+  assert.equal(preview.title, 'OpsVista · Alta prioridad · Orange · Voids');
+  assert.ok(preview.body.includes('0.80%')); assert.equal(preview.urgency,'high');
+  assert.ok(delivery.pushPayload({body:'x'.repeat(1000)}).body.length <= 280);
+  assert.equal(delivery.pushPayload({body:'a\nb'}).body,'a b');
+  console.log('PASS descriptive alert preview, priority and bounded plain text');
   const store = await import(join(temp,'webPushStore.js'));
   const {webPushEndpoint} = await import(join(temp,'webPushEndpoint.js'));
   const ecdh=createECDH('prime256v1');ecdh.generateKeys();

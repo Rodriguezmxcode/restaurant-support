@@ -246,7 +246,7 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
   const pushUserIds = recipientRows.filter(row => row.push_enabled !== false).map(row => String(row.id));
   const devices = pushUserIds.length ? await db`select token,user_id from opsvista_mobile_devices
     where organization_id=${organization(actor)} and user_id in ${db(pushUserIds)} and active=true` : [];
-  const webPush = await sendWebPushToUsers(pushUserIds,actor,{actionId:input.actionId,category:input.category,tag:input.eventKey});
+  const webPush = await sendWebPushToUsers(pushUserIds,actor,{actionId:input.actionId,category:input.category,tag:input.eventKey,title:input.title,body:input.body});
   const email = await sendEmail(input.eventKey,input.title,input.body,recipientRows,actor,input.actionId);
   await db`update opsvista_operational_notifications set email_recipients=${email.accepted} where event_key=${input.eventKey}`;
   if (webPush.accepted) await db`update opsvista_operational_notifications set push_devices=${webPush.accepted} where event_key=${input.eventKey}`;
@@ -291,7 +291,7 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
   if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
   const pushEnabled = recipientRows.some(row => row.push_enabled !== false);
   const devices = pushEnabled ? await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true` : [];
-  const webPush = await sendWebPushToUsers(pushEnabled ? [action.ownerId] : [],actor,{actionId:action.id,category:'action',tag:`action:${action.id}`});
+  const webPush = await sendWebPushToUsers(pushEnabled ? [action.ownerId] : [],actor,{actionId:action.id,category:'action',tag:`action:${action.id}`,title:`${action.location} · ${action.title}`,body:action.recommendation || action.signal,priority:action.severity === 'High' ? 'high' : action.severity === 'Low' ? 'low' : 'normal'});
   if (webPush.accepted) {
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id,action.ownerId,action.ownerName,'Push accepted',actor,`${webPush.accepted} web push accepted`);

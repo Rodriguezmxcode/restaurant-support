@@ -1,7 +1,7 @@
 export const alertLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Avon', 'Southington'] as const;
 export const alertJobs = ['performance', 'overtime', 'tasks', 'logbook', 'reviews', 'ramp', 'prices', 'bonus'] as const;
 export type AlertJob = typeof alertJobs[number];
-export type OperationalAlert = { key: string; kind: AlertJob; location: string; title: string; body: string; module: string };
+export type OperationalAlert = { priority?: 'high' | 'normal' | 'low'; key: string; kind: AlertJob; location: string; title: string; body: string; module: string };
 export function alertClock(now = new Date()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(now).map(p => [p.type, p.value]));
   const day = `${p.year}-${p.month}-${p.day}`;

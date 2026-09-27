@@ -26,9 +26,9 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
   const { day, hour } = alertClock(now);
   const scope = location ? [location] : [...alertLocations];
   const alerts: OperationalAlert[] = [];
-  const add = (loc: string, title: string, body: string, module: string, key = day) => {
+  const add = (loc: string, title: string, body: string, module: string, key = day, priority: OperationalAlert['priority'] = 'normal') => {
     const canonical = canonicalAlertLocation(loc);
-    if (canonical || loc === 'Corporate Office') alerts.push({ key: `${job}:${key}:${canonical || loc}`, kind: job, location: canonical || loc, title, body, module });
+    if (canonical || loc === 'Corporate Office') alerts.push({ key: `${job}:${key}:${canonical || loc}`, kind: job, location: canonical || loc, title, body, module, priority });
   };
   if (job === 'performance') {
     const [{ getToastPerformance }, { allocateSalaryLabor }, { intradaySalary }, { getGoogleOperatingSchedules }] = await Promise.all([
@@ -81,7 +81,7 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
       if (row.mappingError) continue;
       const low = row.reviews.filter(r => r.rating <= 2 && Date.parse(r.createTime) >= Date.parse(`${shiftDay(day, -1)}T00:00:00Z`));
       const unanswered = row.reviews.filter(r => !r.answered && now.getTime() - Date.parse(r.createTime) >= 24 * 3600000);
-      if (low.length || unanswered.length) add(row.location, `${row.location} · Google Reviews`, `${low.length} review(s) reciente(s) de 1–2 estrellas; ${unanswered.length} sin respuesta después de 24 horas (últimos 30 días). Revisa cada caso y responde desde Google Business Profile.`, 'Google Reviews');
+      if (low.length || unanswered.length) add(row.location, `${row.location} · Google Reviews`, `${low.length} review(s) reciente(s) de 1–2 estrellas; ${unanswered.length} sin respuesta después de 24 horas (últimos 30 días). Revisa cada caso y responde desde Google Business Profile.`, 'Google Reviews', day, low.length ? 'high' : 'normal');
     }
   }
   if (job === 'ramp') {
@@ -99,7 +99,7 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
     if (now.getTime() - Date.parse(result.fetchedAt) > 3600000) throw new Error('Price source stale');
     for (const loc of alertLocations) {
       const rows = result.alerts.filter(row => row.status !== 'VERIFY' && (row.changePct || 0) >= 5 && canonicalAlertLocation(row.current.location) === loc && row.current.date >= shiftDay(day, -2));
-      if (rows.length) add(loc, `${loc} · Price Watch`, `${rows.length} producto(s) con aumento ≥5% en invoices recientes; ${rows.filter(r => r.status === 'HIGH').length} HIGH (≥10%) y ${rows.filter(r => r.status === 'CRITICAL').length} CRITICAL (≥20%). ${rows.slice(0, 3).map(r => `${r.itemName}: +${r.changePct?.toFixed(1)}%`).join('; ')}. Comparaciones según producto y unidad normalizada; revisa invoices en Price Watch.`, 'Price Watch');
+      if (rows.length) add(loc, `${loc} · Price Watch`, `${rows.length} producto(s) con aumento ≥5% en invoices recientes; ${rows.filter(r => r.status === 'HIGH').length} HIGH (≥10%) y ${rows.filter(r => r.status === 'CRITICAL').length} CRITICAL (≥20%). ${rows.slice(0, 3).map(r => `${r.itemName}: +${r.changePct?.toFixed(1)}%`).join('; ')}. Comparaciones según producto y unidad normalizada; revisa invoices en Price Watch.`, 'Price Watch', day, rows.some(r => r.status === 'CRITICAL') ? 'high' : 'normal');
     }
   }
   if (job === 'bonus') {

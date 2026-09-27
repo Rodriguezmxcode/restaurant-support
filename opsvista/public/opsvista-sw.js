@@ -4,7 +4,7 @@ self.addEventListener('activate', event => event.waitUntil(self.clients.claim())
 self.addEventListener('push', event => {
   let payload = {};
   try { payload = event.data?.json() || {}; } catch { /* Always show a visible notification. */ }
-  event.waitUntil(self.registration.showNotification('OpsVista', {
+  event.waitUntil(self.registration.showNotification(typeof payload.title === 'string' && payload.title.trim() ? payload.title.slice(0, 160) : 'OpsVista', {
     body: typeof payload.body === 'string' ? payload.body : 'Open OpsVista to review your operational updates.',
     icon: '/icons/opsvista-192.png', badge: '/icons/opsvista-192.png',
     tag: typeof payload.tag === 'string' ? payload.tag : 'opsvista-update',
