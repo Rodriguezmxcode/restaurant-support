@@ -39,10 +39,10 @@ export function pushPayload(input: { actionId?: string; category?: string; tag?:
   };
 }
 
-export async function deliverWebPush(subscription: WebSubscription, keys: PushKeys, payload: ReturnType<typeof pushPayload>, send = webpush.sendNotification) {
+export async function deliverWebPush(subscription: WebSubscription, keys: PushKeys, payload: ReturnType<typeof pushPayload> & { ttlSeconds?: number; kind?: 'login' }, send = webpush.sendNotification) {
   try {
     const result = await send(validateWebSubscription(subscription), JSON.stringify(payload), {
-      vapidDetails: { subject: 'https://getopsvista.com', ...keys }, TTL: 3600, urgency: payload.urgency, timeout: 10000,
+      vapidDetails: { subject: 'https://getopsvista.com', ...keys }, TTL: payload.ttlSeconds ?? 3600, urgency: payload.urgency, timeout: 10000,
     });
     return { accepted: result.statusCode >= 200 && result.statusCode < 300, expired: false };
   } catch (error) {

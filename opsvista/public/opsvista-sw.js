@@ -8,7 +8,7 @@ self.addEventListener('push', event => {
     body: typeof payload.body === 'string' ? payload.body : 'Open OpsVista to review your operational updates.',
     icon: '/icons/opsvista-192.png', badge: '/icons/opsvista-192.png',
     tag: typeof payload.tag === 'string' ? payload.tag : 'opsvista-update',
-    data: { url: payload.url },
+    data: { url: payload.url, kind: payload.kind },
   }));
 });
 self.addEventListener('notificationclick', event => {
@@ -21,7 +21,11 @@ self.addEventListener('notificationclick', event => {
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === self.location.origin);
-    if (existing) { await existing.navigate(url.href); await existing.focus(); }
+    if (existing) {
+      // Keep the pending challenge and code input when tapping a login push.
+      if (event.notification.data?.kind !== 'login') await existing.navigate(url.href);
+      await existing.focus();
+    }
     else await self.clients.openWindow(url.href);
   })());
 });

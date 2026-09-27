@@ -3,6 +3,7 @@ import { useI18n } from './i18n';
 import { applicationServerKey, needsHomeScreen, pushRegistration, pushRequest, supportsWebPush } from './webPush';
 import './pushNotifications.css';
 import OperationalAlertInbox from './OperationalAlertInbox';
+import SecurityDevicePanel from './SecurityDevicePanel';
 
 export default function PushNotificationsPanel() {
   const { t, language } = useI18n();
@@ -51,8 +52,8 @@ export default function PushNotificationsPanel() {
       const registration = await navigator.serviceWorker.getRegistration('/');
       const subscription = await registration?.pushManager.getSubscription();
       if (subscription) {
-        await pushRequest({ action: 'unsubscribe', endpoint: subscription.endpoint });
-        await subscription.unsubscribe();
+        const result = await pushRequest({ action: 'unsubscribe', endpoint: subscription.endpoint });
+        if (!result.retainSubscription) await subscription.unsubscribe();
       }
       setEnabled(false); setMessage('disabled');
     } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); }
@@ -98,7 +99,8 @@ export default function PushNotificationsPanel() {
         <button type="button" className="push-secondary" disabled={busy || !enabled} onClick={() => void test()}>{t('Send me a test', 'Enviarme una prueba')}</button></div>}
     {permission === 'denied' && <p className="push-feedback" role="status">{messages.denied}</p>}
     {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
-    <p className="push-privacy">{t('Notifications show the location, alert and priority. Full details are available inside OpsVista. Signing out disconnects this device.', 'Las notificaciones muestran la locación, la alerta y su prioridad. Consulta el detalle completo dentro de OpsVista. Cerrar sesión desconecta este dispositivo.')}</p>
+    <p className="push-privacy">{t('Notifications show the location, alert and priority. Sign-out disconnects operational updates. A linked security device remains available for sign-in codes.', 'Las notificaciones muestran la locación, la alerta y su prioridad. Cerrar sesión desconecta las alertas operativas. Un dispositivo de seguridad vinculado sigue disponible para los códigos de acceso.')}</p>
+    <SecurityDevicePanel />
     <OperationalAlertInbox />
   </section>;
 }
