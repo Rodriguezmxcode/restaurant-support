@@ -1,0 +1,14 @@
+{
+  "start": "2026-09-16",
+  "end": "2026-09-22",
+  "locations": [
+    "Southington",
+    "Danbury",
+    "Orange",
+    "Fairfield",
+    "Stamford",
+    "Avon"
+  ],
+  "expiresAt": "2026-09-27T06:00:00Z",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtikktzsIZRg+g33Sqv6n\n/R5nabFxIQCm5EvP5QqhMa4kPe/OqhoQ+nrOtH96YNoYrARoQyjkUVgCusRuukAf\nSdY2UreDOIDZAXE1+uWDtbVv4pGRLQBKfWbZwOFV14Ufz7uG5c/qm2VcuTt4/ZvW\nRFRVUWkrw/gyb4PrE5z5rHzLGAp/Ec3SUnu7uniYmFMICm1UjQUnDOtp/0g4CLlS\nBHpyQwgz7y8kMaI8+GWULYSDBDGBSarkpvnJpC4fFf4r207A8Ux914DOxtlP9dOs\n/RJC3dRt3ltmj0cXLdG9Ks+os3vluunNHG6OsU8o3IZ8/a7Am/mpcGGDFIGoaKXI\nBwIDAQAB\n-----END PUBLIC KEY-----\n"
+}
