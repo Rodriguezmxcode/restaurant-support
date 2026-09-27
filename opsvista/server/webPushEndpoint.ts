@@ -9,9 +9,18 @@ type Request = { method?: string; headers?: Record<string, string | string[] | u
 type Response = { status: (code: number) => Response; json: (body: unknown) => void; setHeader?: (name: string, value: string) => void };
 export async function webPushEndpoint(req: Request, res: Response, user: SessionUser) {
   res.setHeader?.('Cache-Control', 'private, no-store');
-  const [account, membership] = await Promise.all([getManagedUser(user.id), getOrganizationMembership(user.id)]);
-  if (!account?.active || membership?.organizationId !== (user.organizationId || 'org-puerto-vallarta')) return res.status(403).json({ error: 'Active account required' });
   try {
+    const account = await getManagedUser(user.id);
+    if (!account?.active || account.role !== user.role) return res.status(403).json({ error: 'Active account required', code: 'account_access' });
+    // The login flow deliberately gives Founders no organization membership.
+    // Match that identity model while keeping subscriptions in their existing
+    // Puerto Vallarta workspace; a Founder session cannot select another tenant.
+    const organizationId = user.organizationId || 'org-puerto-vallarta';
+    const membership = account.role === 'Founder' ? null : await getOrganizationMembership(user.id);
+    const allowed = account.role === 'Founder'
+      ? organizationId === 'org-puerto-vallarta'
+      : membership?.organizationId === organizationId;
+    if (!allowed) return res.status(403).json({ error: 'Active account required', code: 'account_access' });
     if (!req.method || req.method === 'GET') {
       const preferences = await getNotificationPreferences(user);
       return res.status(200).json({ publicKey: await webPushPublicKey(), pushEnabled: preferences.pushEnabled });

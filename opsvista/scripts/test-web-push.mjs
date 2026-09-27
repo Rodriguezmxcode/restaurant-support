@@ -35,12 +35,15 @@ try {
     export default function postgres(){return query}
   `);
   await writeFile(join(temp,'managementStore.js'), `import {db} from './testDb.js'; export async function getManagedUser(id){return (await db.query('select * from opsvista_management_users where id=$1',[id])).rows[0]}`);
-  await writeFile(join(temp,'organizationStore.js'), `import {db} from './testDb.js'; export async function getOrganizationMembership(id){const row=(await db.query('select organization_id from opsvista_management_users where id=$1',[id])).rows[0];return row?{organizationId:row.organization_id}:null}`);
+  await writeFile(join(temp,'organizationStore.js'), `import {db} from './testDb.js'; export async function getOrganizationMembership(id){const row=(await db.query('select organization_id from test_memberships where user_id=$1',[id])).rows[0];return row?{organizationId:row.organization_id}:null}`);
   await writeFile(join(temp,'actionNotificationStore.js'), `import {db} from './testDb.js'; export async function getNotificationPreferences(user){const row=(await db.query('select * from opsvista_notification_preferences where user_id=$1 and organization_id=$2',[user.id,user.organizationId])).rows[0];return {emailEnabled:true,pushEnabled:row?.push_enabled??true,smsEnabled:false}};export async function updateNotificationPreferences(value,user){await db.query('update opsvista_notification_preferences set push_enabled=$1 where user_id=$2 and organization_id=$3',[value.pushEnabled,user.id,user.organizationId]);return value}`);
   db = (await import(join(temp,'testDb.js'))).db;
-  await db.exec(`create table opsvista_management_users(id text primary key,organization_id text,active boolean);
+  await db.exec(`create table opsvista_management_users(id text primary key,organization_id text,active boolean,role text not null default 'Location Manager');
+    create table test_memberships(user_id text primary key,organization_id text);
     create table opsvista_notification_preferences(user_id text,organization_id text,push_enabled boolean);
-    insert into opsvista_management_users values ('alice','org-a',true),('bob','org-a',true),('carol','org-b',true),('disabled','org-a',false);
+    insert into opsvista_management_users(id,organization_id,active) values ('alice','org-a',true),('bob','org-a',true),('carol','org-b',true),('disabled','org-a',false);
+    insert into test_memberships select id,organization_id from opsvista_management_users;
+    insert into opsvista_management_users values ('founder','org-puerto-vallarta',true,'Founder'),('inactive-founder','org-puerto-vallarta',false,'Founder'),('no-membership','org-a',true,'Location Manager');
     insert into opsvista_notification_preferences values ('alice','org-a',true),('bob','org-a',false),('carol','org-b',true),('disabled','org-a',true);`);
   const delivery = await import(join(temp,'webPushDelivery.js'));
   const store = await import(join(temp,'webPushStore.js'));
@@ -48,7 +51,7 @@ try {
   const ecdh=createECDH('prime256v1');ecdh.generateKeys();
   const keys={p256dh:ecdh.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')};
   const subscription=id=>({endpoint:`https://fcm.googleapis.com/fcm/send/test-${id}`,keys});
-  const user=id=>({id,organizationId:id==='carol'?'org-b':'org-a'});
+  const user=id=>({id,role:'Location Manager',organizationId:id==='carol'?'org-b':'org-a'});
   for(const endpoint of ['http://fcm.googleapis.com/x','https://127.0.0.1/x','https://fcm.googleapis.com.evil.test/x','https://u:p@fcm.googleapis.com/x','https://fcm.googleapis.com:8443/x','https://evil.test/x','https://fcm.googleapis.com/x#fragment']) assert.throws(()=>delivery.validateWebSubscription({...subscription('a'),endpoint}));
   assert.throws(()=>delivery.validateWebSubscription({...subscription('a'),keys:{...keys,p256dh:'x'.repeat(87)}}));
   for(const host of ['fcm.googleapis.com','updates.push.services.mozilla.com','web.push.apple.com']) assert.equal(delivery.validateWebSubscription({...subscription('a'),endpoint:`https://${host}/test`}).endpoint,`https://${host}/test`);
@@ -83,6 +86,17 @@ try {
   assert.equal((await request({},headers,user('alice'),'DELETE')).status,405);
   assert.equal((await request({action:'status',endpoint:subscription('carol').endpoint})).body.registered,false);
   const status=await request(undefined,headers,user('alice'),'GET');assert.equal(status.status,200);assert.equal(status.body.publicKey,publicKey1);assert.equal('privateKey' in status.body,false);
+  const founder={id:'founder',role:'Founder'};
+  assert.equal((await request(undefined,headers,founder,'GET')).status,200);
+  assert.equal((await request({action:'subscribe',subscription:subscription('founder')},headers,founder)).status,200);
+  assert.equal((await request({action:'status',endpoint:subscription('founder').endpoint},headers,founder)).body.registered,true);
+  assert.equal((await request({action:'test',endpoint:subscription('founder').endpoint},headers,founder)).body.accepted,true);
+  assert.equal((await request(undefined,headers,{...founder,organizationId:'org-b'},'GET')).status,403);
+  assert.equal((await request(undefined,headers,{...founder,id:'inactive-founder'},'GET')).status,403);
+  assert.equal((await request(undefined,headers,{...user('alice'),role:'Founder'},'GET')).status,403);
+  assert.equal((await request(undefined,headers,user('no-membership'),'GET')).status,403);
+  assert.equal((await request({action:'status',endpoint:subscription('carol').endpoint},headers,founder)).body.registered,false);
+  console.log('PASS Founder without membership: setup, subscribe and test; reject inactive/stale roles and other tenants');
   console.log('PASS test rate limit and authenticated endpoint ownership checks');
   webpush.sendNotification=async()=>{throw {statusCode:410}};
   assert.equal((await store.sendWebPushToUsers(['alice'],user('alice'),{})).accepted,0);
