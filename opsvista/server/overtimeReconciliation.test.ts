@@ -184,3 +184,10 @@ test('analytics fetch scopes the request, resumes 202 reports and caches complet
     assert.equal((await getToastLaborReport('2026-09-16','2026-09-22',['restaurant-one'])).status,'not_configured');
   }finally{globalThis.fetch=oldFetch;for(const key of ['TOAST_ANALYTICS_API_HOST','TOAST_ANALYTICS_CLIENT_ID','TOAST_ANALYTICS_CLIENT_SECRET']){if(oldEnv[key]===undefined)delete process.env[key];else process.env[key]=oldEnv[key];}}
 });
+
+
+test('inactive roster rows at other locations cannot reclassify known worked hours',()=>{
+  const result=applyToastLaborToScheduleRisk(risk([employee({remainingScheduledHours:3})],['Orange','Avon'],{periodClosed:false}),[labor(),labor({employeeGuid:'inactive-location-record',location:'Avon',regularHours:0,overtimeHours:0,totalHours:0,overtimeLaborCost:0,hourlyWage:null,employmentType:'unknown'})]);
+  assert.equal(result.employees.find(row=>row.userId===1)?.employmentType,'hourly');
+  assert.equal(result.actualOvertimeHours,2);assert.equal(result.additionalProjectedOvertimeHours,3);assert.equal(result.forecastAvailable,true);assert.equal(result.unclassifiedToastOvertimeHours,0);
+});

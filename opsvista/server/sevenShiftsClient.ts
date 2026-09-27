@@ -419,14 +419,16 @@ export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,input
     if(candidates.some(row=>claimed.has(row))){toastMatchStatus='ambiguous';candidates=[];}
     // Classification comes from Toast (or a confirmed manual exception),
     // regardless of whether a scheduled employee can be linked.
-    if(candidates.length){
-      employmentType=candidates.some(row=>classified.get(row)==='unknown')?'unknown':candidates.some(row=>classified.get(row)==='hourly')?'hourly':'salary';
+    const activeCandidates=candidates.filter(row=>row.totalHours>0);
+    const classificationCandidates=activeCandidates.length?activeCandidates:candidates;
+    if(classificationCandidates.length){
+      employmentType=classificationCandidates.some(row=>classified.get(row)==='unknown')?'unknown':classificationCandidates.some(row=>classified.get(row)==='hourly')?'hourly':'salary';
     }
     candidates.forEach(row=>claimed.add(row));
     const workedHours=candidates.reduce((sum,row)=>sum+row.totalHours,0);
     const hourlyRows=candidates.filter(row=>classified.get(row)==='hourly');
     const actualOvertimeHours=hourlyRows.reduce((sum,row)=>sum+row.overtimeHours,0);
-    const forecastAvailable=Boolean(risk.periodClosed)||(risk.scheduleAvailable!==false&&(employee.remainingScheduledHours===0||employmentType==='salary'||(candidates.length>0&&candidates.every(row=>classified.get(row)==='hourly'))));
+    const forecastAvailable=Boolean(risk.periodClosed)||(risk.scheduleAvailable!==false&&(employee.remainingScheduledHours===0||employmentType==='salary'||(classificationCandidates.length>0&&classificationCandidates.every(row=>classified.get(row)==='hourly'))));
     const remainingScheduledHours=risk.periodClosed?0:employee.remainingScheduledHours;
     const projectedHours=workedHours+remainingScheduledHours;
     // Only future shifts add projected exposure. Any existing 40-hour-rule
