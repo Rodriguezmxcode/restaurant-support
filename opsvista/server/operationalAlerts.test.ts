@@ -1,3 +1,5 @@
+import { authorizedAlertCron } from './cronAuth.js';
+import { alertHealth } from '../shared/alertHealth.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
@@ -128,7 +130,37 @@ test('a failed push on a daily rule retries before tomorrow without duplicating 
 });
 test('scheduled endpoint rejects browser cookies, invalid method and unsigned bearer tokens', async () => {
   const response = () => { const result: any = {}; result.status = (value: number) => { result.code = value; return result; }; result.json = (value: any) => { result.body = value; }; return result; };
-  const get = response(); await runner.scheduledAlertsEndpoint({ method: 'GET' }, get); assert.equal(get.code, 405);
+  const get = response(); await runner.scheduledAlertsEndpoint({ method: 'GET' }, get); assert.equal(get.code, 401);
   const post = response(); await runner.scheduledAlertsEndpoint({ method: 'POST', headers: { authorization: 'Bearer unsigned', cookie: 'session' }, query: { job: 'tasks', location: 'Orange' } }, post); assert.equal(post.code, 401);
 });
 test.after(async () => { await pg.close(); });
+
+test('native cron authentication fails closed and cannot be replaced with cookies or user agent', async () => {
+  const saved = process.env.CRON_SECRET;
+  try {
+    delete process.env.CRON_SECRET;
+    assert.equal(authorizedAlertCron('Bearer undefined'), false);
+    process.env.CRON_SECRET = 'synthetic-test-only-secret-32-chars-long';
+    assert.equal(authorizedAlertCron('Bearer wrong'), false);
+    assert.equal(authorizedAlertCron(['Bearer ' + process.env.CRON_SECRET]), false);
+    assert.equal(authorizedAlertCron('Bearer ' + process.env.CRON_SECRET), true);
+    const res: any = { code: 0, status(code: number) { this.code = code; return this; }, json(body: any) { this.body = body; } };
+    await runner.scheduledAlertsEndpoint({ method: 'GET', headers: { authorization: 'Bearer ' + process.env.CRON_SECRET }, query: { job: 'tasks', location: 'outside-org' } }, res);
+    assert.equal(res.code, 400);
+    await runner.scheduledAlertsEndpoint({ method: 'DELETE' }, res);
+    assert.equal(res.code, 405);
+  } finally { if (saved === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = saved; }
+});
+test('scheduler health detects missed scans, ignores verification, respects daily completion and quiet hours', () => {
+  const now = new Date('2026-09-28T18:00:00Z');
+  const daily = ['logbook','ramp','prices','bonus'].map(job => ({ job, status: 'ok', checkedAt: '2026-09-28T13:05:00Z', successAt: '2026-09-28T13:05:00Z' }));
+  assert.deepEqual(alertHealth(daily, now).delayed, ['reviews']);
+  assert.deepEqual(alertHealth([...daily, { job: 'verify:reviews', status: 'ok', checkedAt: now.toISOString() }], now).delayed, ['reviews']);
+  const rows = [...daily, { job: 'reviews', status: 'ok', checkedAt: '2026-09-28T17:30:00Z' }];
+  assert.equal(alertHealth(rows, now).status, 'healthy');
+  assert.equal(alertHealth([...daily, { job: 'reviews', status: 'unavailable', checkedAt: now.toISOString() }], now).status, 'degraded');
+  assert.equal(alertHealth([], new Date('2026-09-28T11:00:00Z')).status, 'quiet');
+  assert.equal(alertHealth([], new Date('2026-09-28T13:30:00Z')).status, 'healthy');
+  assert.equal(alertHealth([], new Date('2026-09-28T13:46:00Z')).status, 'delayed');
+  assert.equal(alertHealth([], new Date('2026-12-01T13:46:00Z')).status, 'quiet');
+});

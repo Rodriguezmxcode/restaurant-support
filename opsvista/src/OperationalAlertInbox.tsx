@@ -6,7 +6,7 @@ type Alert = { id: string; title: string; body: string; location: string; at: st
 type Job = { job: string; status: string; checkedAt?: string; successAt?: string; note?: string };
 export default function OperationalAlertInbox() {
   const { t, language } = useI18n();
-  const [data, setData] = useState<{ alerts: Alert[]; jobs: Job[] }>();
+  const [data, setData] = useState<{ alerts: Alert[]; jobs: Job[]; health?: { status: string } | null }>();
   const [error, setError] = useState(false);
   const [version, setVersion] = useState(0);
   useEffect(() => {
@@ -25,12 +25,13 @@ export default function OperationalAlertInbox() {
   const jobs = allJobs.filter(job => !job.job.startsWith('bonus:') || (job.checkedAt || '') > globalBonusCheck);
   const labels: Record<string, string> = { performance: t('Sales, labor, discounts & voids', 'Ventas, labor, descuentos y voids'), overtime: 'Overtime', tasks: 'Tasks', logbook: 'Logbook', reviews: 'Google Reviews', ramp: 'Ramp', prices: 'Price Watch', bonus: t('Weekly bonus', 'Bono semanal') };
   const jobName = (job: string) => { const [kind, location] = job.split(':'); return `${labels[kind] || kind}${location ? ` · ${location}` : ''}`; };
-  const latest = jobs.map(job => job.checkedAt || '').filter(Boolean).sort().at(-1);
+  const latest = (data?.jobs || []).filter(job => !job.job.startsWith('verify:')).map(job => job.checkedAt || '').filter(Boolean).sort().at(-1);
   const unavailable = jobs.filter(job => job.status === 'unavailable');
   return <div className="push-inbox">
     <div className="push-heading"><h3>{t('Operational alerts', 'Alertas operativas')}</h3><button type="button" className="push-secondary" onClick={() => setVersion(v => v + 1)}>{t('Refresh', 'Actualizar')}</button></div>
     <p>{t('Automatic checks every 30 minutes. Scheduled pushes: 9 AM–11 PM, Connecticut time. Each warning is limited to once a day; weekly bonus updates follow the Wednesday–Tuesday period.', 'Revisión automática cada 30 minutos. Push programados: 9 AM–11 PM, hora de Connecticut. Cada advertencia se limita a una vez al día; el bono sigue la semana de miércoles a martes.')}</p>
     <p className="push-privacy">{latest ? `${t('Last scheduler check', 'Última revisión del programador')}: ${date(latest)} · Connecticut` : t('Waiting for the first scheduler check.', 'Esperando la primera revisión del programador.')}</p>
+    {data?.health && ['delayed', 'degraded'].includes(data.health.status) && <p role="alert">{t('Alert monitoring needs attention: checks are delayed or a source or delivery has failed. No notifications does not mean there are no problems.', 'El monitoreo de alertas requiere atención: hay revisiones atrasadas o fallas en fuentes o envíos. No recibir notificaciones no significa que no haya problemas.')}</p>}
     {error && <p role="alert">{t('Could not load alerts. Try refreshing.', 'No se pudieron cargar las alertas. Intenta actualizar.')}</p>}
     {unavailable.length > 0 && <p role="status">{t('Some sources could not be checked. OpsVista will retry; missing data is not treated as a violation.', 'Algunas fuentes no pudieron revisarse. OpsVista reintentará; la falta de datos no se considera un incumplimiento.')}</p>}
     {data && data.alerts.length === 0 && <p>{t('No scheduled alerts for your account yet.', 'Aún no hay alertas programadas para tu cuenta.')}</p>}

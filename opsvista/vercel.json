@@ -89,5 +89,103 @@
         }
       ]
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=reviews",
+      "schedule": "0,30 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=logbook",
+      "schedule": "1,31 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=ramp",
+      "schedule": "2,32 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=prices",
+      "schedule": "3,33 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=bonus",
+      "schedule": "4,34 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Stamford",
+      "schedule": "5,35 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Orange",
+      "schedule": "6,36 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Fairfield",
+      "schedule": "7,37 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Danbury",
+      "schedule": "8,38 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Avon",
+      "schedule": "9,39 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=performance&location=Southington",
+      "schedule": "10,40 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Stamford",
+      "schedule": "11,41 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Orange",
+      "schedule": "12,42 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Fairfield",
+      "schedule": "13,43 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Danbury",
+      "schedule": "14,44 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Avon",
+      "schedule": "15,45 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=overtime&location=Southington",
+      "schedule": "16,46 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Stamford",
+      "schedule": "17,47 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Orange",
+      "schedule": "18,48 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Fairfield",
+      "schedule": "19,49 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Danbury",
+      "schedule": "20,50 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Avon",
+      "schedule": "21,51 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=tasks&location=Southington",
+      "schedule": "22,52 * * * *"
+    },
+    {
+      "path": "/api/workflows?resource=scheduled_alerts&job=watchdog",
+      "schedule": "27,57 * * * *"
+    }
   ]
 }

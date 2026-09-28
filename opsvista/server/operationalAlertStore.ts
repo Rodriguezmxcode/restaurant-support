@@ -1,3 +1,4 @@
+import { alertHealth } from '../shared/alertHealth.js';
 import postgres from 'postgres';
 import { randomUUID } from 'node:crypto';
 import type { SessionUser } from './authSession.js';
@@ -73,6 +74,11 @@ export async function saveAndDeliverAlert(alert: OperationalAlert, recipients: s
   const pending = await sql`select user_id from opsvista_alert_deliveries where organization_id=${alertOrganization} and event_key=${alert.key} and status in ('pending','retry') and attempts<3 limit 1`;
   return { accepted, retryPending: pending.length > 0 };
 }
+export async function scheduledAlertHealth(now = new Date()) {
+  await ready();
+  const rows = await db()`select job,checked_at as "checkedAt",success_at as "successAt",status from opsvista_alert_jobs where organization_id=${alertOrganization}`;
+  return alertHealth(rows as any, now);
+}
 export async function alertInbox(user: SessionUser, allowedLocations: string[] | null) {
   await ready(); const sql = db(), org = user.organizationId || alertOrganization;
   const rows = await sql`select i.event_key as id,i.kind,i.location,i.title,i.body,i.module,i.created_at as at
@@ -82,5 +88,5 @@ export async function alertInbox(user: SessionUser, allowedLocations: string[] |
       and (${allowedLocations === null} or lower(i.location) in (select lower(value) from jsonb_array_elements_text(${sql.json(allowedLocations || [])}::jsonb)))
     order by i.created_at desc limit 50`;
   const jobs = org === alertOrganization ? await sql`select job,checked_at as "checkedAt",success_at as "successAt",status,note from opsvista_alert_jobs where organization_id=${org} order by job` : [];
-  return { alerts: rows, jobs, timeZone: 'America/New_York', quietHours: '23:00–09:00', intervalMinutes: 30 };
+  return { alerts: rows, jobs, health: org === alertOrganization ? alertHealth(jobs as any) : null, timeZone: 'America/New_York', quietHours: '23:00–09:00', intervalMinutes: 30 };
 }
