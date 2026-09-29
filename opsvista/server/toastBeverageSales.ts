@@ -2,9 +2,9 @@ import { standardToastRequest } from './toastClient.js';
 import { resolvedToastLocationEntries } from './toastPerformance.js';
 import { addDays, money, suggestBeverageGroup, suggestBeverageItem, type BeverageSource } from '../shared/beverageMetrics.js';
 
-type Selection = { guid?: string; displayName?: string; salesCategory?: { guid?: string }; price?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
+export type Selection = { guid?: string; displayName?: string; salesCategory?: { guid?: string }; price?: number; preDiscountPrice?: number; quantity?: number; voided?: boolean; deleted?: boolean; deferred?: boolean; selectionType?: string; refundDetails?: { refundAmount?: number; taxRefundAmount?: number }; modifiers?: Selection[] };
 type Check = { deleted?: boolean; voided?: boolean; selections?: Selection[]; payments?: { refund?: { refundAmount?: number } }[]; appliedServiceCharges?: { refundDetails?: { refundAmount?: number; taxRefundAmount?: number } }[] };
-type Order = { guid?: string; businessDate?: number; deleted?: boolean; voided?: boolean; excessFood?: boolean; checks?: Check[] };
+export type Order = { guid?: string; businessDate?: number; deleted?: boolean; voided?: boolean; excessFood?: boolean; checks?: Check[] };
 type Category = { guid?: string; name?: string };
 const active = (selection: Selection) => !selection.deleted && !selection.voided && !selection.deferred && !['HOUSE_ACCOUNT_PAY_BALANCE', 'TOAST_CARD_SELL', 'TOAST_CARD_RELOAD'].includes(selection.selectionType || '');
 
@@ -45,7 +45,7 @@ export function summarizeBeverageSales(orders: Order[], start: string, end: stri
   return { categories: [...categories.values()].map(row => ({ ...row, netSales: money(row.netSales), items: [...row.items].map(([name, netSales]) => ({name, netSales: money(netSales), group: suggestBeverageItem(name, row.group)})).sort((a,b) => b.netSales-a.netSales || a.name.localeCompare(b.name)) })), missingPrices, unallocatedRefunds };
 }
 
-export async function getToastBeverageSales(location: string, start: string, end: string): Promise<BeverageSource['sales']> {
+export async function getToastSalesInputs(location: string, start: string, end: string) {
   const matches = await resolvedToastLocationEntries([location]);
   if (matches.length !== 1) throw new Error(`Toast: correspondencia de ${location} no es única`);
   const guid = matches[0][1], orders: Order[] = [];
@@ -69,5 +69,10 @@ export async function getToastBeverageSales(location: string, start: string, end
       if (category.name) names.set(id, category.name);
     } catch { /* Keep the category visible and unclassified for reconciliation. */ }
   }
+  return { orders, names };
+}
+
+export async function getToastBeverageSales(location: string, start: string, end: string): Promise<BeverageSource['sales']> {
+  const { orders, names } = await getToastSalesInputs(location, start, end);
   return summarizeBeverageSales(orders, start, end, names);
 }
