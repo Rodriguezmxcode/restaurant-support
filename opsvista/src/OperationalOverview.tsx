@@ -8,12 +8,13 @@ import './locationDashboard.css';
 import OverviewCharts from './OverviewCharts';
 import OverviewExplorer, { type OverviewMetric } from './OverviewExplorer';
 import type { OpsVistaModule } from './accessControl';
+import SalesCategoriesPanel from './SalesCategoriesPanel';
 
 type RangeKey='today'|'yesterday'|'this-week'|'previous-week'|'this-month'|'last-month'|'custom';
 export type LiveRow={location:string;netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};
 type LiveResponse={salaryTiming?:SalaryTiming|null;source:string;start:string;end:string;salaryLaborConfigured:boolean;taskCompliance?:SevenShiftsResponse|null;taskComplianceError?:string;locations:LiveRow[];totals:{netSales:number;discountAmount:number;discountPct:number;voidAmount:number;voidPct:number;hourlyHours:number;overtimeHours:number;hourlyLaborCost:number;salaryLaborCost:number;totalLaborCost:number;laborPct:number;hourlyLaborPct:number;salaryLaborPct:number;totalLaborPct:number;splh:number|null};notes?:{salaryLabor?:string;tasks?:string}};
 export type SevenShiftsResponse={source:string;totals:{completed:number;total:number;compliancePct:number};locations:Array<{location:string;completed:number;total:number;compliancePct:number}>};
-type Props={allowedLocations:string[];allLocations:boolean;initialLocation?:string;modules?:OpsVistaModule[];onOpenModule?:(module:OpsVistaModule)=>void};
+type Props={salesMode?:boolean;allowedLocations:string[];allLocations:boolean;initialLocation?:string;modules?:OpsVistaModule[];onOpenModule?:(module:OpsVistaModule)=>void};
 
 const money=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 const money2=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
@@ -31,8 +32,10 @@ function Kpi({label,value,note,status='ready',metric,active,disabled,onOpen}:{la
   return <button type="button" id={`overview-kpi-${metric}`} className="overview-kpi" data-status={status} aria-pressed={active} aria-controls="overview-metric-detail" disabled={disabled} onClick={()=>onOpen(metric)}><span className="overview-kpi-label">{label}{status==='warning'&&<span className="overview-kpi-review">{t('Review','Revisar')}</span>}</span><strong className="overview-kpi-value">{value}</strong><span className="overview-kpi-note">{note}</span><span className="overview-kpi-action">{disabled?t('Waiting for data','Esperando datos'):active?t('Viewing breakdown ↓','Viendo desglose ↓'):t('Explore by location →','Explorar por locación →')}</span></button>;
 }
 
-export default function OperationalOverview({allowedLocations,initialLocation='All locations',modules,onOpenModule}:Props){
+export default function OperationalOverview({salesMode=false,allowedLocations,initialLocation='All locations',modules,onOpenModule}:Props){
   const {t,language}=useI18n();
+  const [salesTab,setSalesTab]=useState<'summary'|'categories'>('summary');
+  const categoriesActive=salesMode&&salesTab==='categories';
   const today=easternToday();
   const [range,setRange]=useState<RangeKey>(()=>{
     const saved=typeof window!=='undefined'?window.localStorage.getItem('opsvista-overview-range'):null;
@@ -76,14 +79,15 @@ export default function OperationalOverview({allowedLocations,initialLocation='A
     window.localStorage.setItem('opsvista-overview-locations',JSON.stringify(selectedLocations));
   },[range,customStart,customEnd,selectionKey]);
 
-  const {revision:liveRevision,refresh:refreshLabor}=useLaborSnapshotRefresh(!loading&&resolved.start===resolved.end&&resolved.start===easternToday());
+  const {revision:liveRevision,refresh:refreshLabor}=useLaborSnapshotRefresh(!categoriesActive&&!loading&&resolved.start===resolved.end&&resolved.start===easternToday());
   useEffect(()=>{
+    if(categoriesActive){setLoading(false);return;}
     const controller=new AbortController();setLoading(true);setError('');setLive(null);
     const params=new URLSearchParams({start:resolved.start,end:resolved.end,salary_basis:'elapsed'});
     if(effectiveLocations.length)params.set('locations',effectiveLocations.join(','));
     fetch(`/api/operations/performance?${params}`,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json().catch(()=>({})) as LiveResponse&{error?:string;requiredEnvironmentVariables?:string[]};if(!response.ok)throw new Error(body.error||'Live performance source unavailable');if(!controller.signal.aborted){setLive(body);setReadAt(new Intl.DateTimeFormat('es-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date()))}}).catch(err=>{if(!controller.signal.aborted)setError(err instanceof Error?err.message:'Live performance source unavailable')}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});
     return()=>controller.abort();
-  },[resolved.start,resolved.end,effectiveLocationKey,refresh,liveRevision]);
+  },[resolved.start,resolved.end,effectiveLocationKey,refresh,liveRevision,categoriesActive]);
 
   const total=live?.totals;
   const tasks=live?.taskCompliance??null;
@@ -92,17 +96,19 @@ export default function OperationalOverview({allowedLocations,initialLocation='A
   return <div className="overview-dashboard overview-dashboard-visual">
     <section className="overview-filter-panel">
       <div className="overview-filter-heading">
-        <div><h2>{t('Your operational dashboard','Tu dashboard operativo')}</h2><p>{t('Operating week: Wednesday–Tuesday','Semana operativa: miércoles–martes')}</p></div>
+        <div><h2>{salesMode?t('Sales reports','Reportes de ventas'):t('Your operational dashboard','Tu dashboard operativo')}</h2><p>{t('Operating week: Wednesday–Tuesday','Semana operativa: miércoles–martes')}</p></div>
         <div className="overview-filter-controls">
           <details className="location-dashboard-location-picker"><summary><span>{t('LOCATIONS','LOCACIONES')}</span><strong>{locationLabel}</strong></summary><div><label><input type="checkbox" checked={!selectedLocations.length} onChange={()=>setSelectedLocations([])}/>{t('All locations','Todas las locaciones')} ({allowedLocations.length})</label>{allowedLocations.map(location=><label key={location}><input type="checkbox" checked={!selectedLocations.length||selectedLocations.includes(location)} onChange={()=>toggleLocation(location)}/>{location}</label>)}</div></details>
           <select className="overview-period-select" aria-label={t('Overview period','Periodo del resumen')} value={range} onChange={e=>setRange(e.target.value as RangeKey)}><option value="today">{t('Today','Hoy')}</option><option value="yesterday">{t('Yesterday','Ayer')}</option><option value="this-week">{t('This week','Esta semana')}</option><option value="previous-week">{t('Previous week','Semana anterior')}</option><option value="this-month">{t('This month','Este mes')}</option><option value="last-month">{t('Last month','Mes anterior')}</option><option value="custom">{t('Custom range','Periodo personalizado')}</option></select>
           <CustomDateRangePicker active={range==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel={t('Select overview or sales period','Seleccionar periodo de Resumen o Ventas')}/>
-          <button type="button" className="overview-refresh" disabled={loading} onClick={()=>setRefresh(value=>value+1)}>{loading?t('Updating…','Actualizando…'):t('Refresh data ↻','Actualizar datos ↻')}</button>
+          <button type="button" className="overview-refresh" disabled={loading&&!categoriesActive} onClick={()=>setRefresh(value=>value+1)}>{loading&&!categoriesActive?t('Updating…','Actualizando…'):t('Refresh data ↻','Actualizar datos ↻')}</button>
         </div>
       </div>
-      <div className="overview-source-strip" data-error={Boolean(error)} role="status"><span><strong>{t(resolved.label,({today:'Hoy',yesterday:'Ayer','this-week':'Esta semana operativa','previous-week':'Semana operativa anterior','this-month':'Este mes','last-month':'Mes anterior',custom:'Periodo personalizado'} as Record<RangeKey,string>)[range])}</strong> · {resolved.start} → {resolved.end}</span><span>{loading?t('Loading live Toast data…','Consultando datos de Toast…'):error?error:live?`${live.source} · ${t('Checked','Consultado')} ${readAt} ET`:t('Waiting for source','Esperando fuente')}</span></div>
+      <div className="overview-source-strip" data-error={!categoriesActive&&Boolean(error)} role="status"><span><strong>{t(resolved.label,({today:'Hoy',yesterday:'Ayer','this-week':'Esta semana operativa','previous-week':'Semana operativa anterior','this-month':'Este mes','last-month':'Mes anterior',custom:'Periodo personalizado'} as Record<RangeKey,string>)[range])}</strong> · {resolved.start} → {resolved.end}</span><span>{categoriesActive?t('Source: Toast · Sales categories','Fuente: Toast · Categorías de venta'):loading?t('Loading live Toast data…','Consultando datos de Toast…'):error?error:live?`${live.source} · ${t('Checked','Consultado')} ${readAt} ET`:t('Waiting for source','Esperando fuente')}</span></div>
     </section>
 
+    {salesMode&&<div className="sales-category-tabs" aria-label={t('Sales sections','Secciones de Ventas')}><button type="button" aria-pressed={!categoriesActive} onClick={()=>setSalesTab('summary')}>{t('Overview','Resumen')}</button><button type="button" aria-pressed={categoriesActive} onClick={()=>setSalesTab('categories')}>{t('Sales by category','Ventas por categoría')}</button></div>}
+    {categoriesActive?<SalesCategoriesPanel start={resolved.start} end={resolved.end} locations={effectiveLocations.filter(location=>allowedLocations.includes(location))} refresh={refresh}/>:<>
     <section className="overview-primary-kpis" aria-label={t('Primary indicators','Indicadores principales')}>
       <Kpi {...metricProps('sales')} label={t('Net sales','Ventas netas')} value={loading?t('Loading…','Cargando…'):total?money.format(total.netSales):t('Pending source','Fuente pendiente')} note={total?`Toast · ${effectiveLocations.length} ${t('locations selected','locaciones seleccionadas')}`:t('Toast connection required','Se requiere conexión con Toast')} status={total?'ready':'pending'} />
       <Kpi {...metricProps('labor')} label={live?.salaryTiming?.applied?t('Labor accrued','Labor acumulado'):t('Total labor','Labor total')} value={loading?t('Loading…','Cargando…'):total?money2.format(total.totalLaborCost):t('Pending source','Fuente pendiente')} note={total?`${total.totalLaborPct.toFixed(2)}% · ${t('Hourly','Por hora')} ${total.hourlyLaborPct.toFixed(2)}% + ${t('Salary','Salarios')} ${total.salaryLaborPct.toFixed(2)}%`:t('Hourly labor + salary allocation','Labor por hora + asignación de salarios')} status={total&&total.totalLaborPct>30?'warning':total?'ready':'pending'} />
@@ -129,5 +135,6 @@ export default function OperationalOverview({allowedLocations,initialLocation='A
 
     <section className="overview-data-source"><span className="overview-data-source-label">{t('Data source','Fuente de datos')}</span><strong>{loading?t('Checking operational data…','Consultando datos operativos…'):error?t('Operational source unavailable','Fuente operativa no disponible'):live?t('Toast connected','Toast conectado'):t('Waiting for source','Esperando fuente')}</strong><p>{t('Total labor = hourly labor + salary allocation for the selected period.','Labor total = labor por hora + asignación de salarios del periodo seleccionado.')}</p></section>
 
+    </>}
   </div>;
 }

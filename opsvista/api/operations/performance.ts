@@ -1,4 +1,5 @@
 import { getOvertimePayrollReference, parsePayrollReference, savePayrollReference } from '../../server/overtimePayrollReference.js';
+import { salesCategoriesEndpoint } from '../../server/salesCategoriesEndpoint.js';
 import { hasLegacyWorkspace } from '../../shared/tenantAccess.js';
 import { readSession } from '../../server/authSession.js';
 import { allocateSalaryLabor } from '../../server/salaryLabor.js';
@@ -32,6 +33,7 @@ export default async function handler(req:Req,res:Res){
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
   if(!hasLegacyWorkspace(user))return res.status(403).json({error:'This module is not enabled for your organization'});
+  if(req.method==='GET'&&asString(req.query?.sales_categories)==='true')return salesCategoriesEndpoint(req,res,user);
   if(['POST'].includes(req.method||'')){
     if(asString(req.query?.payroll_reference)!=='true')return res.status(405).json({error:'Method not allowed'});
     if(!['Founder','Corporate','HR'].includes(user.role))return res.status(403).json({error:'Payroll imports require Corporate or HR access'});
