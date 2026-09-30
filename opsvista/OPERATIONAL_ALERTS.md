@@ -21,8 +21,17 @@ Recipients: existing corporate observers (Founder, Roberto Operations, Jacob) pl
 
 Database job leases prevent overlapping scans. Daily jobs skip after a successful daily check; failed or incomplete checks retry. Event keys deduplicate per location, rule and period, and delivery rows deduplicate per user. Transient push failures retry up to three attempts while a condition remains detected. No-device/opted-out accounts retain inbox entries without receiving a historic push backlog. A process crash after a provider accepted a push but before the database acknowledgement can cause a retry; stable notification tags help collapse it. Provider acceptance does not prove display or reading.
 
-The authenticated Notifications panel shows the last check, individual source state and 30 days of recipient-scoped alerts. Manager location grants are checked again at read time. Lock-screen messages remain generic; business details stay inside the authenticated app.
+The authenticated Notifications panel shows the last check, individual source state and 30 days of recipient-scoped alerts. Manager location grants are checked again at read time. Lock-screen messages include the alert, location and priority; full details remain inside the authenticated app.
 
 Publishing the workflow to main runs **source verification only**, without sending notifications or creating inbox warnings. Subsequent scheduled/manual runs apply the normal windows. No missing data is treated as zero compliance or a violation.
 
 Validation: `npm run test:operational-alerts`, `npm run test:web-push`, `npm run test:source-sync`, `npm run typecheck`, `npm run typecheck:vercel`, `npm run build`.
+
+
+## Native production scheduler (activation required)
+
+Use the 24 staggered Vercel Cron entries in `vercel.json`: 23 source/location checks every 30 minutes and an independent watchdog at minutes 27 and 57. Requires Vercel Pro or Enterprise and a random production `CRON_SECRET` of at least 32 characters configured before deployment. Never put that secret in Git, a URL, or a public variable. GET uses constant-time bearer verification; POST retains the existing pinned GitHub OIDC fallback. Neither cookies nor User-Agent authorize scans. Existing leases, daily limits, delivery retries and deduplication apply to both schedulers.
+
+The watchdog reports stale checks (>45 minutes after a rule window opens) and source/delivery failures, returning HTTP 503 and sending a daily technical alert only to the active Founder account. The Notifications page shows the same warning on read, even if no scheduler is running. Verification-only runs cannot clear stale status. A separate watchdog on the same host does not detect a total hosting outage externally; independent uptime monitoring remains necessary for that scenario.
+
+Activation gate: confirm plan supports subdaily cron, configure the production secret, deploy, confirm Vercel registered all cron entries, observe consecutive automatic invocations, and confirm a device receives an eligible notification. Do not report production scheduling fixed based on tests or a manual run alone.

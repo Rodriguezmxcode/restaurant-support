@@ -1,8 +1,9 @@
+import { authorizedAlertCron } from './cronAuth.js';
 import { alertClock, alertJobDue, alertJobs, alertLocations, canonicalAlertLocation, operationalWeekStart, overdueExpense, performanceWarnings, shiftDay, type AlertJob, type OperationalAlert } from '../shared/operationalAlerts.js';
 import { closedBonusWeek, beverageBonusRange } from '../shared/bonusWeek.js';
 import { calculateWeeklyBonus } from '../src/bonusEngine.js';
 import { listManagedUsers, type ManagedDirectoryUser } from './managementStore.js';
-import { alertOrganization, claimAlertJob, finishAlertJob, saveAndDeliverAlert } from './operationalAlertStore.js';
+import { alertOrganization, claimAlertJob, finishAlertJob, saveAndDeliverAlert, scheduledAlertHealth } from './operationalAlertStore.js';
 import { authorizedSourceSync } from './sourceSyncAuth.js';
 
 const corporate = new Set(['usr-founder-roberto', 'usr-roberto-ops', 'usr-jacob']);
@@ -160,9 +161,21 @@ type Request = { method?: string; headers?: Record<string, string | string[] | u
 type Response = { status: (code: number) => Response; json: (body: unknown) => void; setHeader?: (name: string, value: string) => void };
 export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   res.setHeader?.('Cache-Control', 'private, no-store');
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!await authorizedSourceSync(req.headers?.authorization, 'alerts')) return res.status(401).json({ error: 'Unauthorized' });
+  if (req.method !== 'POST' && req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  if (!(req.method === 'GET' ? authorizedAlertCron(req.headers?.authorization) : await authorizedSourceSync(req.headers?.authorization, 'alerts'))) return res.status(401).json({ error: 'Unauthorized' });
   const job = req.query?.job, location = req.query?.location;
+  if (job === 'watchdog' && location === undefined) {
+    const now = new Date(), health = await scheduledAlertHealth(now);
+    if (health.status === 'delayed' || health.status === 'degraded') {
+      const directory = await listManagedUsers(alertOrganization);
+      await saveAndDeliverAlert({
+        key: `system:scheduler:${alertClock(now).day}`, kind: 'system', location: 'Corporate', priority: 'high',
+        title: 'Alertas operativas con retraso', module: 'Notifications',
+        body: `OpsVista requiere revisión: ${health.delayed.length} revisiones atrasadas y ${health.failed.length} fuentes o envíos con error. Consulta Notificaciones para ver el estado.`,
+      }, directory.filter(user => user.active && user.id === 'usr-founder-roberto').map(user => user.id));
+    }
+    return res.status(health.status === 'delayed' || health.status === 'degraded' ? 503 : 200).json({ ok: health.status === 'healthy' || health.status === 'quiet', health });
+  }
   if (typeof job !== 'string' || !alertJobs.includes(job as AlertJob) || (location !== undefined && (typeof location !== 'string' || !alertLocations.includes(location as typeof alertLocations[number])))) return res.status(400).json({ error: 'Invalid alert job' });
   if (job !== 'bonus' && ['performance', 'overtime', 'tasks'].includes(job) !== Boolean(location)) return res.status(400).json({ error: 'Invalid alert scope' });
   const result = await runScheduledAlertJob(job as AlertJob, location as string | undefined, new Date(), req.query?.verify === '1');
