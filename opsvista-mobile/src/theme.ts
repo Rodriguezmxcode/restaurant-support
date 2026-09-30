@@ -1,2 +1,7 @@
-export const colors={background:'#F4F7FB',surface:'#FFFFFF',ink:'#102037',muted:'#68778C',line:'#DEE6EF',navy:'#0B2447',blue:'#146C94',cyan:'#19A7CE',green:'#208A62',amber:'#D98B19',red:'#C43A4B',softBlue:'#E8F4FA',softGreen:'#E7F5EF',softAmber:'#FFF4DF',softRed:'#FCEAEC'};
-export const shadow={shadowColor:'#102037',shadowOpacity:.08,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:3};
+export const colors = {
+  background: '#071D38', surface: '#102E50', ink: '#F1F7FF', muted: '#ACBED3',
+  line: '#2B4969', navy: '#081F3B', blue: '#83C8FF', cyan: '#83C8FF',
+  green: '#55E4B1', amber: '#FFD084', red: '#FF9DAB',
+  softBlue: '#153C63', softGreen: '#123F3D', softAmber: '#463820', softRed: '#4A2A3E',
+};
+export const shadow = {shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.12, shadowRadius: 12, elevation: 2};
