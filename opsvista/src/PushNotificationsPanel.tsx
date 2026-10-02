@@ -1,3 +1,4 @@
+import NotificationPreferencesPanel from './NotificationPreferencesPanel';
 import { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
 import { applicationServerKey, needsHomeScreen, pushRegistration, pushRequest, supportsWebPush } from './webPush';
@@ -8,6 +9,7 @@ import SecurityDevicePanel from './SecurityDevicePanel';
 export default function PushNotificationsPanel() {
   const { t, language } = useI18n();
   const [loading, setLoading] = useState(true);
+  const [accountPushEnabled, setAccountPushEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [publicKey, setPublicKey] = useState('');
   const [enabled, setEnabled] = useState(false);
@@ -21,7 +23,7 @@ export default function PushNotificationsPanel() {
     Promise.all([pushRequest(), pushRegistration()]).then(async ([config, registration]) => {
       const subscription = await registration.pushManager.getSubscription();
       const status = subscription ? await pushRequest({ action: 'status', endpoint: subscription.endpoint }) : { registered: false };
-      if (!cancelled) { setPublicKey(config.publicKey); setEnabled(Boolean(status.registered && config.pushEnabled && Notification.permission === 'granted')); }
+      if (!cancelled) { setPublicKey(config.publicKey); setEnabled(Boolean(status.registered && Notification.permission === 'granted')); }
     }).catch(error => { if (!cancelled) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -67,7 +69,7 @@ export default function PushNotificationsPanel() {
       if (!subscription) { setEnabled(false); setMessage('not_registered'); return; }
       const result = await pushRequest({ action: 'test', endpoint: subscription.endpoint });
       setMessage(result.accepted ? 'accepted' : result.reason); setFailed(!result.accepted);
-      if (result.reason === 'not_registered' || result.reason === 'push_disabled') setEnabled(false);
+      if (result.reason === 'not_registered') setEnabled(false);
     } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : 'unavailable'); }
     finally { setBusy(false); }
   }
@@ -82,11 +84,12 @@ export default function PushNotificationsPanel() {
     session_expired: t('Your session expired. Sign in again to connect notifications.', 'Tu sesión venció. Inicia sesión de nuevo para conectar las notificaciones.'),
     account_access: t('Your account access could not be verified. Sign in again; if this continues, contact OpsVista support.', 'No se pudo verificar el acceso de tu cuenta. Inicia sesión de nuevo; si continúa, contacta a soporte de OpsVista.'),
     not_registered: t('Activate notifications on this device first.', 'Primero activa las notificaciones en este dispositivo.'),
-    push_disabled: t('Activate notifications again to receive the test.', 'Vuelve a activar las notificaciones para recibir la prueba.'),
+    push_disabled: t('Turn on Push notifications in your account preferences to receive the test.', 'Activa Notificaciones push en las preferencias de tu cuenta para recibir la prueba.'),
     delivery_unconfirmed: t('Delivery could not be confirmed. Try turning notifications off and on again.', 'No se pudo confirmar el envío. Intenta desactivar y volver a activar las notificaciones.'),
   };
   return <section id="opsvista-push-panel" className="push-panel" aria-labelledby="push-title" aria-busy={busy || loading}>
-    <div className="push-heading"><div><h2 id="push-title">{t('Push notifications', 'Notificaciones push')}</h2>
+    <NotificationPreferencesPanel onPushEnabled={setAccountPushEnabled} />
+    <div className="push-heading"><div><h2 id="push-title">{t('This device', 'Este dispositivo')}</h2>
       <p>{t('Receive updates for your account, even when OpsVista is closed.', 'Recibe las actualizaciones de tu cuenta aunque OpsVista esté cerrada.')}</p></div>
       <span className="push-status">{loading ? t('Checking…', 'Consultando…') : enabled ? t('On · this device', 'Activadas · este dispositivo') : t('Off · this device', 'Desactivadas · este dispositivo')}</span></div>
     {install ? <div className="push-help"><strong>{t('First, add OpsVista to your Home Screen', 'Primero, añade OpsVista a tu pantalla de inicio')}</strong><ol>
@@ -96,7 +99,7 @@ export default function PushNotificationsPanel() {
     </ol><p>{t('Requires iOS or iPadOS 16.4 or later.', 'Requiere iOS o iPadOS 16.4 o posterior.')}</p></div>
       : !supported ? <p>{t('This browser does not support push notifications. Open OpsVista in a compatible browser over HTTPS.', 'Este navegador no admite notificaciones push. Abre OpsVista en un navegador compatible mediante HTTPS.')}</p>
       : <div className="push-controls"><button type="button" disabled={loading || busy || !publicKey} onClick={() => void (enabled ? disable() : enable())}>{busy ? t('Processing…', 'Procesando…') : enabled ? t('Turn off on this device', 'Desactivar en este dispositivo') : t('Enable notifications', 'Activar notificaciones')}</button>
-        <button type="button" className="push-secondary" disabled={busy || !enabled} onClick={() => void test()}>{t('Send me a test', 'Enviarme una prueba')}</button></div>}
+        <button type="button" className="push-secondary" disabled={busy || !enabled || !accountPushEnabled} onClick={() => void test()}>{t('Send me a test', 'Enviarme una prueba')}</button></div>}
     {permission === 'denied' && <p className="push-feedback" role="status">{messages.denied}</p>}
     {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
     <p className="push-privacy">{t('Notifications show the location, alert and priority. Sign-out disconnects operational updates. A linked security device remains available for sign-in codes.', 'Las notificaciones muestran la locación, la alerta y su prioridad. Cerrar sesión desconecta las alertas operativas. Un dispositivo de seguridad vinculado sigue disponible para los códigos de acceso.')}</p>

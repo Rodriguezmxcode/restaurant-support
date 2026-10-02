@@ -1,7 +1,8 @@
+import { preferenceContext } from './notificationPreferencesStore.js';
 import type { SessionUser } from './authSession.js';
 import { getManagedUser } from './managementStore.js';
 import { getOrganizationMembership } from './organizationStore.js';
-import { getNotificationPreferences, updateNotificationPreferences } from './actionNotificationStore.js';
+import { getNotificationPreferences } from './actionNotificationStore.js';
 import { isSameOriginPushRequest, validateWebSubscription } from './webPushDelivery.js';
 import { registerWebPush, removeWebPush, testWebPush, webPushPublicKey, webPushRegistered } from './webPushStore.js';
 import { pushMfaDevice } from './pushMfaStore.js';
@@ -31,21 +32,16 @@ export async function webPushEndpoint(req: Request, res: Response, user: Session
     const action = req.body?.action;
     if (action === 'inbox') {
       const { alertInbox } = await import('./operationalAlertStore.js');
-      const allowedLocations = account.role === 'Location Manager'
-        ? account.locationGrants?.length
-          ? account.locationGrants.filter(grant => !grant.expiresAt || Date.parse(grant.expiresAt) > Date.now()).map(grant => grant.location)
-          : account.locations || []
-        : null;
+      const context = await preferenceContext(user);
+      const allowedLocations = context.globalRole ? null : context.allowedLocations;
       return res.status(200).json(await alertInbox(user, allowedLocations));
     }
     const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint : '';
     if (action === 'subscribe') {
       let subscription;
       try { subscription = validateWebSubscription(req.body?.subscription); } catch { return res.status(400).json({ error: 'Invalid push subscription' }); }
-      const preferences = await getNotificationPreferences(user);
       await registerWebPush(subscription, req.body?.locale === 'es' ? 'es' : 'en', user);
-      if (!preferences.pushEnabled) await updateNotificationPreferences({ ...preferences, pushEnabled: true }, user);
-      return res.status(200).json({ registered: true, pushEnabled: true });
+      return res.status(200).json({ registered: true, pushEnabled: (await getNotificationPreferences(user)).pushEnabled });
     }
     if (!endpoint || endpoint.length > 4096) return res.status(400).json({ error: 'Device endpoint required' });
     if (action === 'status') return res.status(200).json({ registered: await webPushRegistered(endpoint, user) });

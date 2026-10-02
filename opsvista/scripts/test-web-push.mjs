@@ -34,6 +34,7 @@ try {
     }
     export default function postgres(){return query}
   `);
+  await writeFile(join(temp,'notificationPreferencesStore.js'), `import {db} from './testDb.js'; export async function preferenceContext(){return {globalRole:true,allowedLocations:[]}}; export async function routePushRecipients(ids,actor){const rows=(await db.query('select user_id from opsvista_notification_preferences where organization_id=$1 and push_enabled=true',[actor.organizationId])).rows;return {instant:ids.filter(id=>rows.some(row=>row.user_id===id)),queued:0,suppressed:0}}`);
   await writeFile(join(temp,'pushMfaStore.js'), 'export async function pushMfaDevice(){return null}');
   await writeFile(join(temp,'managementStore.js'), `import {db} from './testDb.js'; export async function getManagedUser(id){return (await db.query('select * from opsvista_management_users where id=$1',[id])).rows[0]}`);
   await writeFile(join(temp,'organizationStore.js'), `import {db} from './testDb.js'; export async function getOrganizationMembership(id){const row=(await db.query('select organization_id from test_memberships where user_id=$1',[id])).rows[0];return row?{organizationId:row.organization_id}:null}`);

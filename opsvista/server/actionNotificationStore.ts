@@ -4,6 +4,10 @@ import type { SessionUser } from './authSession.js';
 import type { ActionRecord } from './actionStore.js';
 import { getManagedUser } from './managementStore.js';
 import { deliverNotificationEmail } from './emailDelivery.js';
+import { getNotificationPreferences, routePushRecipients } from './notificationPreferencesStore.js';
+export { getNotificationPreferences, updateNotificationPreferences } from './notificationPreferencesStore.js';
+export type { NotificationPreferences } from '../shared/notificationPreferences.js';
+import { notificationCategory, type NotificationCategory } from '../shared/notificationPreferences.js';
 
 export type ActionReceiptStatus =
   | 'Sent'
@@ -51,19 +55,12 @@ type DeviceInput = {
 
 export type OperationalPushInput = {
   eventKey: string;
-  category: 'sales' | 'labor' | 'tasks' | 'maintenance' | 'action';
+  category: NotificationCategory | 'maintenance' | 'action';
   title: string;
   body: string;
   recipientIds: string[];
   location?: string;
   actionId?: string;
-};
-
-export type NotificationPreferences = {
-  emailEnabled: boolean;
-  pushEnabled: boolean;
-  smsEnabled: boolean;
-  phone?: string;
 };
 
 let client: ReturnType<typeof postgres> | undefined;
@@ -181,24 +178,6 @@ export async function sendNotificationEmailTest(user:SessionUser) {
     reason:result.accepted===1?'provider_accepted':'delivery_unconfirmed'};
 }
 
-export async function getNotificationPreferences(user:SessionUser):Promise<NotificationPreferences> {
-  await ensureSchema();
-  const rows = await sql()`select * from opsvista_notification_preferences where organization_id=${organization(user)} and user_id=${user.id} limit 1`;
-  const row = rows[0];
-  return {emailEnabled:row ? Boolean(row.email_enabled) : true,pushEnabled:row ? Boolean(row.push_enabled) : true,smsEnabled:row ? Boolean(row.sms_enabled) : false,phone:row?.phone ? String(row.phone) : undefined};
-}
-
-export async function updateNotificationPreferences(input:NotificationPreferences,user:SessionUser) {
-  await ensureSchema();
-  const phone = input.phone?.trim() || null;
-  if (input.smsEnabled && !phone) throw new Error('A phone number is required to enable SMS');
-  await sql()`insert into opsvista_notification_preferences(organization_id,user_id,email_enabled,push_enabled,sms_enabled,phone,updated_at)
-    values(${organization(user)},${user.id},${input.emailEnabled},${input.pushEnabled},${input.smsEnabled},${phone},now())
-    on conflict(organization_id,user_id) do update set email_enabled=excluded.email_enabled,push_enabled=excluded.push_enabled,
-      sms_enabled=excluded.sms_enabled,phone=excluded.phone,updated_at=now()`;
-  return getNotificationPreferences(user);
-}
-
 function normalizeState(row: Record<string, unknown>): ActionNotificationState {
   return {
     actionId: String(row.action_id), recipientId: String(row.recipient_id), recipientName: String(row.recipient_name),
@@ -243,10 +222,11 @@ export async function dispatchOperationalPush(input: OperationalPushInput, actor
     on conflict(event_key) do nothing returning event_key`;
   if (!inserted.length) return { sent: false, duplicate: true, devices: 0 };
   const recipientRows = await recipientsFor(recipientIds,actor);
-  const pushUserIds = recipientRows.filter(row => row.push_enabled !== false).map(row => String(row.id));
+  const routing = await routePushRecipients(recipientIds, actor, { category: input.category, location: input.location, actionId: input.actionId, title: input.title, body: input.body, tag: input.eventKey });
+  const pushUserIds = routing.instant;
   const devices = pushUserIds.length ? await db`select token,user_id from opsvista_mobile_devices
     where organization_id=${organization(actor)} and user_id in ${db(pushUserIds)} and active=true` : [];
-  const webPush = await sendWebPushToUsers(pushUserIds,actor,{actionId:input.actionId,category:input.category,tag:input.eventKey,title:input.title,body:input.body});
+  const webPush = await sendWebPushToUsers(pushUserIds,actor,{actionId:input.actionId,category:input.category,location:input.location,tag:input.eventKey,title:input.title,body:input.body});
   const email = await sendEmail(input.eventKey,input.title,input.body,recipientRows,actor,input.actionId);
   await db`update opsvista_operational_notifications set email_recipients=${email.accepted} where event_key=${input.eventKey}`;
   if (webPush.accepted) await db`update opsvista_operational_notifications set push_devices=${webPush.accepted} where event_key=${input.eventKey}`;
@@ -289,9 +269,11 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
   const recipientRows = await recipientsFor([action.ownerId],actor);
   const email = await sendEmail(`action:${action.id}:assigned:${sentAt.toISOString()}`,`${action.location}: ${action.title}`,`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,actor,action.id);
   if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
-  const pushEnabled = recipientRows.some(row => row.push_enabled !== false);
+  const category = notificationCategory(action.category);
+  const routing = await routePushRecipients([action.ownerId], actor, { category, location: action.location, actionId: action.id, tag: `action:${action.id}:assigned:${sentAt.toISOString()}`, title: `${action.location} · ${action.title}`, body: action.recommendation || action.signal });
+  const pushEnabled = routing.instant.includes(action.ownerId);
   const devices = pushEnabled ? await db`select token from opsvista_mobile_devices where organization_id=${action.organizationId} and user_id=${action.ownerId} and active=true` : [];
-  const webPush = await sendWebPushToUsers(pushEnabled ? [action.ownerId] : [],actor,{actionId:action.id,category:'action',tag:`action:${action.id}`,title:`${action.location} · ${action.title}`,body:action.recommendation || action.signal,priority:action.severity === 'High' ? 'high' : action.severity === 'Low' ? 'low' : 'normal'});
+  const webPush = await sendWebPushToUsers(pushEnabled ? [action.ownerId] : [],actor,{actionId:action.id,category,location:action.location,tag:`action:${action.id}`,title:`${action.location} · ${action.title}`,body:action.recommendation || action.signal,priority:action.severity === 'High' ? 'high' : action.severity === 'Low' ? 'low' : 'normal'});
   if (webPush.accepted) {
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id,action.ownerId,action.ownerName,'Push accepted',actor,`${webPush.accepted} web push accepted`);

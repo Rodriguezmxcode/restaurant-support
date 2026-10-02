@@ -1,3 +1,4 @@
+import { notificationCategory } from '../shared/notificationPreferences.js';
 import type { SessionUser } from './authSession.js';
 import type { ActionRecord } from './actionStore.js';
 import { dispatchOperationalPush, type OperationalPushInput } from './actionNotificationStore.js';
@@ -23,12 +24,7 @@ export async function operationalRecipientIds(location?: string, ownerId?: strin
 }
 
 function categoryForAction(action: ActionRecord): OperationalPushInput['category'] {
-  const value = action.category.toLowerCase();
-  if (/sales|venta|revenue|upsell/.test(value)) return 'sales';
-  if (/labor|overtime/.test(value)) return 'labor';
-  if (/task|checklist/.test(value)) return 'tasks';
-  if (/maintenance|mantenimiento|repair|facilities/.test(value)) return 'maintenance';
-  return 'action';
+  return notificationCategory(action.category);
 }
 
 export async function notifyActionObservers(
