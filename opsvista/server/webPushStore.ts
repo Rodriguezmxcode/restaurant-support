@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import postgres from 'postgres';
 import webpush from 'web-push';
+import { routePushRecipients } from './notificationPreferencesStore.js';
 import type { SessionUser } from './authSession.js';
 import { deliverWebPush, pushPayload, validateWebSubscription, type PushKeys } from './webPushDelivery.js';
 
@@ -113,12 +114,14 @@ export async function sendWebPushToUsers(userIds: string[], actor: SessionUser, 
   if (!userIds.length) return { accepted: 0, devices: 0 };
   try {
     await ensureSchema();
+    const routing = await routePushRecipients(userIds, actor, input);
+    if (!routing.instant.length) return { accepted: 0, devices: 0, queued: routing.queued, suppressed: routing.suppressed };
     const db = sql();
     const rows = await db`select s.* from opsvista_web_push_subscriptions s
       join opsvista_management_users u on u.id=s.user_id and u.organization_id=s.organization_id and u.active=true
       left join opsvista_notification_preferences p on p.user_id=s.user_id and p.organization_id=s.organization_id
-      where s.organization_id=${org(actor)} and s.user_id in ${db(userIds)} and s.active=true and coalesce(p.push_enabled,true)=true`;
-    return await sendRows(rows, input);
+      where s.organization_id=${org(actor)} and s.user_id in ${db(routing.instant)} and s.active=true and coalesce(p.push_enabled,true)=true`;
+    return { ...await sendRows(rows, input), queued: routing.queued, suppressed: routing.suppressed };
   } catch { return { accepted: 0, devices: 0, unavailable: true }; }
 }
 export async function testWebPush(endpoint: string, user: SessionUser) {
@@ -131,4 +134,12 @@ export async function testWebPush(endpoint: string, user: SessionUser) {
   if (!rows.length) return { accepted: false, reason: await webPushRegistered(endpoint, user) ? 'rate_limited' : 'not_registered' };
   const result = await sendRows(rows, { test: true, tag: `opsvista-test-${Date.now()}` });
   return { accepted: result.accepted === 1, reason: result.accepted ? 'provider_accepted' : 'delivery_unconfirmed' };
+}
+
+// Only the digest worker calls this after revalidating each queued event against
+// the recipient's current organization, access, locations and preferences.
+export async function sendWebPushDigest(userId: string, organizationId: string, input: Parameters<typeof pushPayload>[0]) {
+  await ensureSchema();
+  const rows = await sql()`select * from opsvista_web_push_subscriptions where organization_id=${organizationId} and user_id=${userId} and active=true`;
+  return sendRows(rows, input);
 }

@@ -37,6 +37,7 @@ try {
     }
     export default function postgres(){return wrap(db)}
   `);
+  await writeFile(join(temp, 'notificationPreferencesStore.js'), `export async function preferenceContext(){throw new Error('Security must not read operational preferences')};export async function routePushRecipients(){throw new Error('Security must not use operational routing')}`);
   await writeFile(join(temp, 'managementStore.js'), `export const users=new Map(); export async function getManagedUser(id){return [...users.values()].find(user=>user.id===id)};export async function getManagedUserByEmail(email){return users.get(email)}`);
   await writeFile(join(temp, 'accountStore.js'), 'export async function authenticateStoredCredential(){return null}');
   await writeFile(join(temp, 'organizationStore.js'), `export async function getOrganizationMembership(id){return {organizationId:id==='carol'?'org-b':'org-a'}}`);

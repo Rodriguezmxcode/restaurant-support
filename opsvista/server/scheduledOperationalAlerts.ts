@@ -45,7 +45,9 @@ export async function detectOperationalAlerts(job: AlertJob, location?: string, 
       const warnings = performanceWarnings(row, hour, total, Number(targets[row.location]));
       // Separate threshold keys allow a later void/sales warning after an earlier
       // labor warning, while each individual threshold is limited to once/day.
-      for (const warning of warnings) add(row.location, `${row.location} · Atención operativa`, `${day} · ${warning} Revisa el detalle antes de ajustar la operación.`, 'Labor Intelligence', `${day}:${warning.split(' ')[0]}`);
+      for (const warning of warnings) { add(row.location, `${row.location} · Atención operativa`, `${day} · ${warning} Revisa el detalle antes de ajustar la operación.`, 'Labor Intelligence', `${day}:${warning.split(' ')[0]}`);
+        if (alerts.length) alerts[alerts.length - 1].category = warning.startsWith('Labor ') ? 'labor' : 'sales';
+      }
     }
     return { alerts, note: `${Object.keys(targets).length ? 'Sales targets configured.' : 'Sales pace waiting for configured daily targets.'} ${timing.applied ? '' : 'Total labor waits for verified operating hours and salary.'}`.trim() };
   }
@@ -165,6 +167,12 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   const job = req.query?.job, location = req.query?.location;
   if (typeof job !== 'string' || !alertJobs.includes(job as AlertJob) || (location !== undefined && (typeof location !== 'string' || !alertLocations.includes(location as typeof alertLocations[number])))) return res.status(400).json({ error: 'Invalid alert job' });
   if (job !== 'bonus' && ['performance', 'overtime', 'tasks'].includes(job) !== Boolean(location)) return res.status(400).json({ error: 'Invalid alert scope' });
+  // The existing authenticated half-hour heartbeat also drains preferences
+  // digests, even when an operational source is unavailable or in quiet hours.
+  if (job === 'reviews' && req.query?.verify !== '1') {
+    const { flushPushDigests } = await import('./pushDigestDelivery.js');
+    await flushPushDigests();
+  }
   const result = await runScheduledAlertJob(job as AlertJob, location as string | undefined, new Date(), req.query?.verify === '1');
   return res.status(result.ok ? 200 : 503).json(result);
 }

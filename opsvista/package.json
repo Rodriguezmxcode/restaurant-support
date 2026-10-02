@@ -18,7 +18,8 @@
     "test:partner-api": "node scripts/test-partner-api.mjs",
     "test:push-mfa": "node scripts/test-push-mfa.mjs",
     "test:web-push": "node scripts/test-web-push.mjs",
-    "test:operational-alerts": "node scripts/test-operational-alerts.mjs"
+    "test:operational-alerts": "node scripts/test-operational-alerts.mjs",
+    "test:notification-preferences": "node scripts/test-notification-preferences.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

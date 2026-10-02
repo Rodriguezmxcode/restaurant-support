@@ -25,6 +25,15 @@ jobs:
       - name: Vercel API typecheck
         working-directory: opsvista
         run: npm run typecheck:vercel
+      - name: Notification preference integration tests
+        working-directory: opsvista
+        run: npm run test:notification-preferences
+      - name: Web push regression tests
+        working-directory: opsvista
+        run: npm run test:web-push
+      - name: Push sign-in regression tests
+        working-directory: opsvista
+        run: npm run test:push-mfa
       - name: Build
         working-directory: opsvista
         run: npm run build

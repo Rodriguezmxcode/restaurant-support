@@ -63,8 +63,8 @@ export async function saveAndDeliverAlert(alert: OperationalAlert, recipients: s
         and status in ('pending','retry') and attempts<3 and (lease_until is null or lease_until<now())
       returning user_id`;
     if (!claim.length) continue;
-    const result = await sendWebPushToUsers([userId], alertActor, { category: alert.kind, tag: `opsvista:${alert.key}`, title: alert.title, body: alert.body, priority: alert.priority || (alert.kind === 'bonus' ? 'low' : 'normal') });
-    const status = result.accepted > 0 ? 'accepted' : ('unavailable' in result && result.unavailable) || result.devices > 0 ? 'retry' : 'no_device';
+    const result = await sendWebPushToUsers([userId], alertActor, { category: alert.category || alert.kind, location: alert.location, tag: `opsvista:${alert.key}`, title: alert.title, body: alert.body, priority: alert.priority || (alert.kind === 'bonus' ? 'low' : 'normal') });
+    const status = result.accepted > 0 ? 'accepted' : ('queued' in result && result.queued) ? 'queued' : ('suppressed' in result && result.suppressed) ? 'suppressed' : ('unavailable' in result && result.unavailable) || result.devices > 0 ? 'retry' : 'no_device';
     await sql`update opsvista_alert_deliveries set status=case when ${status}='retry' and attempts>=3 then 'failed' else ${status} end,lease_until=null,
       accepted_at=case when ${status}='accepted' then now() else null end
       where organization_id=${alertOrganization} and event_key=${alert.key} and user_id=${userId}`;

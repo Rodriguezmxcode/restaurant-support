@@ -1,5 +1,6 @@
 import { ECDH } from 'node:crypto';
 import webpush from 'web-push';
+import type { PushEvent } from '../shared/notificationPreferences.js';
 
 export type WebSubscription = { endpoint: string; keys: { p256dh: string; auth: string } };
 export type PushKeys = { publicKey: string; privateKey: string };
@@ -23,7 +24,7 @@ export function validateWebSubscription(value: unknown): WebSubscription {
   return { endpoint: url.href, keys: { p256dh, auth } };
 }
 
-export function pushPayload(input: { actionId?: string; category?: string; tag?: string; test?: boolean; title?: string; body?: string; priority?: 'high' | 'normal' | 'low' }, locale = 'en') {
+export function pushPayload(input: PushEvent, locale = 'en') {
   const es = locale === 'es';
   // Operational previews are explicitly requested by the workspace owner.
   const clean = (value: string | undefined, max: number) => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
