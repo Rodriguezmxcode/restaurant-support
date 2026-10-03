@@ -2,15 +2,15 @@ export const alertLocations = ['Stamford', 'Orange', 'Fairfield', 'Danbury', 'Av
 export const alertJobs = ['performance', 'overtime', 'tasks', 'logbook', 'reviews', 'ramp', 'prices', 'bonus'] as const;
 export type AlertJob = typeof alertJobs[number];
 export type OperationalAlert = { category?: import('./notificationPreferences.js').NotificationCategory; priority?: 'high' | 'normal' | 'low'; key: string; kind: AlertJob; location: string; title: string; body: string; module: string };
-export function alertClock(now = new Date()) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(now).map(p => [p.type, p.value]));
+export function alertClock(now = new Date(), timeZone = 'America/New_York') {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(now).map(p => [p.type, p.value]));
   const day = `${p.year}-${p.month}-${p.day}`;
   return { day, hour: Number(p.hour), weekday: new Date(`${day}T12:00:00Z`).getUTCDay() };
 }
 export const shiftDay = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 export const operationalWeekStart = (day: string) => shiftDay(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() - 3 + 7) % 7));
-export function alertJobDue(job: AlertJob, now = new Date()) {
-  const { hour } = alertClock(now);
+export function alertJobDue(job: AlertJob, now = new Date(), timeZone = 'America/New_York') {
+  const { hour } = alertClock(now, timeZone);
   if (hour < 9 || hour >= 23) return false;
   if (job === 'performance') return hour >= 17;
   if (job === 'tasks') return hour >= 21;

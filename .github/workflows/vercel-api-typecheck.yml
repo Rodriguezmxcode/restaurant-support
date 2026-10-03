@@ -25,6 +25,9 @@ jobs:
       - name: Vercel API typecheck
         working-directory: opsvista
         run: npm run typecheck:vercel
+      - name: Tenant alert and health integration tests
+        working-directory: opsvista
+        run: npm run test:tenant-alerts && npm run test:operational-alerts
       - name: Notification preference integration tests
         working-directory: opsvista
         run: npm run test:notification-preferences

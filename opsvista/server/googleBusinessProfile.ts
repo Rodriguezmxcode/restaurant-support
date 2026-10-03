@@ -67,9 +67,9 @@ async function credentials(organizationId: string) {
     const stored = await getGoogleBusinessCredentials(organizationId);
     if (stored?.clientId && stored.clientSecret && stored.refreshToken) return stored;
   } catch (error) {
-    if (!environmentCredentials()) throw error;
+    if (organizationId !== 'org-puerto-vallarta' || !environmentCredentials()) throw error;
   }
-  return environmentCredentials();
+  return organizationId === 'org-puerto-vallarta' ? environmentCredentials() : null;
 }
 
 function normalized(value: string) {
@@ -128,8 +128,8 @@ function configuredLocationMap() {
   return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
 }
 
-async function accountName(credential: GoogleBusinessCredentials) {
-  const configured = process.env.GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID?.trim();
+async function accountName(credential: GoogleBusinessCredentials, organizationId: string) {
+  const configured = organizationId === 'org-puerto-vallarta' ? process.env.GOOGLE_BUSINESS_PROFILE_ACCOUNT_ID?.trim() : undefined;
   if (configured) return configured.startsWith('accounts/') ? configured : `accounts/${configured}`;
   const payload = await googleJson<{ accounts?: GoogleAccount[] }>(`${ACCOUNT_API}/accounts`, credential);
   const account = payload.accounts?.[0];
@@ -152,13 +152,14 @@ async function listLocations(account: string, credential: GoogleBusinessCredenti
 
 function matchLocation(internalName: string, locations: GoogleLocation[], configured: Record<string, string>) {
   const explicit = configured[internalName];
-  if (explicit) return locations.find(location => location.name === explicit) || { name: explicit };
+  if (explicit) return locations.find(location => location.name === explicit);
   const needle = normalized(internalName);
-  return locations.find(location => {
+  const matches = locations.filter(location => {
     const address = location.storefrontAddress;
     const values = [location.title, location.storeCode, address?.locality, ...(address?.addressLines || [])].filter(Boolean).map(value => normalized(String(value)));
-    return values.some(value => value === needle || value.includes(needle));
+    return Boolean(needle) && values.some(value => value === needle || value.includes(needle));
   });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 async function reviewsForLocation(account: string, locationName: string, start: string, end: string, credential: GoogleBusinessCredentials) {
@@ -229,12 +230,12 @@ export async function getGoogleOperatingSchedules(scope: string[], organizationI
   if (!cached || cached.expiresAt <= Date.now()) {
     const credential = await credentials(organizationId);
     if (!credential) throw new Error('Google Business Profile credentials are not configured');
-    const account = await accountName(credential);
+    const account = await accountName(credential, organizationId);
     const locations = await listLocations(account, credential, true);
     cached = { locations, verifiedAt: new Date().toISOString(), expiresAt: Date.now() + 15 * 60_000 };
     hoursCache.set(organizationId, cached);
   }
-  const configured = configuredLocationMap();
+  const configured = organizationId === 'org-puerto-vallarta' ? configuredLocationMap() : {};
   const schedules: Record<string, OperatingSchedule> = {};
   for (const name of scope) {
     const canonical = [...OPSVISTA_LOCATIONS, 'Middletown', 'Newington'].find(item => normalized(name) === normalized(item) || normalized(name) === normalized(`Puerto Vallarta ${item}`));
@@ -252,10 +253,13 @@ export async function getGoogleOperatingSchedules(scope: string[], organizationI
 export async function getGoogleReviewSummaries(start: string, end: string, scope?: string[], organizationId = 'org-puerto-vallarta') {
   const credential = await credentials(organizationId);
   if (!credential) throw new Error('Google Business Profile credentials are not configured');
-  const account = await accountName(credential);
+  const account = await accountName(credential, organizationId);
   const googleLocations = await listLocations(account, credential);
-  const configured = configuredLocationMap();
-  const requested = (scope?.length ? scope : [...OPSVISTA_LOCATIONS]).filter(location => OPSVISTA_LOCATIONS.includes(location as typeof OPSVISTA_LOCATIONS[number]));
+  const configured = organizationId === 'org-puerto-vallarta' ? configuredLocationMap() : {};
+  const requested = organizationId === 'org-puerto-vallarta'
+    ? (scope?.length ? scope : [...OPSVISTA_LOCATIONS]).filter(location => OPSVISTA_LOCATIONS.includes(location as typeof OPSVISTA_LOCATIONS[number]))
+    : [...new Set(scope || [])];
+  if (!requested.length) throw new Error('No authorized review locations');
   const summaries = await Promise.all(requested.map(async location => {
     const match = matchLocation(location, googleLocations, configured);
     if (!match) return summarize(location, undefined, []);

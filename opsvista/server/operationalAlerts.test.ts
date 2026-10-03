@@ -118,12 +118,12 @@ test('source failures create no violation and a later run recovers', async () =>
 });
 test('a failed push on a daily rule retries before tomorrow without duplicating successful recipients', async () => {
   transport = 'fail'; const before = sends;
-  await runner.runScheduledAlertJob('logbook', undefined, new Date('2026-09-29T15:00:00Z'));
+  await runner.runScheduledAlertJob('logbook', 'Orange', new Date('2026-09-29T15:00:00Z'));
   assert.equal(sends, before + 2);
   transport = 'ok';
-  await runner.runScheduledAlertJob('logbook', undefined, new Date('2026-09-29T15:30:00Z'));
+  await runner.runScheduledAlertJob('logbook', 'Orange', new Date('2026-09-29T15:30:00Z'));
   assert.equal(sends, before + 4);
-  await runner.runScheduledAlertJob('logbook', undefined, new Date('2026-09-29T16:00:00Z'));
+  await runner.runScheduledAlertJob('logbook', 'Orange', new Date('2026-09-29T16:00:00Z'));
   assert.equal(sends, before + 4);
 });
 test('scheduled endpoint rejects browser cookies, invalid method and unsigned bearer tokens', async () => {

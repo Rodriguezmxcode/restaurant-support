@@ -149,7 +149,7 @@ function environmentCredentials(): Restaurant365Credentials | null {
 async function credentialsFor(organizationId: string) {
   const stored = await getRestaurant365Credentials(organizationId);
   if (stored) return { credentials: stored, source: 'encrypted-store' as const };
-  const environment = environmentCredentials();
+  const environment = organizationId === 'org-puerto-vallarta' ? environmentCredentials() : null;
   return environment ? { credentials: environment, source: 'environment' as const } : null;
 }
 

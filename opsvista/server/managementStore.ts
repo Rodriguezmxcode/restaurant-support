@@ -10,6 +10,7 @@ export type StoredLocationGrant = {
 
 export type ManagedDirectoryUser = {
   id: string;
+  organizationId?: string;
   name: string;
   email?: string;
   firstName?: string;
@@ -175,6 +176,7 @@ async function bootstrapInitialDirectory() {
 
 function normalizeUser(row: Record<string, unknown>): ManagedDirectoryUser {
   return {
+    organizationId: String(row.organization_id || 'org-puerto-vallarta'),
     id:String(row.id), name:String(row.name), email:row.email ? String(row.email) : undefined,
     firstName:row.first_name ? String(row.first_name) : undefined, lastName:row.last_name ? String(row.last_name) : undefined,
     phone:row.phone ? String(row.phone) : undefined, recoveryEmail:row.recovery_email ? String(row.recovery_email) : undefined,

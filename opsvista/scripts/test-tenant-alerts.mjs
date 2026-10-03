@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
-const root = fileURLToPath(new URL('../', import.meta.url)), output = await mkdtemp(join(tmpdir(), 'opsvista-alerts-'));
+const root = fileURLToPath(new URL('../', import.meta.url)), output = await mkdtemp(join(tmpdir(), 'opsvista-tenant-alerts-'));
 try {
   await writeFile(join(output, 'package.json'), '{"type":"module"}');
   await symlink(join(root, 'node_modules'), join(output, 'node_modules'), 'dir');
@@ -15,5 +15,5 @@ try {
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, ts.transpileModule(await readFile(join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText);
   }
-  process.exitCode = spawnSync(process.execPath, ['--experimental-test-module-mocks', join(output, 'server/operationalAlerts.test.js')], { stdio: 'inherit' }).status ?? 1;
+  process.exitCode = spawnSync(process.execPath, ['--experimental-test-module-mocks', join(output, 'server/tenantAlerts.test.js')], { stdio: 'inherit' }).status ?? 1;
 } finally { await rm(output, { recursive: true, force: true }); }
