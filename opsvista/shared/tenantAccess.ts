@@ -11,7 +11,7 @@ export function tenantWorkflowAllowed(user: TenantIdentity, resource: string) {
   if (resource === 'organizations') return user.role === 'Founder';
   if (hasLegacyWorkspace(user)) return true;
   if (!user.organizationId) return false;
-  if (['native_tasks', 'web_push', 'notification_preferences'].includes(resource)) return true;
+  if (['native_tasks', 'web_push', 'notification_preferences', 'connection_health'].includes(resource)) return true;
   if (user.role === 'Corporate') {
     return ['tenant_team','google_business_integration','google_business_callback','google_reviews'].includes(resource);
   }

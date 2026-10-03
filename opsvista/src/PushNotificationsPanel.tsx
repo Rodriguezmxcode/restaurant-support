@@ -1,3 +1,4 @@
+import ConnectionHealthPanel from './ConnectionHealthPanel';
 import NotificationPreferencesPanel from './NotificationPreferencesPanel';
 import { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
@@ -104,6 +105,7 @@ export default function PushNotificationsPanel() {
     {message && <p className={`push-feedback ${failed ? 'push-error' : ''}`} role={failed ? 'alert' : 'status'}>{messages[message] || messages.unavailable}</p>}
     <p className="push-privacy">{t('Notifications show the location, alert and priority. Sign-out disconnects operational updates. A linked security device remains available for sign-in codes.', 'Las notificaciones muestran la locación, la alerta y su prioridad. Cerrar sesión desconecta las alertas operativas. Un dispositivo de seguridad vinculado sigue disponible para los códigos de acceso.')}</p>
     <SecurityDevicePanel />
-    <OperationalAlertInbox />
+    <details className="push-inbox"><summary>{t('Connection status','Estado de conexiones')}</summary><ConnectionHealthPanel/></details>
+      <OperationalAlertInbox />
   </section>;
 }
