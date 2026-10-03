@@ -23,41 +23,36 @@ jobs:
           node --input-type=module <<'JS'
           // No checkout, permanent token, customer data, or notification text in logs.
           const verify = process.env.GITHUB_EVENT_NAME === 'push';
-          const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
-          const locations = ['Stamford','Orange','Fairfield','Danbury','Avon','Southington'];
-          const jobs = [];
-          for (const job of ['performance','overtime','tasks']) {
-            const earliest = {performance:17,overtime:15,tasks:21}[job];
-            if (verify || (hour >= earliest && hour < 23)) for (const location of locations) jobs.push({job,location});
+          async function request(params) {
+            const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            tokenUrl.searchParams.set('audience','opsvista-operational-alerts');
+            const identity = await fetch(tokenUrl,{headers:{Authorization:`Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`},signal:AbortSignal.timeout(15000)});
+            if (!identity.ok) throw new Error(`identity HTTP ${identity.status}`);
+            const {value:token} = await identity.json();
+            if (!token) throw new Error('missing identity');
+            console.log(`::add-mask::${token}`);
+            const url = new URL('https://restaurant-support.vercel.app/api/workflows');
+            url.searchParams.set('resource','scheduled_alerts');
+            for (const [key,value] of Object.entries(params)) if (value) url.searchParams.set(key,value);
+            if (verify) url.searchParams.set('verify','1');
+            const response = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(125000)});
+            const result = await response.json().catch(()=>({}));
+            if (!response.ok || !result.ok) throw new Error(`HTTP ${response.status}`);
+            return result;
           }
-          if (verify || (hour >= 9 && hour < 23)) for (const job of ['logbook','reviews','ramp','prices','bonus']) jobs.push({job});
-          // Authenticate a quiet-hours heartbeat too, so status distinguishes a
-          // functioning scheduler from one that stopped running.
-          if (!jobs.length) jobs.push({job:'reviews'});
-          let cursor = 0, failures = 0;
+          const plan = await request({job:'plan'});
+          if (!Array.isArray(plan.jobs)) throw new Error('Invalid scheduler plan');
+          const jobs = plan.jobs;
+          let cursor = 0, failures = Number(plan.configurationFailures) || 0;
           async function worker() {
             while (cursor < jobs.length) {
-              const {job,location} = jobs[cursor++];
+              const {job,location,organizationId} = jobs[cursor++];
               try {
-                const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
-                tokenUrl.searchParams.set('audience','opsvista-operational-alerts');
-                const identity = await fetch(tokenUrl, {headers:{Authorization:`Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`},signal:AbortSignal.timeout(15000)});
-                if (!identity.ok) throw new Error(`identity HTTP ${identity.status}`);
-                const {value:token} = await identity.json();
-                if (!token) throw new Error('missing identity');
-                console.log(`::add-mask::${token}`);
-                const url = new URL('https://restaurant-support.vercel.app/api/workflows');
-                url.searchParams.set('resource','scheduled_alerts'); url.searchParams.set('job',job);
-                if (location) url.searchParams.set('location',location);
-                if (verify) url.searchParams.set('verify','1');
-                const response = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(125000)});
-                const result = await response.json().catch(() => ({}));
-                if (!response.ok) throw new Error(`HTTP ${response.status}${['connection_required','source_limit','source_timeout','source_permissions','source_unavailable'].includes(result.reason) ? ': '+result.reason : ''}`);
-                if (!result.ok) throw new Error('check incomplete');
-                console.log(`${job}${location ? ':'+location : ''}: ${verify ? 'verified without sending' : result.quiet ? 'quiet hours' : result.busy ? 'already checked' : 'checked'}`);
+                const result = await request({job,location,organizationId});
+                console.log(`${job}: ${verify ? 'verified without sending' : result.quiet ? 'quiet hours' : result.busy ? 'already checked' : 'checked'}`);
               } catch (error) {
                 failures++;
-                console.log(`::warning::${job}${location ? ':'+location : ''}: ${error.message}. Other checks continue; the next run retries.`);
+                console.log(`::warning::${job}: ${error.message}. Other checks continue; the next run retries.`);
               }
             }
           }
