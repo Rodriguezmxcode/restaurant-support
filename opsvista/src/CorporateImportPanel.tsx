@@ -1,0 +1,185 @@
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import * as XLSX from 'xlsx';
+import { corporateCategories, corporateSections, corporateExpenseComposition, stableCorporateRowKey, suggestCorporateClassification, summarizeCorporateRows, type CorporateExpenseRow, type CorporateImportResponse, type CorporatePnlSection } from '../shared/corporateImports';
+import './corporateImport.css';
+
+const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2});
+const priorMonth=()=>{const d=new Date();d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()-1);return d.toISOString().slice(0,7);};
+const norm=(value:unknown)=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+const asNumber=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value:typeof value==='string'&&value.trim()&&Number.isFinite(Number(value.replace(/[$,]/g,'')))?Number(value.replace(/[$,]/g,'')):0;
+const asDate=(value:unknown)=>{
+  if(value instanceof Date&&!Number.isNaN(value.getTime()))return value.toISOString().slice(0,10);
+  if(typeof value==='number'){
+    const parsed=XLSX.SSF.parse_date_code(value);
+    if(parsed)return `${parsed.y}-${String(parsed.m).padStart(2,'0')}-${String(parsed.d).padStart(2,'0')}`;
+  }
+  if(typeof value==='string'&&value.trim()){
+    const direct=new Date(value);
+    if(!Number.isNaN(direct.getTime()))return direct.toISOString().slice(0,10);
+  }
+  return '';
+};
+const spanishMonth:Record<string,string>={ene:'01',feb:'02',mar:'03',abr:'04',may:'05',jun:'06',jul:'07',ago:'08',sep:'09',oct:'10',nov:'11',dic:'12'};
+const asReportDate=(value:unknown)=>{
+  const direct=asDate(value);if(direct)return direct;
+  const match=String(value??'').toLowerCase().match(/(\d{1,2})-([a-záéíóúñ]{3})-(\d{4})/);if(!match)return '';
+  const month=spanishMonth[norm(match[2]).slice(0,3)];if(!month)return '';
+  return `${match[3]}-${month}-${String(Number(match[1])).padStart(2,'0')}`;
+};
+const rowsOf=(book:XLSX.WorkBook,name:string)=>book.Sheets[name]?XLSX.utils.sheet_to_json(book.Sheets[name],{header:1,raw:true,defval:null}) as unknown[][]:[];
+const sheetName=(book:XLSX.WorkBook,wanted:string)=>book.SheetNames.find(name=>norm(name)===norm(wanted));
+const makeRow=(input:Omit<CorporateExpenseRow,'key'>):CorporateExpenseRow=>({...input,key:stableCorporateRowKey(input)});
+
+function preparedRows(book:XLSX.WorkBook,fileName:string){
+  const name=sheetName(book,'OpsVista Import');if(!name)return [] as CorporateExpenseRow[];
+  const sheet=rowsOf(book,name);const header=sheet.findIndex(row=>norm(row[0])==='key'&&norm(row[1])==='date'&&norm(row[4])==='amount');if(header<0)return [];
+  const result:CorporateExpenseRow[]=[];
+  for(let r=header+1;r<sheet.length;r++){
+    const row=sheet[r],date=asReportDate(row[1]),description=String(row[2]??'').trim(),amount=asNumber(row[4]);if(!date||!description||!amount)continue;
+    const section=String(row[5]??'Review') as CorporatePnlSection;if(!corporateSections.includes(section))continue;
+    const include=norm(row[7])==='yes'||row[7]===true;
+    result.push({
+      key:String(row[0]||stableCorporateRowKey({date,description,amount,sourceSheet:String(row[11]||name),sourceRow:Number(row[12]||r+1)})),date,description,vendor:String(row[3]??'')||undefined,amount,
+      section,category:String(row[6]??corporateCategories[section][0]),includeInPnl:section==='Balance Sheet'||section==='Review'?false:include,
+      sourceFile:fileName,sourceSheet:String(row[11]??name)||name,sourceRow:Number(row[12]||r+1),notes:String(row[13]??'')||undefined,
+      confidence:(['auto','manual','review'].includes(String(row[9]))?String(row[9]):'manual') as CorporateExpenseRow['confidence'],
+    });
+  }
+  return result;
+}
+
+function bankStatementMonths(book:XLSX.WorkBook){
+  const name=sheetName(book,'Detalle bancario'); if(!name)return new Set<string>();
+  const sheet=rowsOf(book,name),header=sheet.findIndex(row=>norm(row[0])==='fecha'&&norm(row[1])==='tipo'&&norm(row[2]).includes('contraparte'));
+  const months=new Set<string>(); if(header<0)return months;
+  for(let index=header+1;index<sheet.length;index++){
+    const date=asDate(sheet[index]?.[0]),type=norm(sheet[index]?.[1]);
+    if(date&&(type==='entrada'||type==='salida'))months.add(date.slice(0,7));
+  }
+  return months;
+}
+
+function payrollRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
+  const name=sheetName(book,'Detalle nómina'); if(!name)return {rows:[] as CorporateExpenseRow[],months:new Set<string>()};
+  const sheet=rowsOf(book,name), find=(label:string)=>sheet.findIndex(row=>norm(row[0])===norm(label));
+  const check=find('Check Date del reporte'),gross=find('Sueldos brutos'),er=find('Impuestos patronales'),service=find('Servicio Toast e impuesto del servicio');
+  if(check<0||gross<0||er<0||service<0)return {rows:[] as CorporateExpenseRow[],months:new Set<string>()};
+  const reportHeader=sheet.findIndex(row=>norm(row[0])==='concepto'&&row.slice(1).some(value=>/ago|sep|jul|jun|may/i.test(String(value??''))));
+  const result:CorporateExpenseRow[]=[],months=new Set<string>();
+  for(let col=1;col<sheet[check].length;col++){
+    const date=asReportDate(sheet[check][col])||asReportDate(reportHeader>=0?sheet[reportHeader]?.[col]:undefined); if(!date)continue; const month=date.slice(0,7); if(allowedMonths.size&&!allowedMonths.has(month))continue; months.add(month);
+    const specs:[number,string,CorporatePnlSection,string][]=[
+      [gross,'Sueldos brutos','Labor','Wages & Salaries'],[er,'Impuestos patronales (ER)','Labor','Employer Payroll Taxes'],[service,'Servicio Toast e impuesto','Operating Expenses','Payroll Processing'],
+    ];
+    for(const [rowIndex,description,section,category] of specs){const amount=asNumber(sheet[rowIndex]?.[col]);if(!amount)continue;result.push(makeRow({date,description,vendor:'Toast Payroll',amount,section,category,includeInPnl:true,sourceFile:fileName,sourceSheet:name,sourceRow:rowIndex+1,notes:'Desglose de Payroll Summary. Retenciones de empleados no se suman nuevamente.',confidence:'auto'}));}
+  }
+  return {rows:result,months};
+}
+
+function bankRows(book:XLSX.WorkBook,fileName:string,detailedPayrollMonths:Set<string>){
+  const name=sheetName(book,'Detalle bancario'); if(!name)return [] as CorporateExpenseRow[];
+  const sheet=rowsOf(book,name),header=sheet.findIndex(row=>norm(row[0])==='fecha'&&norm(row[1])==='tipo'&&norm(row[2]).includes('contraparte'));
+  if(header<0)return [];
+  const result:CorporateExpenseRow[]=[];
+  for(let index=header+1;index<sheet.length;index++){
+    const row=sheet[index],date=asDate(row[0]),type=norm(row[1]);
+    if(!date||type!=='salida')continue;
+    const counterparty=String(row[2]??''),category=String(row[3]??''),amount=asNumber(row[5]); if(!amount)continue;
+    const combined=`${counterparty} ${category}`;
+    if(detailedPayrollMonths.has(date.slice(0,7))&&/toast payroll/i.test(combined))continue;
+    const suggestion=suggestCorporateClassification(combined);
+    result.push(makeRow({date,description:category||counterparty,vendor:counterparty,amount,section:suggestion.section,category:suggestion.category,includeInPnl:suggestion.includeInPnl,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:String(row[7]??row[6]??'')||undefined,confidence:suggestion.confidence}));
+  }
+  return result;
+}
+
+function rentRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
+  const name=sheetName(book,'Detalle bancario'); if(!name)return [] as CorporateExpenseRow[];
+  const sheet=rowsOf(book,name),header=sheet.findIndex(row=>norm(row[0])==='mes asignado'&&norm(row[1]).includes('renta'));
+  if(header<0)return [];
+  const result:CorporateExpenseRow[]=[];
+  for(let index=header+1;index<sheet.length;index++){
+    const date=asDate(sheet[index]?.[0]),amount=asNumber(sheet[index]?.[1]); if(!date||!amount)break; if(allowedMonths.size&&!allowedMonths.has(date.slice(0,7)))continue;
+    const payer=String(sheet[index]?.[2]??''),beneficiary=String(sheet[index]?.[3]??''),check=String(sheet[index]?.[4]??'');
+    result.push(makeRow({date,description:`Renta corporativa completa${payer?` · pagada por ${payer}`:''}${check?` · cheque ${check}`:''}`,vendor:beneficiary||'325 Boston Post Rd LLC',amount,section:'Occupancy',category:'Corporate Office Rent',includeInPnl:true,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:String(sheet[index]?.[7]??'')||undefined,confidence:'auto'}));
+  }
+  return result;
+}
+
+function budgetRows(book:XLSX.WorkBook,fileName:string,allowedMonths:Set<string>){
+  const name=sheetName(book,'Gastos corporativos'); if(!name)return [] as CorporateExpenseRow[];
+  const sheet=rowsOf(book,name),index=sheet.findIndex(row=>norm(row[0])==='ramp mensual presupuestado'&&[1,2,3,4].every(col=>asNumber(row[col])>0));
+  if(index<0)return [];
+  let header=-1;for(let cursor=index-1;cursor>=Math.max(0,index-7);cursor--){if([1,2,3,4].every(col=>Boolean(asDate(sheet[cursor]?.[col])))){header=cursor;break;}}
+  if(header<0)return [];
+  return [1,2,3,4].map(col=>{const date=asDate(sheet[header][col]),amount=asNumber(sheet[index][col]);return makeRow({date,description:'Ramp mensual presupuestado',vendor:'Ramp',amount,section:'Review',category:'Budget / Forecast (excluded)',includeInPnl:false,sourceFile:fileName,sourceSheet:name,sourceRow:index+1,notes:'Presupuesto, no gasto real conciliado. Se excluye del P&L hasta sustituirse por cargos reales.',confidence:'review'});}).filter(row=>row.date&&row.amount&&(!allowedMonths.size||allowedMonths.has(row.date.slice(0,7))));
+}
+
+function genericRows(book:XLSX.WorkBook,fileName:string){
+  const result:CorporateExpenseRow[]=[];
+  for(const name of book.SheetNames){
+    const sheet=rowsOf(book,name); let header=-1,dateCol=-1,descCol=-1,amountCol=-1,vendorCol=-1;
+    for(let r=0;r<Math.min(sheet.length,25);r++){
+      const labels=sheet[r].map(norm);dateCol=labels.findIndex(v=>v==='date'||v==='fecha');descCol=labels.findIndex(v=>/description|descripcion|descripción|concepto/.test(v));amountCol=labels.findIndex(v=>/amount|importe|gasto|expense|salida/.test(v));vendorCol=labels.findIndex(v=>/vendor|proveedor|contraparte/.test(v));if(dateCol>=0&&descCol>=0&&amountCol>=0){header=r;break;}
+    }
+    if(header<0)continue;
+    for(let r=header+1;r<sheet.length;r++){const date=asDate(sheet[r][dateCol]),description=String(sheet[r][descCol]??''),amount=asNumber(sheet[r][amountCol]);if(!date||!description||!amount)continue;const vendor=vendorCol>=0?String(sheet[r][vendorCol]??''):'';const suggestion=suggestCorporateClassification(`${vendor} ${description}`);result.push(makeRow({date,description,vendor:vendor||undefined,amount,section:suggestion.section,category:suggestion.category,includeInPnl:suggestion.includeInPnl,sourceFile:fileName,sourceSheet:name,sourceRow:r+1,confidence:suggestion.confidence}));}
+  }
+  return result;
+}
+
+function parseWorkbook(book:XLSX.WorkBook,fileName:string){
+  const prepared=preparedRows(book,fileName);if(prepared.length)return prepared.sort((a,b)=>a.date.localeCompare(b.date)||a.sourceRow-b.sourceRow);
+  const coveredMonths=bankStatementMonths(book); const payroll=payrollRows(book,fileName,coveredMonths); const known=[...bankRows(book,fileName,payroll.months),...payroll.rows,...rentRows(book,fileName,coveredMonths),...budgetRows(book,fileName,coveredMonths)];
+  const rows=known.length?known:genericRows(book,fileName);
+  const unique=new Map<string,CorporateExpenseRow>();for(const row of rows)unique.set(row.key,row);
+  if(!unique.size)throw new Error('No encontré una tabla de gastos reconocible. Usa columnas de fecha, concepto/description e importe/amount, o el formato corporativo actual.');
+  return [...unique.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.sourceRow-b.sourceRow);
+}
+
+async function readSaved(signal?:AbortSignal):Promise<CorporateImportResponse>{const response=await fetch('/api/corporate-import',{credentials:'include',cache:'no-store',signal});const body=await response.json();if(!response.ok)throw new Error(body.error||'No se pudo abrir el P&L corporativo importado.');return body;}
+
+export default function CorporateImportPanel({start,end,allowImport=false,onSelectMonth}:{start:string;end:string;allowImport?:boolean;onSelectMonth:(month:string)=>void}){
+  const [data,setData]=useState<CorporateImportResponse>({rows:[],summary:summarizeCorporateRows([]),canImport:false});
+  const [preview,setPreview]=useState<CorporateExpenseRow[]>([]),[sourceFile,setSourceFile]=useState('');
+  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  useEffect(()=>{const controller=new AbortController();void readSaved(controller.signal).then(body=>{setData(body);setError('');}).catch(reason=>setError(reason instanceof Error?reason.message:'No se pudo abrir Corporate Office.')).finally(()=>setLoading(false));return()=>controller.abort();},[]);
+  const activeRows=preview.length?preview:data.rows;
+  const months=useMemo(()=>[...new Set(activeRows.map(row=>row.date.slice(0,7)))].sort().reverse(),[activeRows]);
+  const activeMonth=start.slice(0,7);
+  const visible=useMemo(()=>activeRows.filter(row=>row.date>=start&&row.date<=end),[activeRows,start,end]);
+  const savedComposition=useMemo(()=>corporateExpenseComposition(data.rows,start,end),[data.rows,start,end]);
+  const summary=useMemo(()=>summarizeCorporateRows(visible),[visible]);
+  const choose=async(event:ChangeEvent<HTMLInputElement>)=>{
+    const file=event.target.files?.[0];event.target.value='';setError('');setNotice('');if(!file)return;
+    if(file.size>10_000_000){setError('El archivo puede tener hasta 10 MB.');return;}
+    try{const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});const rows=parseWorkbook(book,file.name);setPreview(rows);setSourceFile(file.name);const ms=[...new Set(rows.map(row=>row.date.slice(0,7)))];if(ms.includes(priorMonth()))onSelectMonth(priorMonth());else if(ms.length)onSelectMonth(ms.sort().reverse()[0]);setNotice(`${rows.length} movimientos preparados. Revisa las filas amarillas antes de guardar. La gráfica usa únicamente los datos guardados.`);}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo leer el archivo.');}
+  };
+  const update=(key:string,patch:Partial<CorporateExpenseRow>)=>setPreview(current=>current.map(row=>row.key===key?{...row,...patch,confidence:'manual'}:row));
+  const changeSection=(row:CorporateExpenseRow,section:CorporatePnlSection)=>{const category=corporateCategories[section][0];update(row.key,{section,category,includeInPnl:section!=='Balance Sheet'&&section!=='Review'});};
+  const save=async()=>{if(!preview.length||!allowImport||!data.canImport)return;setSaving(true);setError('');setNotice('');try{const response=await fetch('/api/corporate-import',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{schemaVersion:1,sourceFile,rows:preview}})});const body=await response.json();if(!response.ok)throw new Error(body.error||'No se pudo guardar.');const saved=await readSaved();setData(saved);setPreview([]);setNotice(`${body.saved} movimientos guardados en OpsVista. Volver a cargar el mismo archivo reemplaza esa versión sin duplicarla.`);}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo guardar.');}finally{setSaving(false);}};
+  return <section className="panel corp-import-panel" aria-label="Importación del P&L corporativo">
+    <header><div><h2>P&L de Corporate Office</h2><p>Importa Excel, revisa la clasificación y guarda solo los costos que pertenecen al P&L. Transferencias, retenciones y presupuestos quedan fuera por defecto.</p></div>{allowImport&&data.canImport&&<div className="corp-import-actions"><label className="corp-import-file">Subir Excel corporativo<input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={event=>void choose(event)} disabled={saving}/></label>{preview.length>0&&<button type="button" className="primary" onClick={()=>void save()} disabled={saving}>{saving?'Guardando…':'Guardar P&L en OpsVista'}</button>}</div>}</header>
+    {loading&&<p role="status">Abriendo P&L corporativo guardado…</p>}{notice&&<p className="corp-import-notice" role="status">{notice}</p>}{error&&<p className="corp-import-error" role="alert">{error}</p>}
+    <div className="corp-import-controls"><label>VER MES DEL EXCEL<select aria-label="Mes del Excel corporativo" value={months.includes(activeMonth)&&start===`${activeMonth}-01`&&end===new Date(Date.UTC(Number(activeMonth.slice(0,4)),Number(activeMonth.slice(5,7)),0)).toISOString().slice(0,10)?activeMonth:""} onChange={event=>onSelectMonth(event.target.value)}><option value="" disabled>Selecciona un mes importado</option>{months.map(value=><option key={value}>{value}</option>)}</select></label><span>{start} → {end} · mismo período que la vista contable</span>{preview.length>0&&<span className="corp-import-badge">PREVIEW · {sourceFile}</span>}{!preview.length&&data.updatedAt&&<span className="corp-import-badge">GUARDADO · {new Date(data.updatedAt).toLocaleString('es-MX',{timeZone:'America/New_York'})}</span>}</div>
+    {preview.length>0&&<p className="corp-import-warning">Vista previa sin guardar: los importes de revisión aún no actualizan la gráfica guardada.</p>}{visible.length>0&&<div className="corp-import-summary"><Kpi label="P&L corporativo" value={usd.format(summary.total)}/><Kpi label="Labor" value={usd.format(summary.labor)}/><Kpi label="Gastos operativos" value={usd.format(summary.operatingExpenses)}/><Kpi label="Renta / ocupación" value={usd.format(summary.occupancy)}/><Kpi label="COGS" value={usd.format(summary.cogs)}/><Kpi label="Por revisar" value={String(summary.reviewCount)}/></div>}
+    {!loading&&!error&&<CorporateExpenseComposition composition={savedComposition} start={start} end={end} updatedAt={data.updatedAt}/>}
+    {visible.length?<><div className="corp-import-preview-head"><div><h3>{preview.length?'Revisión antes de guardar':'Detalle guardado'}</h3><p>{visible.length} movimientos del período · excluidos del P&L: {usd.format(summary.excluded)}</p></div></div><div className="corp-import-table-wrap"><table className="corp-import-table"><thead><tr><th>Fecha</th><th>Concepto / vendor</th><th>Importe</th><th>Sección P&L</th><th>Categoría</th><th>Incluir</th><th>Fuente</th></tr></thead><tbody>{visible.map(row=><tr key={row.key} className={`${row.section==='Review'?'review ':''}${!row.includeInPnl?'excluded':''}`}><td>{row.date}</td><td><strong>{row.description}</strong><small>{row.vendor||'Sin vendor'}</small>{row.notes&&<small>{row.notes}</small>}</td><td className="amount">{usd.format(row.amount)}</td><td>{preview.length?<select value={row.section} onChange={event=>changeSection(row,event.target.value as CorporatePnlSection)}>{corporateSections.map(value=><option key={value}>{value}</option>)}</select>:row.section}</td><td>{preview.length?<select value={row.category} onChange={event=>update(row.key,{category:event.target.value})}>{corporateCategories[row.section].map(value=><option key={value}>{value}</option>)}</select>:row.category}</td><td>{preview.length?<input type="checkbox" checked={row.includeInPnl} disabled={row.section==='Balance Sheet'||row.section==='Review'} onChange={event=>update(row.key,{includeInPnl:event.target.checked})}/>:row.includeInPnl?'Sí':'No'}</td><td className="corp-import-source">{row.sourceSheet} · fila {row.sourceRow}<small>{row.confidence==='review'?'Requiere revisión':row.confidence==='manual'?'Editado manualmente':'Clasificación automática'}</small></td></tr>)}</tbody></table></div><div className="corp-import-total"><span>Total P&L del período:</span><strong>{usd.format(summary.total)}</strong></div></>:!loading&&<div className="corp-import-empty">No hay gastos corporativos importados para este período. Selecciona un mes del Excel o carga un archivo con las fechas que necesitas.</div>}
+    <p className="corp-import-help"><strong>Regla anti-duplicados:</strong> si el Excel contiene el detalle de nómina de un mes, OpsVista usa sueldos brutos + impuestos patronales + servicio Toast y omite los débitos bancarios Toast de ese mismo mes. Las retenciones del empleado no se suman otra vez.</p>
+  </section>;
+}
+function Kpi({label,value}:{label:string;value:string}){return <div className="corp-import-kpi"><span>{label}</span><strong>{value}</strong></div>}
+
+export function CorporateExpenseComposition({composition,start,end,updatedAt}:{composition:ReturnType<typeof corporateExpenseComposition>;start:string;end:string;updatedAt?:string}){
+  const labels:Record<string,string>={Labor:'Labor','Operating Expenses':'Gastos operativos',Occupancy:'Renta / ocupación','Other Expense':'Otros gastos',COGS:'COGS'};
+  const max=Math.max(1,...composition.groups.map(group=>Math.abs(group.amount)));
+  return <section className="r365-card" aria-label="Composición de gastos corporativos del Excel guardado" style={{margin:'22px 0',padding:0}}>
+    <header><div><h2>Composición de gastos corporativos</h2><p>Fuente: Excel guardado en OpsVista · clasificaciones incluidas en el P&L.</p></div><span className="count-pill">{start} → {end}</span></header>
+    {!composition.summary.rowCount?<p className="corp-import-warning">No hay filas guardadas del Excel para este período. Elige un mes disponible arriba; no se muestran ceros como si fueran gastos confirmados.</p>:<>
+      {composition.summary.reviewCount>0&&<p className="corp-import-warning">{composition.summary.reviewCount} movimientos por revisar, excluidos de esta composición.</p>}
+      <div className="r365-bars">{composition.groups.map(group=><div key={group.section} className="r365-bar-row"><div><strong>{labels[group.section]}</strong><span>{group.categoryCount} categorías · {group.rowCount} movimientos</span></div><div className="r365-bar-track"><i style={{width:`${Math.abs(group.amount)/max*100}%`}}/></div><strong>{usd.format(group.amount)}</strong></div>)}</div>
+      <div className="corp-import-total"><span>Total clasificado del Excel:</span><strong>{usd.format(composition.summary.total)}</strong></div>
+      <p className="corp-import-help">Excluidos del P&L: {usd.format(composition.summary.excluded)}. Esta gráfica no suma el ledger de R365. Archivos: {composition.sourceFiles.join(', ')}{updatedAt?` · Guardado: ${new Date(updatedAt).toLocaleString('es-MX',{timeZone:'America/New_York'})}`:''}.</p>
+    </>}
+  </section>;
+}

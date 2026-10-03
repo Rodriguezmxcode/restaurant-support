@@ -1,0 +1,59 @@
+import { preferenceContext } from './notificationPreferencesStore.js';
+import type { SessionUser } from './authSession.js';
+import { getManagedUser } from './managementStore.js';
+import { getOrganizationMembership } from './organizationStore.js';
+import { getNotificationPreferences } from './actionNotificationStore.js';
+import { isSameOriginPushRequest, validateWebSubscription } from './webPushDelivery.js';
+import { registerWebPush, removeWebPush, testWebPush, webPushPublicKey, webPushRegistered } from './webPushStore.js';
+import { pushMfaDevice } from './pushMfaStore.js';
+
+type Request = { method?: string; headers?: Record<string, string | string[] | undefined>; body?: Record<string, unknown> };
+type Response = { status: (code: number) => Response; json: (body: unknown) => void; setHeader?: (name: string, value: string) => void };
+export async function webPushEndpoint(req: Request, res: Response, user: SessionUser) {
+  res.setHeader?.('Cache-Control', 'private, no-store');
+  try {
+    const account = await getManagedUser(user.id);
+    if (!account?.active || account.role !== user.role) return res.status(403).json({ error: 'Active account required', code: 'account_access' });
+    // The login flow deliberately gives Founders no organization membership.
+    // Match that identity model while keeping subscriptions in their existing
+    // Puerto Vallarta workspace; a Founder session cannot select another tenant.
+    const organizationId = user.organizationId || 'org-puerto-vallarta';
+    const membership = account.role === 'Founder' ? null : await getOrganizationMembership(user.id);
+    const allowed = account.role === 'Founder'
+      ? organizationId === 'org-puerto-vallarta'
+      : membership?.organizationId === organizationId;
+    if (!allowed) return res.status(403).json({ error: 'Active account required', code: 'account_access' });
+    if (!req.method || req.method === 'GET') {
+      const preferences = await getNotificationPreferences(user);
+      return res.status(200).json({ publicKey: await webPushPublicKey(), pushEnabled: preferences.pushEnabled });
+    }
+    if (req.method !== 'POST') { res.setHeader?.('Allow', 'GET, POST'); return res.status(405).json({ error: 'Method not allowed' }); }
+    if (!isSameOriginPushRequest(req.headers)) return res.status(403).json({ error: 'Same-origin JSON request required' });
+    const action = req.body?.action;
+    if (action === 'inbox') {
+      const { alertInbox } = await import('./operationalAlertStore.js');
+      const context = await preferenceContext(user);
+      const allowedLocations = context.globalRole ? null : context.allowedLocations;
+      return res.status(200).json(await alertInbox(user, allowedLocations));
+    }
+    const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint : '';
+    if (action === 'subscribe') {
+      let subscription;
+      try { subscription = validateWebSubscription(req.body?.subscription); } catch { return res.status(400).json({ error: 'Invalid push subscription' }); }
+      await registerWebPush(subscription, req.body?.locale === 'es' ? 'es' : 'en', user);
+      return res.status(200).json({ registered: true, pushEnabled: (await getNotificationPreferences(user)).pushEnabled });
+    }
+    if (!endpoint || endpoint.length > 4096) return res.status(400).json({ error: 'Device endpoint required' });
+    if (action === 'status') return res.status(200).json({ registered: await webPushRegistered(endpoint, user) });
+    if (action === 'unsubscribe') {
+      const retainSubscription = user.role !== 'Founder' && (await pushMfaDevice(user))?.endpoint === endpoint;
+      await removeWebPush(endpoint, user);
+      return res.status(200).json({ registered: false, retainSubscription });
+    }
+    if (action === 'test') {
+      if (!(await getNotificationPreferences(user)).pushEnabled) return res.status(200).json({ accepted: false, reason: 'push_disabled' });
+      return res.status(200).json(await testWebPush(endpoint, user));
+    }
+    return res.status(400).json({ error: 'Unknown push action' });
+  } catch { return res.status(503).json({ error: 'Push notifications are temporarily unavailable' }); }
+}

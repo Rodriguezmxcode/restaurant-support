@@ -1,0 +1,498 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OpsVista API for PV Control",
+    "version": "1.0.0",
+    "description": "Read-only export. Data still originates from R365. Payment status and receipt files are unavailable. API keys are created by Founder in OpsVista Integraciones, expire in 90 days and allow 30 requests/minute."
+  },
+  "servers": [
+    {
+      "url": "https://restaurant-support.vercel.app/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/locations": {
+      "get": {
+        "operationId": "listLocations",
+        "summary": "List authorized location IDs",
+        "responses": {
+          "200": {
+            "description": "Six restaurants and Corporate Office",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invoices": {
+      "get": {
+        "operationId": "listInvoices",
+        "summary": "Read saved AP invoice approvals and known invoice amounts",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "description": "Inclusive transaction date, YYYY-MM-DD",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "description": "Inclusive transaction date; range must be at most 31 days",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "location_id",
+            "in": "query",
+            "required": false,
+            "description": "Stable location ID from GET /locations",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "approval_status",
+            "in": "query",
+            "required": false,
+            "description": "Approval filter; not payment status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "approved",
+                "unapproved"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum records on one page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Offset from pagination.next_offset",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000,
+              "default": 0
+            }
+          },
+          {
+            "name": "snapshot_at",
+            "in": "query",
+            "required": false,
+            "description": "Required when offset > 0; preserve the value from the first page; restart on 409",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved snapshot. Totals cover the entire filtered result; do not add totals across pages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoicesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error; never interpret as a successful empty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "OpsVista API key"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "restaurant",
+              "corporate"
+            ]
+          }
+        }
+      },
+      "LocationsResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            }
+          }
+        }
+      },
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable source-prefixed identity. Upsert by this field."
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "nullable": true
+          },
+          "transaction_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "location_id": {
+            "type": "string"
+          },
+          "vendor_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount": {
+            "type": "number",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "approval_status": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "unapproved",
+              "unknown"
+            ]
+          },
+          "payment_status": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          "paid_amount": {
+            "type": "number",
+            "nullable": true,
+            "description": "Always null in v1; unknown, not zero."
+          },
+          "outstanding_amount": {
+            "type": "number",
+            "nullable": true,
+            "description": "Always null in v1; unknown, not zero."
+          }
+        }
+      },
+      "InvoicesResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Invoice"
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              },
+              "next_offset": {
+                "type": "integer",
+                "nullable": true
+              },
+              "snapshot_at": {
+                "type": "string"
+              }
+            }
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "invoice_count": {
+                "type": "integer"
+              },
+              "known_invoice_amount": {
+                "type": "number",
+                "nullable": true
+              },
+              "missing_amounts": {
+                "type": "integer"
+              }
+            }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "restaurant365-odata"
+                ]
+              },
+              "snapshot_at": {
+                "type": "string"
+              },
+              "refresh_pending": {
+                "type": "boolean"
+              },
+              "date_basis": {
+                "type": "string",
+                "enum": [
+                  "transaction_date"
+                ]
+              }
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

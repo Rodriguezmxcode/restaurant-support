@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="same-origin">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>PV Control · OpsVista</title>
+  <link rel="stylesheet" href="/pv-control.css">
+</head>
+<body>
+  <header><div class="brand"><span class="mark">PV</span><div><h1>PV Control</h1><span>Conectado con OpsVista</span></div></div><a href="/" target="_blank" rel="noopener">Abrir OpsVista ↗</a></header>
+  <main>
+    <div class="heading"><div><p class="eyebrow">PUERTO VALLARTA · CONTROL DE FACTURAS</p><h2>Tu operación, conectada.</h2><p class="muted">Envía facturas de PV Control y consulta las recibidas de Restaurant365.</p></div><span id="connection" class="badge">Verificando conexión…</span></div>
+    <section id="access" class="panel" hidden><h3>Inicia sesión en OpsVista</h3><p id="access-message">Usa tu cuenta Founder y regresa a esta pestaña.</p><div class="actions"><a class="button" href="/" target="_blank" rel="noopener">Iniciar sesión ↗</a><button id="retry" class="secondary">Probar conexión</button></div></section>
+    <section id="workspace" hidden>
+      <section id="pv-preview" class="panel" hidden>
+        <h3>Revisar factura de PV Control</h3>
+        <p>Confirma estos datos para guardarlos en OpsVista. El registro quedará recibido para revisión; este paso no aprueba ni realiza un pago.</p>
+        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Proveedor</th><th>Factura</th><th>Importe</th><th>Carril</th></tr></thead><tbody id="pv-preview-row"></tbody></table></div>
+        <p id="pv-preview-notes" class="muted"></p><p class="note">Se envían los datos capturados. El envío todavía no incluye la foto o PDF.</p>
+        <p id="pv-submit-status" role="status" aria-live="polite"></p>
+        <button id="pv-submit" type="button">Confirmar y guardar en OpsVista</button>
+      </section>
+      <section class="panel" id="pv-inbox-panel">
+        <div class="table-head"><div><h3>Recibidas de PV Control</h3><p id="pv-inbox-status" class="muted">Consultando registros guardados…</p></div><button id="pv-inbox-refresh" type="button" class="secondary">Actualizar</button></div>
+        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Proveedor</th><th>Factura</th><th>Importe</th><th>Carril</th><th>Estado</th></tr></thead><tbody id="pv-inbox"></tbody></table></div>
+        <p class="note">Esta bandeja conserva las facturas recibidas de PV Control. Su recepción todavía no alimenta el P&amp;L, Price Watch ni los saldos por pagar.</p>
+      </section>
+      <form id="sync-form" class="panel filters"><label>Desde<input id="start" type="date" required></label><label>Hasta<input id="end" type="date" required></label><button id="sync" type="submit">Sincronizar OpsVista</button><p class="muted">Hasta 31 días por consulta · seis restaurantes y oficina corporativa</p></form>
+      <p id="status" role="status" aria-live="polite">Selecciona las fechas y sincroniza para consultar datos.</p>
+      <section id="local-transfer" class="panel" hidden><h3>Enviar la consulta a tu PV Control local</h3><p>Este archivo abrió la conexión. Al confirmar, las facturas del período consultado se enviarán a ese archivo para guardarlas en su navegador. No se envían claves ni contraseñas.</p><p id="transfer-status" class="muted">Primero sincroniza las facturas.</p><button id="send-local" type="button" disabled>Enviar facturas a PV Control</button></section>
+      <div class="metrics"><article><span>Facturas consultadas</span><strong id="count">—</strong></article><article><span>Importe conocido de facturas</span><strong id="amount">—</strong></article><article><span>Importes no disponibles</span><strong id="missing">—</strong></article></div>
+      <section class="panel"><div class="table-head"><div><h3>Facturas</h3><p id="freshness" class="muted">Sin consulta realizada.</p></div><div class="table-filters"><label>Sucursal<select id="location"><option value="">Todas las sucursales</option></select></label><label>Buscar<input id="search" type="search" placeholder="Proveedor o número"></label></div></div><div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Proveedor</th><th>Factura</th><th class="numeric">Importe</th><th>Aprobación</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Las facturas aparecerán después de sincronizar.</td></tr></tbody></table></div></section>
+      <p class="note">La aprobación no confirma un pago. Los importes de esta consulta no representan saldos pendientes. Pagos, bancos y comprobantes todavía no están conectados.</p>
+    </section>
+    <footer>OpsVista guarda las facturas de PV Control que confirmes. Tu archivo local conserva sus propios registros.</footer>
+  </main>
+  <script type="module" src="/pv-control.js"></script>
+</body>
+</html>
