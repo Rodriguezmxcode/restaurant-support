@@ -35,7 +35,7 @@ try {
   assert.deepEqual(Object.keys(results[0]).sort(), ['checkedAt', 'ok']);
   fail(Object.assign(new Error('private-credential-never-log'), { code: '42P01' }));
   assert.equal((await (await import(join(temp, 'health.js') + '?db')).signInHealth()).ok, false);
-  assert.deepEqual(logs.at(-1)[1], { stage: 'directory', reason: '42P01' });
+  assert.deepEqual(logs.at(-1)[1], { stage: 'directory', reason: '42P01', category: 'dependency_failure' });
   fail(undefined); identityOK = false;
   assert.equal((await (await import(join(temp, 'health.js') + '?identity')).signInHealth()).ok, false);
   identityOK = true; delete process.env.OPSVISTA_SESSION_SECRET;

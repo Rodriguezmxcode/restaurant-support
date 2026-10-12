@@ -7,8 +7,18 @@ let cached: { until: number; result: Promise<Health> } | undefined;
 
 function recordFailure(stage: string, error: unknown) {
   const code = (error as { code?: unknown } | null)?.code;
-  const allowed = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'CONNECT_TIMEOUT', '53300', '57P01', '23505', '42501', '42P01', '42703', '53100'];
-  console.error('OpsVista sign-in health failed', { stage, reason: typeof code === 'string' && allowed.includes(code) ? code : 'dependency_failure' });
+  const allowed = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'CONNECT_TIMEOUT', 'CONNECTION_CLOSED', 'CONNECTION_ENDED', 'CONNECTION_DESTROYED', '53300', '57P01', '23505', '42501', '42P01', '42703', '53100', '28P01', '28000', 'XX000', '08001', '08006'];
+  const message = error instanceof Error ? error.message : '';
+  // Interpret provider failures locally; never log their raw text or parameters.
+  const category = /quota|compute.?time|limit.*exceed/i.test(message) ? 'quota_exceeded'
+    : /endpoint.*disabled|suspend/i.test(message) ? 'database_suspended'
+    : /storage.*full|disk.*full|size limit/i.test(message) ? 'storage_full'
+    : /password authentication|authentication failed/i.test(message) ? 'database_credentials'
+    : /too many|connection slots/i.test(message) ? 'connection_capacity'
+    : /permission denied/i.test(message) ? 'database_permissions'
+    : /certificate|TLS|SSL/i.test(message) ? 'database_tls'
+    : /Database unavailable/i.test(message) ? 'database_not_configured' : 'dependency_failure';
+  console.error('OpsVista sign-in health failed', { stage, reason: typeof code === 'string' && allowed.includes(code) ? code : 'dependency_failure', category });
 }
 
 // Public readiness reports no accounts, credentials, schema, or business data.
