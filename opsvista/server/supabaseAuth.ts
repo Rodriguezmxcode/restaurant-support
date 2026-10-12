@@ -24,8 +24,10 @@ export async function verifySupabaseIdentity(accessToken: string, requiredLevel:
       apikey: SUPABASE_PUBLISHABLE_KEY,
       Authorization: `Bearer ${accessToken}`,
     },
+    signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) return null;
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) throw new Error('Identity verification unavailable');
   const identity = await response.json() as SupabaseIdentity;
   // Claims are used only after the identity service has validated the token.
   let claims: { sub?: string; session_id?: string; aal?: string; amr?: { method: string; timestamp: number }[] };

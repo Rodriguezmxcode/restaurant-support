@@ -38,7 +38,7 @@ try {
     export default function postgres(){return wrap(db)}
   `);
   await writeFile(join(temp, 'notificationPreferencesStore.js'), `export async function preferenceContext(){throw new Error('Security must not read operational preferences')};export async function routePushRecipients(){throw new Error('Security must not use operational routing')}`);
-  await writeFile(join(temp, 'managementStore.js'), `export const users=new Map(); export async function getManagedUser(id){return [...users.values()].find(user=>user.id===id)};export async function getManagedUserByEmail(email){return users.get(email)}`);
+  await writeFile(join(temp, 'managementStore.js'), `export const users=new Map(); let failure; export function setFailure(value){failure=value}; export async function getManagedUser(id){return [...users.values()].find(user=>user.id===id)};export async function getManagedUserByEmail(email){if(failure)throw failure;return users.get(email)}`);
   await writeFile(join(temp, 'accountStore.js'), 'export async function authenticateStoredCredential(){return null}');
   await writeFile(join(temp, 'organizationStore.js'), `export async function getOrganizationMembership(id){return {organizationId:id==='carol'?'org-b':'org-a'}}`);
   await writeFile(join(temp, 'actionNotificationStore.js'), `export async function getNotificationPreferences(){return {pushEnabled:true}};export async function updateNotificationPreferences(){}`);
@@ -49,7 +49,7 @@ try {
   const { default: handler } = await import(join(temp, 'session.js'));
   const { default: legacy } = await import(join(temp, 'login.js'));
   const { setIdentity } = await import(join(temp, 'supabaseAuth.js'));
-  const { users } = await import(join(temp, 'managementStore.js'));
+  const { users, setFailure } = await import(join(temp, 'managementStore.js'));
   const { webPushEndpoint } = await import(join(temp, 'webPushEndpoint.js'));
   const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
   const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
@@ -149,6 +149,26 @@ try {
   const remaining=(await db.query("select count(*)::int as count from opsvista_push_mfa_challenges where user_id='alice' and session_id='session-a' and used_at is null and expires_at>now()" )).rows[0].count;
   assert.equal(remaining,0);
   console.log('PASS logout preserves only the owner’s security factor and delivery failure never authenticates');
+  const savedError = console.error, diagnostics=[];
+  try {
+    console.error=(...args)=>diagnostics.push(args);
+    identify(user('founder'),{aal:'aal2',hasVerifiedMfa:true});
+    for (const code of ['ECONNREFUSED','private-credential-must-not-be-logged']) {
+      setFailure(Object.assign(new Error('private-token-must-not-be-logged'),{code}));
+      const failed=await request({action:'mfa_status'});
+      assert.equal(failed.status,503);
+      assert.equal(failed.body.code,'unavailable');
+      assert.equal(failed.headers['Set-Cookie'],undefined);
+      assert.ok(!JSON.stringify(failed).includes('private-'));
+    }
+    assert.deepEqual(diagnostics.map(entry=>entry[1]),[
+      {stage:'directory',reason:'ECONNREFUSED'},
+      {stage:'directory',reason:'dependency_failure'},
+    ]);
+    assert.ok(!JSON.stringify(diagnostics).includes('private-'));
+  } finally {console.error=savedError;setFailure(undefined);}
+  console.log('PASS dependency failures deny access and emit only safe diagnostic categories');
+
 } finally {
   webpush.sendNotification=originalSend;
   if(savedEnv.secret===undefined)delete process.env.OPSVISTA_SESSION_SECRET;else process.env.OPSVISTA_SESSION_SECRET=savedEnv.secret;

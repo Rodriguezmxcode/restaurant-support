@@ -30,6 +30,33 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [inviteLoading,setInviteLoading]=useState(Boolean(inviteToken));
   const [inviteProfile,setInviteProfile]=useState<InviteProfile>({email:'',firstName:'',lastName:'',title:'',phone:'',recoveryEmail:''});
 
+  const signInMessage = (error: unknown) => {
+    const detail = error as { code?: string; message?: string; status?: number } | null;
+    const code = detail?.code || detail?.message;
+    if (code === 'invalid_credentials') return t('Incorrect email or password. Use your authorized OpsVista account.', 'Correo o contraseña incorrectos. Usa tu cuenta autorizada de OpsVista.');
+    if (['session_expired', 'refresh_token_not_found', 'refresh_token_already_used', 'session_not_found'].includes(code || '')) return t('Your saved session expired. Return to sign in and complete two-step verification again.', 'Tu sesión guardada venció. Vuelve a iniciar sesión y completa la verificación en dos pasos.');
+    if (code === 'account_not_authorized') return t('This account does not have access to OpsVista. Contact your administrator.', 'Esta cuenta no tiene acceso a OpsVista. Contacta a tu administrador.');
+    if (detail?.status === 429) return t('Too many attempts. Wait a moment before trying again.', 'Demasiados intentos. Espera un momento antes de volver a intentar.');
+    return t('We could not complete secure sign-in. Retry, or return to sign in to start a new session. Your account and verification methods will stay in place.', 'No pudimos completar el acceso seguro. Reintenta o vuelve a iniciar sesión para comenzar una sesión nueva. Tu cuenta y tus métodos de verificación se conservarán.');
+  };
+
+  const returnToSignIn = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // End only this browser session; never remove a registered MFA factor.
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+      const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include', signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('unavailable');
+      setPassword(''); setConfirmPassword(''); setFactorId('');
+      setQrCode(''); setManualSecret(''); setVerificationCode('');
+      setStage('password'); setState('signed-out'); setMessage('');
+    } catch (error) {
+      setMessage(signInMessage(error));
+    } finally { setBusy(false); }
+  };
+
   const establishServerSession = async (accessToken: string) => {
     const response = await fetch('/api/auth/session', {
       method: 'POST',
@@ -37,6 +64,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accessToken }),
+      signal: AbortSignal.timeout(25000),
     });
     const body = await response.json().catch(() => ({})) as SessionResponse;
     if (!response.ok || !body.user) throw Object.assign(new Error(body.error || 'Unable to authorize this account in OpsVista.'), { code: body.code });
@@ -114,7 +142,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     let active = true;
     const restore = async () => {
       try {
-        const existing = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+        const existing = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(25000) });
         const existingBody = await existing.json().catch(() => ({})) as SessionResponse;
         if (existing.ok && existingBody.user && !recoveryMode) {
           if (!active) return;
@@ -122,7 +150,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           setState('authenticated');
           return;
         }
-        const { data } = await supabase.auth.getSession();
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
         if (data.session) {
           if(recoveryMode){
             if(active){setEmail(data.session.user.email||'');setStage('reset');setState('signed-out');}
@@ -134,7 +163,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         if (active) setState('signed-out');
       } catch (error) {
         if (!active) return;
-        setMessage(error instanceof Error ? error.message : 'Could not reach the authentication service.');
+        setMessage(signInMessage(error));
         setState('error');
       }
     };
@@ -189,16 +218,12 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     event.preventDefault();
     setBusy(true);
     setMessage('');
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) {
-      setMessage('Incorrect email or password. Use your authorized OpsVista account.');
-      setBusy(false);
-      return;
-    }
     try {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) throw error;
       await prepareMfa();
     } catch (authError) {
-      setMessage(authError instanceof Error ? authError.message : 'Could not prepare secure verification.');
+      setMessage(signInMessage(authError));
     } finally {
       setBusy(false);
     }
@@ -345,5 +370,5 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     <button type="button" onClick={async()=>{await supabase.auth.signOut();setStage('password');setVerificationCode('');setQrCode('');setManualSecret('');setMessage('')}} style={{...primaryButton,marginTop:10,background:'#fff',color:'#12395b',border:'1px solid #cbd5e1'}}>{t('Use another account','Usar otra cuenta')}</button>
   </form>);
 
-  return shell(state === 'loading' ? <><h1 style={{fontSize:24,margin:'0 0 8px'}}>Checking your session</h1><p style={{color:'#64748b',margin:0}}>Securely validating access…</p></> : state === 'error' ? <><h1 style={{fontSize:24,margin:'0 0 8px'}}>Sign-in service unavailable</h1><p style={{color:'#64748b'}}>{message}</p><button onClick={()=>window.location.reload()} style={primaryButton}>Retry</button></> : <form onSubmit={login}><h1 style={{fontSize:26,margin:'0 0 8px'}}>{t('Client Login','Acceso a OpsVista')}</h1><p style={{color:'#64748b',margin:'0 0 24px'}}>{t('Sign in to your secure OpsVista account.','Ingresa a tu cuenta segura de OpsVista.')}</p><label style={labelStyle}>{t('Email','Correo electrónico')}</label><input type="email" autoComplete="username" value={email} onChange={event=>setEmail(event.target.value)} required style={fieldStyle}/><label style={labelStyle}>{t('Password','Contraseña')}</label><input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)} required style={{...fieldStyle,marginBottom:8}}/><div style={{textAlign:'right',marginBottom:14}}><button type="button" onClick={()=>{setStage('forgot');setMessage('');setPassword('')}} style={{border:0,background:'transparent',color:'#12395b',fontWeight:800,cursor:'pointer',padding:0}}>{t('Forgot password?','¿Olvidaste tu contraseña?')}</button></div>{alert}<button disabled={busy} type="submit" style={{...primaryButton,opacity:busy ? 0.55 : 1}}>{busy?t('Verifying…','Verificando…'):t('Secure sign in','Iniciar sesión')}</button><p style={{fontSize:12,lineHeight:1.5,color:'#64748b',margin:'18px 0 0'}}>Passwords and two-step verification are handled by OpsVista’s secure identity provider. OpsVista administrators cannot see your password.</p></form>);
+  return shell(state === 'loading' ? <><h1 style={{fontSize:24,margin:'0 0 8px'}}>Checking your session</h1><p style={{color:'#64748b',margin:0}}>Securely validating access…</p></> : state === 'error' ? <><h1 style={{fontSize:24,margin:'0 0 8px'}}>{t('We could not restore your session','No pudimos recuperar tu sesión')}</h1><p role="alert" style={{color:'#64748b',lineHeight:1.6}}>{message}</p><button disabled={busy} onClick={()=>window.location.reload()} style={primaryButton}>{t('Retry','Reintentar')}</button><button type="button" disabled={busy} onClick={()=>void returnToSignIn()} style={{...primaryButton,marginTop:10,background:'#fff',color:'#12395b',border:'1px solid #cbd5e1'}}>{busy?t('Preparing sign-in…','Preparando el acceso…'):t('Return to sign in','Volver a iniciar sesión')}</button></> : <form onSubmit={login}><h1 style={{fontSize:26,margin:'0 0 8px'}}>{t('Client Login','Acceso a OpsVista')}</h1><p style={{color:'#64748b',margin:'0 0 24px'}}>{t('Sign in to your secure OpsVista account.','Ingresa a tu cuenta segura de OpsVista.')}</p><label style={labelStyle}>{t('Email','Correo electrónico')}</label><input type="email" autoComplete="username" value={email} onChange={event=>setEmail(event.target.value)} required style={fieldStyle}/><label style={labelStyle}>{t('Password','Contraseña')}</label><input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)} required style={{...fieldStyle,marginBottom:8}}/><div style={{textAlign:'right',marginBottom:14}}><button type="button" onClick={()=>{setStage('forgot');setMessage('');setPassword('')}} style={{border:0,background:'transparent',color:'#12395b',fontWeight:800,cursor:'pointer',padding:0}}>{t('Forgot password?','¿Olvidaste tu contraseña?')}</button></div>{alert}<button disabled={busy} type="submit" style={{...primaryButton,opacity:busy ? 0.55 : 1}}>{busy?t('Verifying…','Verificando…'):t('Secure sign in','Iniciar sesión')}</button><p style={{fontSize:12,lineHeight:1.5,color:'#64748b',margin:'18px 0 0'}}>Passwords and two-step verification are handled by OpsVista’s secure identity provider. OpsVista administrators cannot see your password.</p></form>);
 }

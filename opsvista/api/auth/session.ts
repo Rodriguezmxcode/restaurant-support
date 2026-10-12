@@ -27,14 +27,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(200).json({ authenticated: true, user });
   }
   if (req.method !== 'POST') { res.setHeader?.('Allow', 'GET, POST'); return res.status(405).json({ error: 'Method not allowed' }); }
-  if (!isSameOriginPushRequest(req.headers)) return res.status(403).json({ error: 'Same-origin JSON request required' });
+  if (!isSameOriginPushRequest(req.headers)) return res.status(403).json({ error: 'Same-origin JSON request required', code: 'invalid_origin' });
+  let stage = 'identity';
   try {
     const identity = await verifySupabaseIdentity(req.body?.accessToken || '', 'aal1');
     if (!identity) return res.status(401).json({ error: 'Your secure session expired. Sign in again.', code: 'session_expired' });
+    stage = 'directory';
     const user = await sessionForSupabaseIdentity(identity.email);
-    if (!user) return res.status(403).json({ error: 'This account is not authorized in OpsVista' });
+    if (!user) return res.status(403).json({ error: 'This account is not authorized in OpsVista', code: 'account_not_authorized' });
     const action = req.body?.action || 'session';
     const founder = user.role === 'Founder';
+    stage = 'second_factor';
     const device = founder ? null : await pushMfaDevice(user);
     const current = readSession(req.headers?.cookie);
     const sameUser = current?.id === user.id && current?.organizationId === user.organizationId;
@@ -46,6 +49,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const strongIdentity = validProof || (identity.aal === 'aal2' && (founder || !device));
     if (action === 'session') {
       if (!strongIdentity) return res.status(401).json({ error: 'Two-step verification required', code: 'mfa_required' });
+      stage = 'session_cookie';
       res.setHeader?.('Set-Cookie', sessionCookie(issueSession(user, validProof ? proof : undefined)));
       return res.status(200).json({ authenticated: true, user });
     }
@@ -86,6 +90,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     if (error instanceof PushMfaError) return res.status(error.status).json({ error: error.code, code: error.code });
     // Authentication codes, tokens, subscriptions and identity-provider responses
     // must never appear in application logs or error responses.
+    const rawCode = (error as { code?: unknown } | null)?.code;
+    const allowedCodes = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'CONNECT_TIMEOUT', '53300', '57P01', '23505', '42501'];
+    console.error('OpsVista secure sign-in unavailable', { stage, reason: typeof rawCode === 'string' && allowedCodes.includes(rawCode) ? rawCode : 'dependency_failure' });
     return res.status(503).json({ error: 'Secure verification is temporarily unavailable. Try again.', code: 'unavailable' });
   }
 }

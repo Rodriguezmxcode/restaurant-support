@@ -4,13 +4,17 @@ import { supabase } from './supabaseClient';
 import { applicationServerKey, needsHomeScreen, pushRegistration, supportsWebPush } from './webPush';
 
 export async function securityRequest(action: string, values: Record<string, unknown> = {}) {
-  const { data } = await supabase.auth.getSession();
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
   if (!data.session) throw new Error('session_expired');
   const response = await fetch('/api/auth/session', { method: 'POST', credentials: 'include', cache: 'no-store',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...values, action, accessToken: data.session.access_token }),
     signal: AbortSignal.timeout(25000) });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.code || 'unavailable');
+  if (!response.ok) {
+    const code = result.code || (response.status === 401 ? 'session_expired' : 'unavailable');
+    throw Object.assign(new Error(code), { code, status: response.status });
+  }
   return result;
 }
 export default function PushVerification({ enroll = false, onComplete, onAlternative }: {

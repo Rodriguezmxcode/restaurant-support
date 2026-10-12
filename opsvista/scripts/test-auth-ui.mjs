@@ -14,15 +14,16 @@ try {
   await writeFile(join(temp,'accessControl.js'),'export function bindAuthenticatedUser(){}');
   const source=await readFile(new URL('../src/AuthGate.tsx',import.meta.url),'utf8');
   const {I18nProvider}=await import(join(temp,'i18n.js'));
-  for(const stage of ['password','forgot','enroll','verify','push','push_enroll']) {
-    const fixture=source.replace("useState<AuthStage>('password')",`useState<AuthStage>('${stage}')`)
-      .replace("inviteToken ? 'signed-out' : 'loading'", "'signed-out'")
+  for(const stage of ['password','forgot','enroll','verify','push','push_enroll','error']) {
+    const fixture=source.replace("useState<AuthStage>('password')",`useState<AuthStage>('${stage==='error'?'password':stage}')`)
+      .replace("inviteToken ? 'signed-out' : 'loading'", stage==='error'?"'error'":"'signed-out'")
       .replace("const [qrCode, setQrCode] = useState('');","const [qrCode, setQrCode] = useState('data:image/svg+xml;charset=utf-8,%3Csvg%2F%3E');")
       .replace("const [manualSecret, setManualSecret] = useState('');","const [manualSecret, setManualSecret] = useState('TESTONLYSETUPKEY');");
     await writeFile(join(temp,stage+'.js'),compile(fixture));
     const {default:AuthGate}=await import(join(temp,stage+'.js'));
     const html=renderToStaticMarkup(React.createElement(I18nProvider,null,React.createElement(AuthGate,null,'Protected business data')));
     assert.ok(!html.includes('Protected business data'));
+    if(stage==='error'){assert.ok(html.includes('No pudimos recuperar tu sesión'));assert.ok(html.includes('Volver a iniciar sesión'));assert.ok(html.includes('Reintentar'));assert.ok(!html.includes('Sign-in service unavailable'));}
     if(stage==='password'){assert.ok(html.includes('¿Olvidaste tu contraseña?'));assert.ok(html.includes('Iniciar sesión'));}
     if(stage==='forgot'){assert.ok(html.includes('Enviar enlace de recuperación'));assert.ok(html.includes('Volver al inicio de sesión'));}
     if(stage==='enroll'){assert.ok(html.includes('data:image/svg+xml'));assert.ok(html.includes('TESTONLYSETUPKEY'));assert.ok(html.includes('mismo teléfono'));}
