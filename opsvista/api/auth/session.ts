@@ -7,6 +7,7 @@ import { pushMfaDevice, validPushAssurance, startPushChallenge, verifyPushChalle
 
 type ApiRequest = {
   method?: string;
+  query?: Record<string, string | string[] | undefined>;
   headers?: Record<string, string | undefined>;
   body?: { accessToken?: string; action?: string; challengeId?: string; code?: string; subscription?: unknown; locale?: string };
 };
@@ -15,6 +16,11 @@ type ApiResponse = { status: (code: number) => ApiResponse; json: (body: unknown
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   res.setHeader?.('Cache-Control', 'private, no-store');
   if (!req.method || req.method === 'GET') {
+    if (req.query?.health === '1') {
+      const { signInHealth } = await import('../../server/signInHealth.js');
+      const health = await signInHealth();
+      return res.status(health.ok ? 200 : 503).json(health);
+    }
     const user = readSession(req.headers?.cookie);
     if (!user) return res.status(401).json({ authenticated: false });
     if (user.organizationId && user.organizationId !== 'org-puerto-vallarta') {
