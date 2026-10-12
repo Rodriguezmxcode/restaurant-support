@@ -1,0 +1,71 @@
+name: OpsVista access availability
+on:
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/opsvista-availability.yml']
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: opsvista-access-availability
+  cancel-in-progress: false
+jobs:
+  availability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check access dependencies and notify the owner of incidents
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          // Independent of OpsVista login, database, push service and quiet hours.
+          // No credentials or business data are sent to the readiness endpoint.
+          const origin = 'https://restaurant-support.vercel.app';
+          const repository = 'Rodriguezmxcode/restaurant-support';
+          const title = 'OpsVista: access availability incident';
+          const run = `https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          let healthy = false, failure = 'Readiness check did not complete';
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const response = await fetch(`${origin}/api/auth/session?health=1`, {signal:AbortSignal.timeout(20000),cache:'no-store'});
+              const result = await response.json();
+              const age = Date.now() - Date.parse(result.checkedAt);
+              if (!response.ok || result.ok !== true || !Number.isFinite(age) || age < -60000 || age > 120000) throw new Error(`Readiness HTTP ${response.status}`);
+              const page = await fetch(origin, {signal:AbortSignal.timeout(15000),cache:'no-store'});
+              if (!page.ok || !(await page.text()).includes('OpsVista')) throw new Error(`Login page HTTP ${page.status}`);
+              healthy = true; break;
+            } catch (error) {
+              failure = error instanceof Error && /^Readiness HTTP \d+$|^Login page HTTP \d+$/.test(error.message) ? error.message : 'Availability probe timed out or returned an invalid response';
+              console.log(`Attempt ${attempt + 1}: ${failure}`);
+              if (attempt < 2) await new Promise(resolve=>setTimeout(resolve,10000));
+            }
+          }
+          async function github(path, method='GET', body) {
+            const response = await fetch(`https://api.github.com/repos/${repository}/${path}`, {
+              method, headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(body?{'Content-Type':'application/json'}:{})},
+              ...(body?{body:JSON.stringify(body)}:{}), signal:AbortSignal.timeout(15000),
+            });
+            if (!response.ok) throw new Error(`Incident notification API HTTP ${response.status}`);
+            return response.json();
+          }
+          const issues = await github('issues?state=open&creator=github-actions%5Bbot%5D&per_page=100');
+          const incident = issues.find(issue=>!issue.pull_request && issue.title===title && issue.user?.login==='github-actions[bot]');
+          const at = new Date().toISOString();
+          if (!healthy) {
+            if (!incident) await github('issues','POST',{
+              title, assignees:['Rodriguezmxcode'],
+              body:`OpsVista access readiness failed three consecutive checks at ${at}.\n\n${failure}. Some users may be unable to sign in. The number of affected users is not known.\n\n[Diagnostic run](${run})\n\nThis check covers the login page and authentication dependencies. It does not replace a full user sign-in test. Scheduled checks are subject to GitHub delays.`,
+            });
+            throw new Error('OpsVista access unavailable; owner incident opened or already active');
+          }
+          if (incident) {
+            await github(`issues/${incident.number}/comments`,'POST',{body:`Access dependencies responded successfully at ${at}. [Verification run](${run}). This confirms dependency recovery, not a completed user login.`});
+            await github(`issues/${incident.number}`,'PATCH',{state:'closed',state_reason:'completed'});
+          }
+          console.log('OpsVista login page and access dependencies are healthy');
+          JS
