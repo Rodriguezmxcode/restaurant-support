@@ -3,7 +3,7 @@ type LocationPoint = { name: string; lat: number; lon: number };
 type ProviderState = {
   id: 'weather' | 'traffic' | 'events';
   name: string;
-  state: 'live' | 'fallback' | 'error' | 'not_configured';
+  state: 'live' | 'fallback' | 'error' | 'not_configured' | 'partial';
   detail: string;
 };
 
@@ -110,6 +110,7 @@ async function getWeather(place: LocationPoint, weatherKey?: string, language:Lo
   url.searchParams.set('longitude', String(place.lon));
   url.searchParams.set('current', 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m');
   url.searchParams.set('temperature_unit', 'fahrenheit');
+  url.searchParams.set('precipitation_unit', 'inch');
   url.searchParams.set('wind_speed_unit', 'mph');
   url.searchParams.set('timezone', 'America/New_York');
   const data = await timedJson(url, 7_000, 'Open-Meteo');
@@ -139,19 +140,23 @@ async function getTraffic(place: LocationPoint, key: string, radiusMiles:LocalIn
   incidentUrl.searchParams.set('timeValidityFilter', 'present');
   incidentUrl.searchParams.set('key', key);
 
-  const [flow, incidentResult] = await Promise.all([
+  const [flowResult, incidentResult] = await Promise.allSettled([
     timedJson(flowUrl, 7_000, 'TomTom flow'),
-    timedJson(incidentUrl, 7_000, 'TomTom incidents').catch(() => ({ incidents: [] })),
+    timedJson(incidentUrl, 7_000, 'TomTom incidents'),
   ]);
+  if(flowResult.status==='rejected') throw flowResult.reason;
+  const flow=flowResult.value;
   const segment = flow.flowSegmentData ?? {};
+  if (!Number.isFinite(segment.currentSpeed) || !Number.isFinite(segment.freeFlowSpeed)) throw new Error('TomTom flow: invalid response');
   const currentSpeed = Number(segment.currentSpeed ?? 0);
   const freeFlowSpeed = Number(segment.freeFlowSpeed ?? 0);
   const congestionPct = freeFlowSpeed ? Math.max(0, Math.min(100, Math.round((1 - currentSpeed / freeFlowSpeed) * 100))) : 0;
-  const incidents = Array.isArray(incidentResult.incidents) ? incidentResult.incidents : [];
+  const incidents = incidentResult.status === 'fulfilled' && Array.isArray(incidentResult.value.incidents) ? incidentResult.value.incidents : null;
+  const incidentsError = incidents ? null : incidentResult.status === 'rejected' ? String(incidentResult.reason?.message || 'TomTom incidents unavailable') : 'TomTom incidents: invalid response';
   return {
     provider: 'TomTom Traffic', currentSpeed, freeFlowSpeed, congestionPct,
-    roadClosure: Boolean(segment.roadClosure), incidentCount: incidents.length,
-    topIncident: incidents[0]?.properties?.events?.[0]?.description || null,
+    roadClosure: Boolean(segment.roadClosure), incidentCount: incidents?.length ?? null, incidentsError,
+    topIncident: incidents?.[0]?.properties?.events?.[0]?.description || null,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -177,7 +182,8 @@ async function getEvents(place: LocationPoint, key: string, horizon: LocalIntell
     city: event._embedded?.venues?.[0]?.city?.name || place.name,
     category: event.classifications?.[0]?.segment?.name || 'Event',
   }));
-  return { provider: 'Ticketmaster Discovery', eventCount: source.length, events, horizonDays: horizon.horizonDays, radiusMiles, updatedAt: new Date().toISOString() };
+  if (!data.page || !Number.isFinite(data.page.totalElements)) throw new Error('Ticketmaster: invalid response');
+  return { provider: 'Ticketmaster Discovery', eventCount: Number(data.page.totalElements), events, horizonDays: horizon.horizonDays, radiusMiles, updatedAt: new Date().toISOString() };
 }
 
 function operatingAssessment(weather: any, traffic: any, events: any, horizonDays: number, radiusMiles:LocalIntelligenceRadiusMiles, language:LocalLanguage='en') {
@@ -206,10 +212,12 @@ function operatingAssessment(weather: any, traffic: any, events: any, horizonDay
     recommendations.push(tr(language,`Direct impact within 1–5 miles: prepare extra inventory, staffing, reservations and a themed promotion for ${events.eventCount} nearby event${events.eventCount===1?'':'s'}.`,`Impacto directo a 1–5 millas: prepara inventario extra, staffing, reservas y una promoción temática para ${events.eventCount} evento${events.eventCount===1?'':'s'} cercano${events.eventCount===1?'':'s'}.`));
   } else if (events?.eventCount >= 5) { riskScore += radiusMiles<=10?2:1; recommendations.push(tr(language,`Review staffing, reservations, prep and inventory: there are ${events.eventCount} events within ${radiusMiles} miles over the next ${horizonDays} day${horizonDays===1?'':'s'}.`,`Revisa staffing, reservas, prep e inventario: hay ${events.eventCount} eventos dentro de ${radiusMiles} millas en el horizonte de ${horizonDays} día${horizonDays === 1 ? '' : 's'}.`)); }
   else if (events?.eventCount > 0) recommendations.push(tr(language,`Compare events within ${radiusMiles} miles against reservations and historical sales before adjusting staffing.`,`Compara los eventos dentro de ${radiusMiles} millas con reservas y ventas históricas antes de ajustar staffing.`));
+  const incomplete = !weather || !traffic || traffic.incidentCount == null || !events;
+  if (incomplete) recommendations.push(tr(language,'Some sources are unavailable. Confirm traffic and events before changing staffing.','Hay fuentes sin datos. Confirma tráfico y eventos antes de ajustar el personal.'));
   if (!recommendations.length) recommendations.push(tr(language,'No critical external signals right now; keep planned staffing and monitor for changes.','Sin señales externas críticas ahora; conserva el staffing planificado y monitorea cambios.'));
   return {
-    level: riskScore >= 5 ? 'high' : riskScore >= 2 ? 'watch' : 'normal',
-    summary: directEventImpact ? tr(language,'Direct impact · 1–5 miles','Impacto directo · 1–5 millas') : riskScore >= 5 ? tr(language,'High operational impact','Impacto operativo alto') : riskScore >= 2 ? tr(language,'Watch required','Requiere vigilancia') : tr(language,'Normal conditions','Condiciones normales'),
+    level: riskScore >= 5 ? 'high' : riskScore >= 2 || incomplete ? 'watch' : 'normal',
+    summary: incomplete ? tr(language,'Incomplete information','Información incompleta') : directEventImpact ? tr(language,'Direct impact · 1–5 miles','Impacto directo · 1–5 millas') : riskScore >= 5 ? tr(language,'High operational impact','Impacto operativo alto') : riskScore >= 2 ? tr(language,'Watch required','Requiere vigilancia') : tr(language,'Normal conditions','Condiciones normales'),
     recommendations,
   };
 }
@@ -218,7 +226,6 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const configuredUrl = process.env.OPSVISTA_LOCAL_INTELLIGENCE_SOURCE_URL?.trim();
   const candidates = [...new Set([
     configuredUrl,
-    'https://app.getopsvista.com/api/public-local-intelligence',
     'https://pv-operations.rodriguez10.chatgpt.site/api/public-local-intelligence',
   ].filter(Boolean) as string[])];
   let source: any;
@@ -236,7 +243,11 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
       url.searchParams.set('rangeEnd', range.rangeEnd);
       url.searchParams.set('radiusMiles', String(radiusMiles));
       url.searchParams.set('lang',language);
-      source = await timedJson(url, 9_000, 'Existing Local Intelligence connection');
+      const candidateData = await timedJson(url, 12_000, 'Existing Local Intelligence connection');
+      if (!Array.isArray(candidateData.weather) || !Array.isArray(candidateData.traffic) || !Array.isArray(candidateData.events)) throw new Error('Local Intelligence source returned an invalid response');
+      if (Number(candidateData.radiusMiles) !== radiusMiles) throw new Error(tr(language,'Source did not confirm the selected radius; results withheld.','La fuente no confirmó el radio seleccionado; se omitieron esos resultados.'));
+      if (candidateData.rangeStart !== range.rangeStart || candidateData.rangeEnd !== range.rangeEnd) throw new Error('Local Intelligence source returned a different date range');
+      source = candidateData;
       sourceUrl = `${url.origin}${url.pathname}`;
       break;
     } catch (error) {
@@ -249,6 +260,7 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const weatherRows = Array.isArray(source.weather) ? source.weather : [];
   const trafficRows = Array.isArray(source.traffic) ? source.traffic : [];
   const eventRows = Array.isArray(source.events) ? source.events : [];
+  const errorsByLocation = source.errorsByLocation ?? {};
   const sourceErrors = source.errors && typeof source.errors === 'object' ? source.errors : {};
   const byName = (rows: any[]) => new Map(rows.map(row => [String(row.name || row.location || ''), row]));
   const weatherByName = byName(weatherRows);
@@ -293,7 +305,8 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
       freeFlowSpeed: Number(trafficSource.freeFlowSpeed ?? 0),
       congestionPct: Number(trafficSource.congestion ?? trafficSource.congestionPct ?? 0),
       roadClosure: Boolean(trafficSource.roadClosure),
-      incidentCount: Number(trafficSource.incidentCount ?? 0),
+      incidentCount: trafficSource.incidentCount == null ? null : Number(trafficSource.incidentCount),
+      incidentsError: trafficSource.incidentsError || (trafficSource.incidentCount == null ? tr(language,'Incident data unavailable','Datos de incidentes no disponibles') : null),
       topIncident: trafficSource.topIncident || null,
       updatedAt: String(trafficSource.updatedAt || new Date().toISOString()),
     } : null;
@@ -318,9 +331,9 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
       traffic,
       events,
       errors: {
-        weather: weather ? '' : String(sourceErrors.weather?.[0] || tr(language,'The shared source returned no weather data.','La fuente compartida no devolvió clima.')),
-        traffic: traffic ? '' : String(sourceErrors.traffic?.[0] || tr(language,'The shared source returned no traffic data.','La fuente compartida no devolvió tráfico.')),
-        events: events ? '' : String(sourceErrors.events?.[0] || tr(language,'The shared source returned no event data.','La fuente compartida no devolvió eventos.')),
+        weather: weather ? '' : String(errorsByLocation[place.name]?.weather || sourceErrors.weather?.[0] || tr(language,'The shared source returned no weather data.','La fuente compartida no devolvió clima.')),
+        traffic: traffic?.incidentsError || (traffic ? '' : String(errorsByLocation[place.name]?.traffic || sourceErrors.traffic?.[0] || tr(language,'The shared source returned no traffic data.','La fuente compartida no devolvió tráfico.'))),
+        events: events ? '' : String(errorsByLocation[place.name]?.events || sourceErrors.events?.[0] || tr(language,'The shared source returned no event data.','La fuente compartida no devolvió eventos.')),
       },
       assessment: operatingAssessment(weather, traffic, events, horizon.horizonDays, radiusMiles,language),
     };
@@ -332,7 +345,7 @@ async function getExistingConnectedSource(requestedLocations: string[] | undefin
   const provider = (id: ProviderState['id'], name: string, count: number): ProviderState => ({
     id,
     name,
-    state: count > 0 ? (id === 'weather' && /(open-meteo|national weather service)/i.test(name) ? 'fallback' : 'live') : 'error',
+    state: count > 0 ? (count < rows.length || (id === 'traffic' && rows.some(row=>row.traffic?.incidentsError)) ? 'partial' : id === 'weather' && /(open-meteo|national weather service)/i.test(name) ? 'fallback' : 'live') : 'error',
     detail: count > 0 ? tr(language,`${count}/${rows.length} locations updated through PV Operations`,`${count}/${rows.length} locaciones actualizadas mediante PV Operations`) : tr(language,'Existing provider did not return data','El proveedor existente no devolvió datos'),
   });
   return {
@@ -367,12 +380,14 @@ export async function getLocalIntelligence(requestedLocations?: string[], horizo
   // Reuse the already configured provider runtime before asking for any new
   // deployment secrets. Only public weather, traffic and event data crosses
   // this server-to-server boundary; provider keys remain in PV Operations.
+  let sharedSourceError = '';
   if (!tomtomKey || !ticketmasterKey) {
     try {
       const sharedPayload = await getExistingConnectedSource(requestedLocations, horizon, radiusMiles,language);
       responseCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60_000, value: sharedPayload });
       return sharedPayload;
-    } catch {
+    } catch (error) {
+      sharedSourceError = error instanceof Error ? error.message : 'Local Intelligence shared source unavailable';
       // Continue to the direct providers/Open-Meteo fallback so this module
       // remains honest and usable if the existing source is temporarily down.
     }
@@ -391,8 +406,8 @@ export async function getLocalIntelligence(requestedLocations?: string[], horizo
       location: place.name, weather, traffic, events,
       errors: {
         weather: weatherResult.status === 'rejected' ? String(weatherResult.reason?.message || weatherResult.reason) : '',
-        traffic: trafficResult.status === 'rejected' ? String(trafficResult.reason?.message || trafficResult.reason) : '',
-        events: eventsResult.status === 'rejected' ? String(eventsResult.reason?.message || eventsResult.reason) : '',
+        traffic: trafficResult.status === 'rejected' ? String(trafficResult.reason?.message || trafficResult.reason) : traffic?.incidentsError || (!traffic ? sharedSourceError : ''),
+        events: eventsResult.status === 'rejected' ? String(eventsResult.reason?.message || eventsResult.reason) : !events ? sharedSourceError : '',
       },
       assessment: operatingAssessment(weather, traffic, events, horizon.horizonDays, radiusMiles,language),
     };
@@ -401,8 +416,8 @@ export async function getLocalIntelligence(requestedLocations?: string[], horizo
   const providerState = (id: ProviderState['id'], configured: boolean, hasRows: boolean, failedRows: number, fallback = false): ProviderState => ({
     id,
     name: id === 'weather' ? (weatherKey ? 'The Weather Company' : 'Open-Meteo') : id === 'traffic' ? 'TomTom Traffic' : 'Ticketmaster Discovery',
-    state: !configured ? (fallback ? (hasRows ? 'fallback' : 'error') : 'not_configured') : hasRows ? 'live' : 'error',
-    detail: !configured ? (fallback ? (hasRows ? tr(language,'Live fallback weather','Clima fallback en vivo') : tr(language,'Weather fallback did not return data','El fallback del clima no devolvió datos')) : tr(language,'API key not configured','API key no configurada')) : hasRows ? tr(language,`${rows.length - failedRows}/${rows.length} locations updated`,`${rows.length - failedRows}/${rows.length} locaciones actualizadas`) : tr(language,'Provider did not return data','El proveedor no devolvió datos'),
+    state: !configured ? (fallback ? (hasRows ? 'fallback' : 'error') : 'not_configured') : hasRows ? (failedRows > 0 || id === 'traffic' && rows.some(row=>row.traffic?.incidentsError) ? 'partial' : 'live') : 'error',
+    detail: !configured ? (fallback ? (hasRows ? tr(language,'Live fallback weather','Clima fallback en vivo') : tr(language,'Weather fallback did not return data','El fallback del clima no devolvió datos')) : (sharedSourceError || tr(language,'API key not configured','API key no configurada'))) : hasRows ? tr(language,`${rows.length - failedRows}/${rows.length} locations updated`,`${rows.length - failedRows}/${rows.length} locaciones actualizadas`) : tr(language,'Provider did not return data','El proveedor no devolvió datos'),
   });
   const weatherFailures = rows.filter(row => !row.weather).length;
   const trafficFailures = rows.filter(row => !row.traffic).length;

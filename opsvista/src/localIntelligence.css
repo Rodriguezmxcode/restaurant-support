@@ -24,7 +24,7 @@
 .provider-card strong{font-size:20px;margin:7px 0 4px}
 .provider-card small{color:#6d8099}
 .provider-card.live strong{color:#15815d}
-.provider-card.fallback strong{color:#98700e}
+.provider-card.partial strong,.provider-card.fallback strong{color:#98700e}
 .provider-card.error strong,.provider-card.not_configured strong{color:#bd3a33}
 .provider-card.summary{background:#17375e;color:#fff}
 .provider-card.summary span,.provider-card.summary small{color:#c4d4e8}
