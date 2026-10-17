@@ -2,12 +2,14 @@ import { hasLegacyWorkspace } from '../shared/tenantAccess.js';
 import { readSession } from '../server/authSession.js';
 import { getLocalIntelligence, localIntelligenceHorizons, localIntelligenceLocationNames, localIntelligenceRadii, type LocalIntelligenceHorizonKey, type LocalIntelligenceRadiusMiles } from '../server/localIntelligence.js';
 
+export const config = { maxDuration: 30 };
+
 type ApiRequest={method?:string;headers?:{cookie?:string};query?:Record<string,string|string[]>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
 const query=(req:ApiRequest,key:string)=>typeof req.query?.[key]==='string'?(req.query[key] as string).trim():'';
 
 export default async function handler(req:ApiRequest,res:ApiResponse){
-  res.setHeader?.('X-OpsVista-Local-Version','local-api-v2');
+  res.setHeader?.('X-OpsVista-Local-Version','local-api-v3');
   if(req.method&&req.method!=='GET'){res.setHeader?.('Allow','GET');return res.status(405).json({error:'Method not allowed'});}
   const user=readSession(req.headers?.cookie);
   if(!user)return res.status(401).json({error:'Authentication required'});
