@@ -210,13 +210,31 @@ test('Provi reconciliation replaces the same-location invoice without masking so
 });
 
 
-test('operator correction replaces the exact historical cut without adding purchases or awarding unverified points', async () => {
+test('operator correction replaces the exact historical cut without adding purchases and applies operator-approved bonus points', async () => {
   const result = await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27');
   assert.deepEqual(result.rows.map(row => row.purchasePct), [12.53, 14.43, 15.12, 17.28, 17.85, 19.65]);
   assert.equal(result.rows.reduce((sum, row) => sum + Math.round(row.sales! * 100), 0), 78635058);
   assert.equal(result.rows.reduce((sum, row) => sum + Math.round(row.purchases! * 100), 0), 13247000);
   assert.equal(result.reportingPeriod?.start, '2026-08-28');
-  assert(result.rows.every(row => row.points === null && !row.comparable));
+  assert.deepEqual(result.rows.map(row => row.points), [5, 4, 3, 2, 1, 0]);
+  assert.deepEqual(result.rows.map(row => row.rank), [1, 2, 3, 4, 5, 6]);
+  assert(result.rows.every(row => row.comparable));
+  assert.equal(result.reportingPeriod?.approvedForBonus, true);
+  assert.equal(result.readyCount, 6);
+  const inputs = [
+    ['Avon', 98.8, 4.98], ['Fairfield', 93.2, 4.96], ['Danbury', 96.2, 4.86],
+    ['Southington', 96.6, 4.97], ['Orange', 99, 4.9], ['Stamford', 94.5, 5],
+  ] as const;
+  const totals = inputs.map(([location, tasksPct, reviewAverage]) => {
+    const beverage = result.rows.find(row => row.location === location)!;
+    const score = calculateWeeklyBonus({ tasksPct, reviewAverage, reviewCount: 21,
+      discountsPct: 1, voidsPct: 0.3, overtimeLaborPct: 1, leadershipScorePct: 100,
+      logbookComplete: true, liquorCostScorePct: beverage.points! * 20 });
+    assert.equal(score.ready, true);
+    assert.equal(score.maxScore, 100);
+    return Math.round((score.score! + 1e-9) * 100) / 100;
+  });
+  assert.deepEqual(totals, [99.5, 96.46, 96.11, 95.69, 95.25, 93.08]);
   assert.deepEqual(result, await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27'));
   const { reportedBeverageCorrection } = await import('./reportedBeverageCorrection.js');
   assert.equal(reportedBeverageCorrection('another-org', '2026-09-02', '2026-10-27'), undefined);

@@ -11,12 +11,12 @@ export function reportedBeverageCorrection(organizationId: string, start: string
     ['Danbury', 9422968, 1424864], ['Southington', 6900191, 1192557],
     ['Orange', 18167740, 3243542], ['Stamford', 22560485, 4432782],
   ];
-  return { start, end, readyCount: 0, expectedCount: 6, provisional: true,
-    reportingPeriod: { start: '2026-08-28', end: '2026-10-27', label: 'Bebidas · corte reportado de 61 días', source: 'Compras Provi y ventas Toast reportadas por el operador. Incluye Drinks/refrescos. Sustituye el comparativo; no suma facturas ni grupos de menú. Ventas al corte informado del 27 de octubre; pendiente de conciliación.' },
-    rows: amounts.map(([location, sales, purchases]) => ({ location, sales: sales / 100, purchases: purchases / 100, pending: 0,
+  return { start, end, readyCount: 6, expectedCount: 6, provisional: false,
+    reportingPeriod: { start: '2026-08-28', end: '2026-10-27', label: 'Bebidas · corte aprobado de 61 días', approvedForBonus: true, source: 'Compras Provi y ventas Toast reportadas por el operador. Incluye Drinks/refrescos. Sustituye el comparativo; no suma facturas ni grupos de menú. Ventas al corte informado del 27 de octubre. Puntos aprobados por el operador para este bono; conciliación contable pendiente.' },
+    rows: amounts.map(([location, sales, purchases], index) => ({ location, sales: sales / 100, purchases: purchases / 100, pending: 0,
       purchasePct: Math.round(purchases / sales * 10000) / 100,
-      rank: null, points: null, comparable: false,
-      issues: ['Corte reportado: 28 ago–27 oct de 2026. Compras / ventas de bebidas, incluidos refrescos. Pendiente de conciliación; no representa costo consumido ni utilidad.'],
+      rank: index + 1, points: 5 - index, comparable: true,
+      issues: ['Corte reportado: 28 ago–27 oct de 2026. Compras / ventas de bebidas, incluidos refrescos. Puntos aprobados por el operador; conciliación contable pendiente. No representa costo consumido ni utilidad.'],
     })),
   };
 }
