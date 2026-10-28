@@ -228,7 +228,7 @@ test('operator correction replaces the exact historical cut without adding purch
   const totals = inputs.map(([location, tasksPct, reviewAverage]) => {
     const beverage = result.rows.find(row => row.location === location)!;
     const score = calculateWeeklyBonus({ tasksPct, reviewAverage, reviewCount: 21,
-      discountsPct: 1, voidsPct: 0.3, overtimeLaborPct: 0, leadershipScorePct: 100,
+      discountsPct: 1, voidsPct: 0.3, overtimeLaborPct: 1, leadershipScorePct: 100,
       logbookComplete: true, liquorCostScorePct: beverage.points! * 20 });
     assert.equal(score.ready, true);
     assert.equal(score.maxScore, 100);

@@ -37,19 +37,13 @@ export function googleReviewPoints(average:number|undefined,count:number|undefin
   return bonusPolicy.weights.reviews*(quality*.8+volume*.2);
 }
 
-export function overtimePoints(value:number|undefined):number|undefined {
-  if(value===undefined || !Number.isFinite(value) || value<0)return undefined;
-  return bonusPolicy.weights.overtime*clamp(1-value/bonusPolicy.requirements.overtimeLaborPct);
-}
-
 export function calculateWeeklyBonus(input:BonusInputs):BonusResult{
-  if(overtimePoints(input.overtimeLaborPct)===undefined)input={...input,overtimeLaborPct:undefined};
   const w=bonusPolicy.weights;
   const metrics:BonusMetricResult[]=[
     {key:'tasks',label:'Tasks',weight:w.tasks,value:input.tasksPct,points:input.tasksPct===undefined?undefined:w.tasks*higherIsBetter(input.tasksPct,100),source:'7shifts Tasks',ready:input.tasksPct!==undefined,note:'35% of score · eligibility minimum 80%'},
     {key:'discounts',label:'Discounts excl. Uber Eats / employee meals',weight:w.discounts,value:input.discountsPct,points:input.discountsPct===undefined?undefined:w.discounts*lowerIsBetter(input.discountsPct,2),source:'Toast',ready:input.discountsPct!==undefined,note:'20% of score · Uber Eats promotions and employee meals excluded · eligibility maximum 2.00%'},
     {key:'voids',label:'Voids',weight:w.voids,value:input.voidsPct,points:input.voidsPct===undefined?undefined:w.voids*lowerIsBetter(input.voidsPct,0.5),source:'Toast',ready:input.voidsPct!==undefined,note:'15% of score · eligibility maximum 0.50%'},
-    {key:'overtime',label:'Overtime',weight:w.overtime,value:input.overtimeLaborPct,points:overtimePoints(input.overtimeLaborPct),source:'Toast / Labor',ready:input.overtimeLaborPct!==undefined,note:'15 points at 0% OT, decreasing linearly to 0 at 8% · over 8% disqualifies · percentage of hourly hours worked'},
+    {key:'overtime',label:'Overtime',weight:w.overtime,value:input.overtimeLaborPct,points:input.overtimeLaborPct===undefined?undefined:w.overtime*lowerIsBetter(input.overtimeLaborPct,8),source:'Toast / Labor',ready:input.overtimeLaborPct!==undefined,note:'15% of score · eligibility maximum 8.00% of hourly hours worked'},
     {key:'reviews',label:'Google Reviews',weight:w.reviews,value:input.reviewAverage,points:googleReviewPoints(input.reviewAverage,input.reviewCount),source:'Google Business Profile',ready:input.reviewAverage!==undefined&&input.reviewCount!==undefined,note:'5% of score · minimum 5 weekly reviews · quality 80% + volume 20%'},
     {key:'liquorCost',label:'Liquor Cost',weight:w.liquorCost,value:input.liquorCostScorePct,points:input.liquorCostScorePct===undefined?undefined:w.liquorCost*clamp(input.liquorCostScorePct/100),source:'R365 + Toast',ready:input.liquorCostScorePct!==undefined,note:'5% of score · purchase invoices less credits / net alcohol sales · relative efficiency rank over the trailing eight weeks'},
     {key:'leadership',label:'Logbook / Leadership',weight:w.leadership,value:input.leadershipScorePct,points:input.leadershipScorePct===undefined?undefined:w.leadership*clamp(input.leadershipScorePct/100),source:'7shifts Logbook',ready:input.leadershipScorePct!==undefined&&input.logbookComplete!==undefined,note:'5% of score · 4 verified summaries per operating week · does not block qualification'},
