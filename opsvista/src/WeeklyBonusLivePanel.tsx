@@ -26,7 +26,8 @@ export default function WeeklyBonusLivePanel({allowedLocations,canReadRestaurant
   const [includeEmployeeMeals,setIncludeEmployeeMeals]=useState(false);
   const [includeUberEats,setIncludeUberEats]=useState(false);
   const comparing=includeEmployeeMeals||includeUberEats;
-  const [period,setPeriod]=useState<Period>('previous-week');
+  // Global Actualizar datos reloads the app: reopen on the current Connecticut bonus week.
+  const [period,setPeriod]=useState<Period>('this-week');
   const [customStart,setCustomStart]=useState(()=>typeof window!=='undefined'?(window.localStorage.getItem('opsvista-bonus-custom-start')||today):today);
   const [customEnd,setCustomEnd]=useState(()=>typeof window!=='undefined'?(window.localStorage.getItem('opsvista-bonus-custom-end')||today):today);
   const [selected,setSelected]=useState(()=>typeof window!=='undefined'?window.sessionStorage.getItem('opsvista-bonus-location')||'All locations':'All locations');
