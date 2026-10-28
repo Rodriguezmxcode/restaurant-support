@@ -208,3 +208,20 @@ test('Provi reconciliation replaces the same-location invoice without masking so
   assert.equal(compareBeverages('Avon', adjusted, 1).purchasePct, null);
   assert.equal(adjusted[1].purchases.invoices.length, 1); assert.equal(adjusted[1].purchases.invoices[0].amount, 200);
 });
+
+
+test('operator correction replaces the exact historical cut without adding purchases or awarding unverified points', async () => {
+  const result = await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27');
+  assert.deepEqual(result.rows.map(row => row.purchasePct), [12.53, 14.43, 15.12, 17.28, 17.85, 19.65]);
+  assert.equal(result.rows.reduce((sum, row) => sum + Math.round(row.sales! * 100), 0), 78635058);
+  assert.equal(result.rows.reduce((sum, row) => sum + Math.round(row.purchases! * 100), 0), 13247000);
+  assert.equal(result.reportingPeriod?.start, '2026-08-28');
+  assert(result.rows.every(row => row.points === null && !row.comparable));
+  assert.deepEqual(result, await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27'));
+  const { reportedBeverageCorrection } = await import('./reportedBeverageCorrection.js');
+  assert.equal(reportedBeverageCorrection('another-org', '2026-09-02', '2026-10-27'), undefined);
+  assert.equal(reportedBeverageCorrection('org-puerto-vallarta', '2026-09-09', '2026-11-03'), undefined);
+  const manager = { id: 'synthetic-manager', role: 'Location Manager', organizationId: 'org-puerto-vallarta', locations: ['Avon'] } as SessionUser;
+  const visible = visibleBeverageScore(result, manager);
+  assert.deepEqual(visible.rows.map(row => row.location), ['Avon']);
+});

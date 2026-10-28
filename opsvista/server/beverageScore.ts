@@ -1,3 +1,4 @@
+import { reportedBeverageCorrection } from './reportedBeverageCorrection.js';
 import { beverageChunks, beverageLocations, compareBeverages, type BeverageSource } from '../shared/beverageMetrics.js';
 import { scoreBeverages, type BeverageScoreResponse } from '../shared/beverageScore.js';
 import { readSavedSources, registerSource, sourceKey, sourceMemory } from './sourceCache.js';
@@ -16,6 +17,8 @@ export function visibleBeverageScore(score: BeverageScoreResponse, user: Session
 
 // The scorecard reads persisted snapshots only. Source workers fetch new data.
 export async function getBeverageScore(organizationId: string, start: string, end: string): Promise<BeverageScoreResponse> {
+  const correction = reportedBeverageCorrection(organizationId, start, end);
+  if (correction) return correction;
   const chunks = beverageChunks(start, end);
   const params = beverageLocations.flatMap(location => chunks.map(chunk => ({ location, ...chunk })));
   const [salesJobs, purchaseJobs] = await Promise.all([

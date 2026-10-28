@@ -9,6 +9,7 @@ export type BeverageScoreRow = Pick<BeverageComparison, 'location' | 'sales' | '
   provi?: ProviBonusReference;
 };
 export type BeverageScoreResponse = {
+  reportingPeriod?: { start: string; end: string; label: string; source: string };
   start: string; end: string; rows: BeverageScoreRow[];
   readyCount: number; expectedCount: number; provisional: boolean; periodOpen?: boolean; updatedAt?: string; error?: string;
 };
