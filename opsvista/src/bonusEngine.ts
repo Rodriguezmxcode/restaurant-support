@@ -1,5 +1,6 @@
 export type BonusMetricKey='tasks'|'discounts'|'voids'|'overtime'|'reviews'|'liquorCost'|'leadership';
 export type BonusInputs={
+  periodStart?:string;
   tasksPct?:number;
   discountsPct?:number;
   voidsPct?:number;
@@ -23,6 +24,16 @@ const clamp=(n:number,min=0,max=1)=>Math.max(min,Math.min(max,n));
 const lowerIsBetter=(value:number,target:number)=>clamp(target/Math.max(value,target));
 const higherIsBetter=(value:number,target:number)=>clamp(value/target);
 
+// Use the evaluated period, never the wall clock, to preserve historical bonuses.
+export const progressiveOvertimeEffectiveDate='2026-10-28';
+export const usesProgressiveOvertime=(periodStart?:string)=>!!periodStart&&/^\d{4}-\d{2}-\d{2}$/.test(periodStart)&&periodStart>=progressiveOvertimeEffectiveDate;
+export function overtimePoints(value:number|undefined,periodStart?:string){
+  if(value===undefined||!Number.isFinite(value)||value<0)return undefined;
+  return bonusPolicy.weights.overtime*(usesProgressiveOvertime(periodStart)
+    ?clamp(1-value/bonusPolicy.requirements.overtimeLaborPct)
+    :lowerIsBetter(value,bonusPolicy.requirements.overtimeLaborPct));
+}
+
 /**
  * Google Reviews rewards quality first and volume second. A location must
  * receive at least five reviews in the Wednesday–Tuesday operating week to
@@ -39,11 +50,12 @@ export function googleReviewPoints(average:number|undefined,count:number|undefin
 
 export function calculateWeeklyBonus(input:BonusInputs):BonusResult{
   const w=bonusPolicy.weights;
+  const otPoints=overtimePoints(input.overtimeLaborPct,input.periodStart);
   const metrics:BonusMetricResult[]=[
     {key:'tasks',label:'Tasks',weight:w.tasks,value:input.tasksPct,points:input.tasksPct===undefined?undefined:w.tasks*higherIsBetter(input.tasksPct,100),source:'7shifts Tasks',ready:input.tasksPct!==undefined,note:'35% of score · eligibility minimum 80%'},
     {key:'discounts',label:'Discounts excl. Uber Eats / employee meals',weight:w.discounts,value:input.discountsPct,points:input.discountsPct===undefined?undefined:w.discounts*lowerIsBetter(input.discountsPct,2),source:'Toast',ready:input.discountsPct!==undefined,note:'20% of score · Uber Eats promotions and employee meals excluded · eligibility maximum 2.00%'},
     {key:'voids',label:'Voids',weight:w.voids,value:input.voidsPct,points:input.voidsPct===undefined?undefined:w.voids*lowerIsBetter(input.voidsPct,0.5),source:'Toast',ready:input.voidsPct!==undefined,note:'15% of score · eligibility maximum 0.50%'},
-    {key:'overtime',label:'Overtime',weight:w.overtime,value:input.overtimeLaborPct,points:input.overtimeLaborPct===undefined?undefined:w.overtime*lowerIsBetter(input.overtimeLaborPct,8),source:'Toast / Labor',ready:input.overtimeLaborPct!==undefined,note:'15% of score · eligibility maximum 8.00% of hourly hours worked'},
+    {key:'overtime',label:'Overtime',weight:w.overtime,value:input.overtimeLaborPct,points:otPoints,source:'Toast / Labor',ready:otPoints!==undefined,note:usesProgressiveOvertime(input.periodStart)?'Since 2026-10-28: 15 × max(0, 1 − OT% / 8); OT above 8% disqualifies':'Historical policy: 15 points up to 8% OT; OT above 8% disqualifies'},
     {key:'reviews',label:'Google Reviews',weight:w.reviews,value:input.reviewAverage,points:googleReviewPoints(input.reviewAverage,input.reviewCount),source:'Google Business Profile',ready:input.reviewAverage!==undefined&&input.reviewCount!==undefined,note:'5% of score · minimum 5 weekly reviews · quality 80% + volume 20%'},
     {key:'liquorCost',label:'Liquor Cost',weight:w.liquorCost,value:input.liquorCostScorePct,points:input.liquorCostScorePct===undefined?undefined:w.liquorCost*clamp(input.liquorCostScorePct/100),source:'R365 + Toast',ready:input.liquorCostScorePct!==undefined,note:'5% of score · purchase invoices less credits / net alcohol sales · relative efficiency rank over the trailing eight weeks'},
     {key:'leadership',label:'Logbook / Leadership',weight:w.leadership,value:input.leadershipScorePct,points:input.leadershipScorePct===undefined?undefined:w.leadership*clamp(input.leadershipScorePct/100),source:'7shifts Logbook',ready:input.leadershipScorePct!==undefined&&input.logbookComplete!==undefined,note:'5% of score · 4 verified summaries per operating week · does not block qualification'},
@@ -51,7 +63,7 @@ export function calculateWeeklyBonus(input:BonusInputs):BonusResult{
   // Qualification is decided by the operating gates. Leadership/Logbook
   // contributes points to the ranking, but an incomplete Logbook cannot
   // disqualify a restaurant that passed Tasks, Discounts, Voids and OT.
-  const eligibilityKnown=input.tasksPct!==undefined&&input.discountsPct!==undefined&&input.voidsPct!==undefined&&input.overtimeLaborPct!==undefined;
+  const eligibilityKnown=input.tasksPct!==undefined&&input.discountsPct!==undefined&&input.voidsPct!==undefined&&otPoints!==undefined;
   const reasons:string[]=[];
   if(input.tasksPct!==undefined&&input.tasksPct<80)reasons.push(`Tasks ${input.tasksPct.toFixed(1)}% < 80%`);
   if(input.discountsPct!==undefined&&input.discountsPct>2)reasons.push(`Discounts ${input.discountsPct.toFixed(2)}% > 2.00%`);
