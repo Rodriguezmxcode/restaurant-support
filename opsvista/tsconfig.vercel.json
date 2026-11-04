@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "moduleResolution": "Node",
+    "types": ["node"]
+  },
+  "include": ["api/**/*.ts", "server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["**/*.test.ts", "**/*.spec.ts"]
+}

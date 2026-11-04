@@ -1,0 +1,43 @@
+{
+  "name": "opsvista-migration-v1",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:vercel": "tsc --noEmit -p tsconfig.vercel.json",
+    "test:sales-categories": "node scripts/test-sales-categories.mjs",
+    "test:notification-email": "node scripts/test-notification-email.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "test:beverage-bonus": "node scripts/test-beverage-bonus.mjs",
+    "test:source-sync": "node scripts/test-source-sync.mjs",
+    "test:salary-timing": "node scripts/test-salary-timing.mjs",
+    "test:copilot": "node scripts/test-copilot.mjs",
+    "test:partner-api": "node scripts/test-partner-api.mjs",
+    "test:push-mfa": "node scripts/test-push-mfa.mjs",
+    "test:web-push": "node scripts/test-web-push.mjs",
+    "test:operational-alerts": "node scripts/test-operational-alerts.mjs",
+    "test:notification-preferences": "node scripts/test-notification-preferences.mjs",
+    "test:tenant-alerts": "node scripts/test-tenant-alerts.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "@vitejs/plugin-react": "latest",
+    "postgres": "^3.4.7",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "5.9.3",
+    "vite": "latest",
+    "web-push": "^3.6.7",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^24.13.4",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/web-push": "^3.6.4"
+  }
+}
