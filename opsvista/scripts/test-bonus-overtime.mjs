@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { overtimePoints, calculateWeeklyBonus } from '../src/bonusEngine.ts';
-const baseline={tasksPct:100,discountsPct:1,voidsPct:0.1,reviewAverage:5,reviewCount:10,liquorCostScorePct:100,leadershipScorePct:100,logbookComplete:true};
+const baseline={tasksPct:100,discountsPct:0,voidsPct:0,reviewAverage:5,reviewCount:10,liquorCostScorePct:100,leadershipScorePct:100,logbookComplete:true};
 test('effective week and future weeks reward lower overtime proportionally',()=>{
   for(const period of ['2026-10-28','2026-11-04','2027-01-06']){
     for(const [ot,points] of [[0,15],[2,11.25],[4,7.5],[6,3.75],[8,0],[9,0]]) assert.equal(overtimePoints(ot,period),points);
@@ -18,7 +18,7 @@ test('only overtime changes total points; eligibility limit stays above 8%',()=>
   const old=calculateWeeklyBonus({...baseline,periodStart:'2026-10-21',overtimeLaborPct:4});
   const current=calculateWeeklyBonus({...baseline,periodStart:'2026-10-28',overtimeLaborPct:4});
   assert.equal(old.score,100);assert.equal(current.score,92.5);
-  assert.deepEqual(old.metrics.filter(m=>m.key!=='overtime'),current.metrics.filter(m=>m.key!=='overtime'));
+  assert.deepEqual(old.metrics.filter(m=>m.key!=='overtime').map(({note,...metric})=>metric),current.metrics.filter(m=>m.key!=='overtime').map(({note,...metric})=>metric));
   assert.equal(calculateWeeklyBonus({...baseline,periodStart:'2026-10-28',overtimeLaborPct:8}).eligible,true);
   assert.equal(calculateWeeklyBonus({...baseline,periodStart:'2026-10-28',overtimeLaborPct:8.01}).eligible,false);
 });
