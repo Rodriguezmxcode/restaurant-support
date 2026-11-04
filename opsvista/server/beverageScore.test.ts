@@ -238,8 +238,26 @@ test('operator correction replaces the exact historical cut without adding purch
   assert.deepEqual(result, await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27'));
   const { reportedBeverageCorrection } = await import('./reportedBeverageCorrection.js');
   assert.equal(reportedBeverageCorrection('another-org', '2026-09-02', '2026-10-27'), undefined);
-  assert.equal(reportedBeverageCorrection('org-puerto-vallarta', '2026-09-09', '2026-11-03'), undefined);
+  assert.equal(reportedBeverageCorrection('org-puerto-vallarta', '2026-09-16', '2026-11-10'), undefined);
   const manager = { id: 'synthetic-manager', role: 'Location Manager', organizationId: 'org-puerto-vallarta', locations: ['Avon'] } as SessionUser;
   const visible = visibleBeverageScore(result, manager);
   assert.deepEqual(visible.rows.map(row => row.location), ['Avon']);
+});
+
+
+test('Nov 3 approved cut counts each restaurant once, uses matching dates and preserves other cuts', async () => {
+  const score = await getBeverageScore('org-puerto-vallarta', '2026-09-09', '2026-11-03');
+  assert.equal(score.reportingPeriod?.start, '2026-09-04');
+  assert.equal(score.reportingPeriod?.end, '2026-11-03');
+  assert.equal(score.provisional, false);
+  assert.equal(new Set(score.rows.map(row => row.location)).size, 6);
+  assert.equal(score.rows.reduce((n, row) => n + Math.round(row.sales! * 100), 0), 80085670);
+  assert.equal(score.rows.reduce((n, row) => n + Math.round(row.purchases! * 100), 0), 13481258);
+  assert.deepEqual(score.rows.map(row => [row.location, row.purchasePct, row.points]), [
+    ['Avon', 12.47, 5], ['Southington', 14.65, 4], ['Danbury', 15.82, 3],
+    ['Orange', 17.59, 2], ['Fairfield', 17.64, 1], ['Stamford', 18.52, 0],
+  ]);
+  assert.deepEqual(await getBeverageScore('org-puerto-vallarta', '2026-09-09', '2026-11-03'), score);
+  const prior = await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27');
+  assert.equal(prior.rows.reduce((n, row) => n + Math.round(row.purchases! * 100), 0), 13247000);
 });
