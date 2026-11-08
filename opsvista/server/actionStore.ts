@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import { parseMeetingAgreement, type MeetingAgreement } from '../shared/meetingAgreements.js';
 import type { SessionUser } from './authSession.js';
 
 export type ActionSeverity='High'|'Medium'|'Low';
@@ -9,12 +10,12 @@ export type ActionRecord={
   id:string;organizationId:string;location:string;category:string;title:string;severity:ActionSeverity;status:ActionStatus;
   signal:string;cause:string;recommendation:string;impact:string;ownerId?:string;ownerName?:string;accountableName?:string;accountableRole?:string;dueAt?:string;
   automationKey?:string;automated:boolean;priorityScore:number;sources:string[];sourceIds:string[];sourceUrl?:string;detectedAt?:string;
-  verificationStatus:ActionVerificationStatus;verificationNote?:string;verifiedAt?:string;
+  meeting?:MeetingAgreement;verificationStatus:ActionVerificationStatus;verificationNote?:string;verifiedAt?:string;
   createdById:string;createdByName:string;createdAt:string;updatedAt:string;
 };
 
-export type ActionCreateInput=Pick<ActionRecord,'location'|'category'|'title'|'severity'|'signal'|'cause'|'recommendation'|'impact'>&Partial<Pick<ActionRecord,'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'automationKey'|'automated'|'priorityScore'|'sources'|'sourceIds'|'sourceUrl'|'detectedAt'>>;
-export type ActionUpdateInput=Partial<Pick<ActionRecord,'status'|'severity'|'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'sourceUrl'|'verificationStatus'|'verificationNote'|'verifiedAt'>>;
+export type ActionCreateInput=Pick<ActionRecord,'location'|'category'|'title'|'severity'|'signal'|'cause'|'recommendation'|'impact'>&Partial<Pick<ActionRecord,'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'automationKey'|'automated'|'priorityScore'|'sources'|'sourceIds'|'sourceUrl'|'detectedAt'|'meeting'>>;
+export type ActionUpdateInput=Partial<Pick<ActionRecord,'status'|'severity'|'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'sourceUrl'|'verificationStatus'|'verificationNote'|'verifiedAt'|'meeting'>>;
 
 let client:ReturnType<typeof postgres>|undefined;
 let initialized=false;
@@ -33,6 +34,7 @@ async function ensureSchema(){
     created_by_id text not null, created_by_name text not null, created_at timestamptz not null, updated_at timestamptz not null default now()
   )`;
   await db`alter table opsvista_actions add column if not exists source_url text`;
+  await db`alter table opsvista_actions add column if not exists meeting_context jsonb`;
   await db`alter table opsvista_actions add column if not exists accountable_name text`;
   await db`alter table opsvista_actions add column if not exists accountable_role text`;
   await db`create table if not exists opsvista_action_audit (
@@ -54,6 +56,7 @@ function norm(row:Record<string,unknown>):ActionRecord{return{
   dueAt:row.due_at?String(row.due_at).slice(0,10):undefined,automationKey:row.automation_key?String(row.automation_key):undefined,
   automated:Boolean(row.automated),priorityScore:Number(row.priority_score)||0,sources:strings(row.sources),sourceIds:strings(row.source_ids),sourceUrl:row.source_url?String(row.source_url):undefined,
   detectedAt:row.detected_at?new Date(String(row.detected_at)).toISOString():undefined,verificationStatus:String(row.verification_status) as ActionVerificationStatus,
+  meeting:row.meeting_context?parseMeetingAgreement(row.meeting_context):undefined,
   verificationNote:row.verification_note?String(row.verification_note):undefined,verifiedAt:row.verified_at?new Date(String(row.verified_at)).toISOString():undefined,
   createdById:String(row.created_by_id),createdByName:String(row.created_by_name),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString(),
 };}
@@ -67,12 +70,13 @@ export async function listActionAudit(id:string){await ensureSchema();return awa
 
 export async function createAction(input:ActionCreateInput,actor:SessionUser){
   await ensureSchema();const db=sql();const org=organization(actor);
+  const meeting=input.meeting?parseMeetingAgreement(input.meeting):undefined;
   if(input.automationKey){const existing=await db`select * from opsvista_actions where organization_id=${org} and automation_key=${input.automationKey} and status not in ('Completed','Dismissed') order by updated_at desc limit 1`;if(existing[0]){const current=norm(existing[0]);if(input.ownerId||input.ownerName||input.accountableName||input.accountableRole||input.dueAt||input.sourceUrl)return updateActionRecord(current.id,{...(input.ownerId?{ownerId:input.ownerId}:{}),...(input.ownerName?{ownerName:input.ownerName}:{}),...(input.accountableName?{accountableName:input.accountableName}:{}),...(input.accountableRole?{accountableRole:input.accountableRole}:{}),...(input.dueAt?{dueAt:input.dueAt}:{}),...(input.sourceUrl?{sourceUrl:input.sourceUrl}:{}),status:input.ownerId?'Assigned':current.status},'Existing source action assigned to a responsible user',actor);return current;}}
   const id=`ACT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;const at=new Date().toISOString();
   await db.begin(async tx=>{
-    await tx`insert into opsvista_actions(id,organization_id,location,category,title,severity,status,signal,cause,recommendation,impact,owner_id,owner_name,accountable_name,accountable_role,due_at,automation_key,automated,priority_score,sources,source_ids,source_url,detected_at,verification_status,created_by_id,created_by_name,created_at)
-      values(${id},${org},${input.location},${input.category},${input.title},${input.severity},${input.ownerId?'Assigned':'Open'},${input.signal},${input.cause},${input.recommendation},${input.impact},${input.ownerId??null},${input.ownerName??null},${input.accountableName??null},${input.accountableRole??null},${input.dueAt??null},${input.automationKey??null},${input.automated??false},${input.priorityScore??0},${tx.json(input.sources??[])},${tx.json(input.sourceIds??[])},${input.sourceUrl??null},${input.detectedAt??at},'Pending',${actor.id},${actor.name},${at})`;
-    await tx`insert into opsvista_action_audit(id,action_id,at,actor_id,actor_name,event,after_value,reason) values(${auditId()},${id},${at},${actor.id},${actor.name},'Action created',${input.ownerId?'Assigned':'Open'},${input.signal})`;
+    await tx`insert into opsvista_actions(id,organization_id,location,category,title,severity,status,signal,cause,recommendation,impact,owner_id,owner_name,accountable_name,accountable_role,due_at,automation_key,automated,priority_score,sources,source_ids,source_url,detected_at,verification_status,created_by_id,created_by_name,created_at,meeting_context)
+      values(${id},${org},${input.location},${input.category},${input.title},${input.severity},${input.ownerId?'Assigned':'Open'},${input.signal},${input.cause},${input.recommendation},${input.impact},${input.ownerId??null},${input.ownerName??null},${input.accountableName??null},${input.accountableRole??null},${input.dueAt??null},${input.automationKey??null},${input.automated??false},${input.priorityScore??0},${tx.json(input.sources??[])},${tx.json(input.sourceIds??[])},${input.sourceUrl??null},${input.detectedAt??at},'Pending',${actor.id},${actor.name},${at},${meeting?tx.json(meeting):null})`;
+    await tx`insert into opsvista_action_audit(id,action_id,at,actor_id,actor_name,event,after_value,reason) values(${auditId()},${id},${at},${actor.id},${actor.name},'Action created',${meeting?JSON.stringify({status:input.ownerId?'Assigned':'Open',ownerName:input.ownerName,dueAt:input.dueAt,meeting}):(input.ownerId?'Assigned':'Open')},${input.signal})`;
   });
   return getAction(id);
 }
@@ -80,11 +84,13 @@ export async function createAction(input:ActionCreateInput,actor:SessionUser){
 export async function updateActionRecord(id:string,patch:ActionUpdateInput,reason:string,actor:SessionUser){
   await ensureSchema();const existing=await getAction(id);if(!existing)throw new Error('Action not found');
   if(existing.organizationId!==organization(actor))throw new Error('Action not found');
-  const next={...existing,...patch,updatedAt:new Date().toISOString()};
-  const before=`${existing.status} · ${existing.ownerName||'Unassigned'} · ${existing.verificationStatus}`;
-  const after=`${next.status} · ${next.ownerName||'Unassigned'} · ${next.verificationStatus}`;
+  const meeting=patch.meeting?parseMeetingAgreement(patch.meeting):existing.meeting;
+  if(existing.meeting&&meeting&&existing.meeting.weekStart!==meeting.weekStart)throw new Error('The original meeting week cannot be changed');
+  const next={...existing,...patch,meeting,updatedAt:new Date().toISOString()};
+  const before=meeting?JSON.stringify({status:existing.status,ownerName:existing.ownerName,dueAt:existing.dueAt,verificationStatus:existing.verificationStatus,verificationNote:existing.verificationNote,meeting:existing.meeting}):`${existing.status} · ${existing.ownerName||'Unassigned'} · ${existing.verificationStatus}`;
+  const after=meeting?JSON.stringify({status:next.status,ownerName:next.ownerName,dueAt:next.dueAt,verificationStatus:next.verificationStatus,verificationNote:next.verificationNote,meeting:next.meeting}):`${next.status} · ${next.ownerName||'Unassigned'} · ${next.verificationStatus}`;
   await sql().begin(async tx=>{
-    await tx`update opsvista_actions set status=${next.status},severity=${next.severity},owner_id=${next.ownerId??null},owner_name=${next.ownerName??null},accountable_name=${next.accountableName??null},accountable_role=${next.accountableRole??null},due_at=${next.dueAt??null},source_url=${next.sourceUrl??null},verification_status=${next.verificationStatus},verification_note=${next.verificationNote??null},verified_at=${next.verifiedAt??null},updated_at=now() where id=${id}`;
+    await tx`update opsvista_actions set status=${next.status},severity=${next.severity},owner_id=${next.ownerId??null},owner_name=${next.ownerName??null},accountable_name=${next.accountableName??null},accountable_role=${next.accountableRole??null},due_at=${next.dueAt??null},source_url=${next.sourceUrl??null},verification_status=${next.verificationStatus},verification_note=${next.verificationNote??null},verified_at=${next.verifiedAt??null},meeting_context=${next.meeting?tx.json(next.meeting):null},updated_at=now() where id=${id}`;
     await tx`insert into opsvista_action_audit(id,action_id,at,actor_id,actor_name,event,before_value,after_value,reason) values(${auditId()},${id},${new Date().toISOString()},${actor.id},${actor.name},'Action updated',${before},${after},${reason||'Action updated'})`;
   });
   return getAction(id);

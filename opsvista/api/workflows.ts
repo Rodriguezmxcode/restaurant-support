@@ -1,3 +1,4 @@
+import { parseMeetingAgreement, validMeetingDate, type MeetingAgreement } from '../shared/meetingAgreements.js';
 import { connectionHealthEndpoint } from '../server/connectionHealthEndpoint.js';
 import { notificationPreferencesEndpoint } from '../server/notificationPreferencesEndpoint.js';
 import { scheduledAlertsEndpoint } from '../server/scheduledOperationalAlerts.js';
@@ -131,7 +132,10 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   const priorityScore=Math.max(0,Math.min(100,Number(req.body?.priorityScore)||0));const requestedOwnerId=text(req.body?.ownerId);const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,location):null;
   if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
   const sourceUrl=safeActionSourceUrl(text(req.body?.sourceUrl));
-  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,detectedAt:text(req.body?.detectedAt)||undefined},user);
+  let meeting:MeetingAgreement|undefined;
+  if(has(req.body,'meeting')){try{meeting=parseMeetingAgreement(req.body?.meeting);}catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Invalid meeting context'});}
+   if(!validMeetingDate(dueAt)||!assignee)return res.status(400).json({error:'Meeting agreements require an owner and deadline / El acuerdo necesita responsable y fecha compromiso'});}
+  const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,meeting,detectedAt:text(req.body?.detectedAt)||undefined},user);
   const notification=action&&assignee?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
   if(action&&assignee)await notifyActionObservers(action,user,'assigned');
   return res.status(201).json({action,notification});
@@ -149,7 +153,11 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   }
   const requestedOwnerId=has(req.body,'ownerId')?text(req.body?.ownerId):existing.ownerId||'';const assignee=requestedOwnerId?await resolveActionAssignee(requestedOwnerId,existing.location):null;
   if(requestedOwnerId&&!assignee)return res.status(400).json({error:'The selected responsible user is inactive or outside this location'});
-  const action=await updateActionRecord(id,{...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
+  let meeting:MeetingAgreement|undefined;
+  if(has(req.body,'meeting')){try{meeting=parseMeetingAgreement(req.body?.meeting);}catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Invalid meeting context'});}
+   if(existing.meeting&&existing.meeting.weekStart!==meeting.weekStart)return res.status(400).json({error:'The original meeting week is preserved / Se conserva la semana original del acuerdo'});}
+  if(existing.meeting||meeting){const deadline=has(req.body,'dueAt')?text(req.body?.dueAt):existing.dueAt;if(!assignee||!deadline||!validMeetingDate(deadline))return res.status(400).json({error:'Meeting agreements require an owner and deadline / El acuerdo necesita responsable y fecha compromiso'});}
+  const action=await updateActionRecord(id,{...(meeting?{meeting}:{}),...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
   const ownerChanged=has(req.body,'ownerId')&&Boolean(action?.ownerId)&&(action?.ownerId!==existing.ownerId||Boolean(req.body?.resendNotification));
   const notification=action&&ownerChanged?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
   if(action&&ownerChanged)await notifyActionObservers(action,user,'assigned');

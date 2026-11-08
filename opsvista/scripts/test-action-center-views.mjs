@@ -81,6 +81,7 @@ for (const nav of [['Action Center'], ['Google Reviews']]) {
     setSection: value => { destination = value; }, setSearchTarget: value => { selectedTarget = value; },
     setSearch() {}, setSearchOpen() {}, setSearchIndex() {}, setLiveSearchResults() {},
   };
+  context.navigateToSection = fromApp('navigateToSection', { closePushPanel() {}, setSection: context.setSection });
   fromApp('openSearchResult', context)({ section: 'Prioridades', badge: 'ACCIÓN', recordId: 'completed', location: 'Avon' });
   assert.equal(destination, nav[0] === 'Action Center' ? 'Action Center' : undefined);
   if (destination) { assert.equal(selectedTarget.recordId, 'completed'); assert.equal(selectedTarget.section, 'Action Center'); }
@@ -147,6 +148,30 @@ try {
   start({}, { ...props, currentUser: { ...props.currentUser, role: 'Location Manager' }, initialRecordId: 'completed' });
   assert.ok(rows().includes('completed'), 'Search can open a completed action owned by another authorized user');
   assert.equal(nodes(tree(), node => node.props?.className === 'panel detail-panel')[0].props.children[0].props.children.props.children[1].props.children, 'completed');
+  const meeting = { weekStart: '2026-11-04', kpi: 'labor', dataQuality: 'estimated', nextReview: 'Revisar labor de cierre' };
+  const weekly = [
+    fixture('current', { meeting, ownerId:'me' }),
+    fixture('previous-open', { meeting:{...meeting,weekStart:'2026-10-28'} }),
+    fixture('previous-closed', { status:'Completed',meeting:{...meeting,weekStart:'2026-10-28'} }),
+    fixture('current-closed', { status:'Completed',meeting }),
+    fixture('next-week', { meeting:{...meeting,weekStart:'2026-11-11'} }),
+    fixture('other-location', { location:'Orange',meeting }),
+    fixture('unlinked'),
+  ];
+  start({2:weekly,24:'2026-11-04'});
+  tab('meetings').props.onClick();
+  assert.deepEqual(rows(), ['current','previous-open','current-closed']);
+  const weeklyMarkup = renderToStaticMarkup(tree());
+  assert.match(weeklyMarkup, /Acuerdos de reunión/);
+  assert.match(weeklyMarkup, /Incluir pendientes/);
+  assert.match(weeklyMarkup, /Confirmado por el usuario|Estimado/);
+  nodes(tree(), node => node.props?.type === 'checkbox' && node.props.checked === true)[0].props.onChange({target:{checked:false}});
+  assert.deepEqual(rows(), ['current','current-closed']);
+  start({2:weekly,24:'2026-11-04'}, {...props,initialMeeting:true,currentUser:{...props.currentUser,role:'Location Manager'}});
+  assert.deepEqual(rows(), ['current','previous-open','current-closed'], 'Deep link includes all authorized owners and statuses');
+  nodes(tree(), node => node.type==='button' && node.props?.children==='+ Nuevo acuerdo')[0].props.onClick();
+  assert.equal(seed[17],true);assert.equal(seed[26],true);assert.equal(seed[27].weekStart,'2026-11-04');
+  assert.match(renderToStaticMarkup(tree()), /Guardar acuerdo y avisar al responsable/);
   assert.equal(JSON.stringify(actions), originalActions, 'Views must not mutate records');
 } finally { globalThis.fetch = originalFetch; }
 
