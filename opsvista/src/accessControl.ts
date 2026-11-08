@@ -2,7 +2,7 @@ export type OpsVistaRole = 'Founder' | 'Corporate' | 'Location Manager' | 'Onlin
 
 export type OpsVistaModule =
   | 'Resumen' | 'Locaciones' | 'Ventas' | 'Google Reviews' | 'Local Intelligence' | 'Finanzas' | 'Gastos'
-  | 'Team' | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';
+  | 'Team' | 'Horarios' | 'Tasks' | 'Bono semanal' | 'Action Center' | 'Acuerdos' | 'Proyectos' | 'Prioridades' | 'Pagos' | 'Transferencias' | 'Restaurant365' | 'Integraciones' | 'Configuración';
 
 export type LocationAccessGrant = {
   location: string;
@@ -45,7 +45,7 @@ export type OpsVistaUser = {
   active: boolean;
 };
 
-const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Finanzas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
+const allModules: OpsVistaModule[] = ['Resumen','Locaciones','Ventas','Finanzas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Acuerdos','Proyectos','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'];
 
 export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
   Founder: {
@@ -67,31 +67,31 @@ export const rolePermissions: Record<OpsVistaRole, PermissionSet> = {
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   'Location Manager': {
-    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Proyectos','Pagos','Transferencias','Restaurant365'],
+    modules: ['Resumen','Locaciones','Ventas','Google Reviews','Local Intelligence','Gastos','Team','Horarios','Tasks','Bono semanal','Action Center','Acuerdos','Proyectos','Pagos','Transferencias','Restaurant365'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Kitchen: {
-    modules: ['Resumen','Locaciones','Tasks','Bono semanal','Action Center','Proyectos','Transferencias'],
+    modules: ['Resumen','Locaciones','Tasks','Bono semanal','Action Center','Acuerdos','Proyectos','Transferencias'],
     allLocations: false, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: true, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   HR: {
-    modules: ['Resumen','Locaciones','Team','Horarios','Action Center','Proyectos','Configuración'],
+    modules: ['Resumen','Locaciones','Team','Horarios','Action Center','Acuerdos','Proyectos','Configuración'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: false, canApprovePayments: false, canSeeFinancialImpact: false,
   },
   Administration: {
-    modules: ['Resumen','Gastos','Action Center','Proyectos','Finanzas','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'],
+    modules: ['Resumen','Gastos','Action Center','Acuerdos','Proyectos','Finanzas','Pagos','Transferencias','Restaurant365','Integraciones','Configuración'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: true,
   },
   Maintenance: {
-    modules: ['Resumen','Locaciones','Tasks','Action Center','Proyectos'],
+    modules: ['Resumen','Locaciones','Tasks','Action Center','Acuerdos','Proyectos'],
     allLocations: true, canPreviewUsers: false, canManageUsers: false, canManagePlatform: false, canManageIntegrations: false,
     canRunAutomation: false, canUseCopilot: true, canReviewEvidence: false, canEscalateActions: true,
     canVerifyActions: true, canApprovePayments: false, canSeeFinancialImpact: false,

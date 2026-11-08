@@ -15,7 +15,7 @@ export type ActionRecord={
 };
 
 export type ActionCreateInput=Pick<ActionRecord,'location'|'category'|'title'|'severity'|'signal'|'cause'|'recommendation'|'impact'>&Partial<Pick<ActionRecord,'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'automationKey'|'automated'|'priorityScore'|'sources'|'sourceIds'|'sourceUrl'|'detectedAt'|'meeting'>>;
-export type ActionUpdateInput=Partial<Pick<ActionRecord,'status'|'severity'|'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'sourceUrl'|'verificationStatus'|'verificationNote'|'verifiedAt'|'meeting'>>;
+export type ActionUpdateInput=Partial<Pick<ActionRecord,'status'|'severity'|'ownerId'|'ownerName'|'accountableName'|'accountableRole'|'dueAt'|'sourceUrl'|'verificationStatus'|'verificationNote'|'verifiedAt'|'meeting'|'title'|'signal'|'cause'|'recommendation'|'impact'>>;
 
 let client:ReturnType<typeof postgres>|undefined;
 let initialized=false;
@@ -48,6 +48,7 @@ async function ensureSchema(){
   initialized=true;
 }
 const strings=(value:unknown)=>Array.isArray(value)?value.filter(item=>typeof item==='string') as string[]:[];
+const timestamp=(value:unknown)=>value instanceof Date?value.toISOString():new Date(String(value)).toISOString();
 function norm(row:Record<string,unknown>):ActionRecord{return{
   id:String(row.id),organizationId:String(row.organization_id),location:String(row.location),category:String(row.category),title:String(row.title),
   severity:String(row.severity) as ActionSeverity,status:String(row.status) as ActionStatus,signal:String(row.signal),cause:String(row.cause),
@@ -58,7 +59,7 @@ function norm(row:Record<string,unknown>):ActionRecord{return{
   detectedAt:row.detected_at?new Date(String(row.detected_at)).toISOString():undefined,verificationStatus:String(row.verification_status) as ActionVerificationStatus,
   meeting:row.meeting_context?parseMeetingAgreement(row.meeting_context):undefined,
   verificationNote:row.verification_note?String(row.verification_note):undefined,verifiedAt:row.verified_at?new Date(String(row.verified_at)).toISOString():undefined,
-  createdById:String(row.created_by_id),createdByName:String(row.created_by_name),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString(),
+  createdById:String(row.created_by_id),createdByName:String(row.created_by_name),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:timestamp(row.updated_at),
 };}
 const organization=(user:SessionUser)=>user.organizationId||'org-puerto-vallarta';
 const canSee=(user:SessionUser,row:ActionRecord)=>['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role)||user.locations.includes(row.location);
@@ -81,17 +82,23 @@ export async function createAction(input:ActionCreateInput,actor:SessionUser){
   return getAction(id);
 }
 
-export async function updateActionRecord(id:string,patch:ActionUpdateInput,reason:string,actor:SessionUser){
+export async function updateActionRecord(id:string,patch:ActionUpdateInput,reason:string,actor:SessionUser,expectedUpdatedAt?:string){
   await ensureSchema();const existing=await getAction(id);if(!existing)throw new Error('Action not found');
   if(existing.organizationId!==organization(actor))throw new Error('Action not found');
+  if(expectedUpdatedAt&&existing.updatedAt!==expectedUpdatedAt){const error=new Error('Otra persona actualizó el acuerdo. Actualiza la lista antes de guardar.');Object.assign(error,{status:409});throw error;}
   const meeting=patch.meeting?parseMeetingAgreement(patch.meeting):existing.meeting;
   if(existing.meeting&&meeting&&existing.meeting.weekStart!==meeting.weekStart)throw new Error('The original meeting week cannot be changed');
   const next={...existing,...patch,meeting,updatedAt:new Date().toISOString()};
-  const before=meeting?JSON.stringify({status:existing.status,ownerName:existing.ownerName,dueAt:existing.dueAt,verificationStatus:existing.verificationStatus,verificationNote:existing.verificationNote,meeting:existing.meeting}):`${existing.status} · ${existing.ownerName||'Unassigned'} · ${existing.verificationStatus}`;
-  const after=meeting?JSON.stringify({status:next.status,ownerName:next.ownerName,dueAt:next.dueAt,verificationStatus:next.verificationStatus,verificationNote:next.verificationNote,meeting:next.meeting}):`${next.status} · ${next.ownerName||'Unassigned'} · ${next.verificationStatus}`;
-  await sql().begin(async tx=>{
-    await tx`update opsvista_actions set status=${next.status},severity=${next.severity},owner_id=${next.ownerId??null},owner_name=${next.ownerName??null},accountable_name=${next.accountableName??null},accountable_role=${next.accountableRole??null},due_at=${next.dueAt??null},source_url=${next.sourceUrl??null},verification_status=${next.verificationStatus},verification_note=${next.verificationNote??null},verified_at=${next.verifiedAt??null},meeting_context=${next.meeting?tx.json(next.meeting):null},updated_at=now() where id=${id}`;
+  const before=meeting?JSON.stringify({title:existing.title,signal:existing.signal,cause:existing.cause,recommendation:existing.recommendation,impact:existing.impact,status:existing.status,ownerName:existing.ownerName,dueAt:existing.dueAt,verificationStatus:existing.verificationStatus,verificationNote:existing.verificationNote,meeting:existing.meeting}):`${existing.status} · ${existing.ownerName||'Unassigned'} · ${existing.verificationStatus}`;
+  const after=meeting?JSON.stringify({title:next.title,signal:next.signal,cause:next.cause,recommendation:next.recommendation,impact:next.impact,status:next.status,ownerName:next.ownerName,dueAt:next.dueAt,verificationStatus:next.verificationStatus,verificationNote:next.verificationNote,meeting:next.meeting}):`${next.status} · ${next.ownerName||'Unassigned'} · ${next.verificationStatus}`;
+  return sql().begin(async tx=>{
+    // Lock before checking the displayed revision, so concurrent edits cannot both win.
+    if(expectedUpdatedAt){
+      const locked=await tx`select updated_at from opsvista_actions where id=${id} and organization_id=${organization(actor)} for update`;
+      if(!locked[0]||timestamp(locked[0].updated_at)!==expectedUpdatedAt){const error=new Error('Otra persona actualizó el acuerdo. Actualiza la lista antes de guardar.');Object.assign(error,{status:409});throw error;}
+    }
+    const saved=await tx`update opsvista_actions set title=${next.title},signal=${next.signal},cause=${next.cause},recommendation=${next.recommendation},impact=${next.impact},status=${next.status},severity=${next.severity},owner_id=${next.ownerId??null},owner_name=${next.ownerName??null},accountable_name=${next.accountableName??null},accountable_role=${next.accountableRole??null},due_at=${next.dueAt??null},source_url=${next.sourceUrl??null},verification_status=${next.verificationStatus},verification_note=${next.verificationNote??null},verified_at=${next.verifiedAt??null},meeting_context=${next.meeting?tx.json(next.meeting):null},updated_at=greatest(clock_timestamp(),updated_at+interval '1 millisecond') where id=${id} returning *`;
     await tx`insert into opsvista_action_audit(id,action_id,at,actor_id,actor_name,event,before_value,after_value,reason) values(${auditId()},${id},${new Date().toISOString()},${actor.id},${actor.name},'Action updated',${before},${after},${reason||'Action updated'})`;
+    return norm(saved[0]);
   });
-  return getAction(id);
 }

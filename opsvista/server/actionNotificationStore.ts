@@ -86,6 +86,7 @@ async function ensureSchema() {
     latest_status text not null, sent_at timestamptz not null, accept_by timestamptz not null,
     delivered_at timestamptz, seen_at timestamptz, accepted_at timestamptz, updated_at timestamptz not null default now()
   )`;
+  await db`alter table opsvista_action_notification_state add column if not exists auto_escalate boolean not null default true`;
   await db`create table if not exists opsvista_action_notification_events (
     id text primary key, action_id text not null, organization_id text not null, recipient_id text not null,
     recipient_name text not null, status text not null, at timestamptz not null, actor_id text not null,
@@ -261,13 +262,13 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
   const db = sql();
   const sentAt = new Date();
   const acceptBy = new Date(sentAt.getTime() + Math.max(5, acceptWithinMinutes) * 60_000);
-  await db`insert into opsvista_action_notification_state(action_id,organization_id,recipient_id,recipient_name,latest_status,sent_at,accept_by,updated_at)
-    values(${action.id},${action.organizationId},${action.ownerId},${action.ownerName},'Sent',${sentAt.toISOString()},${acceptBy.toISOString()},now())
+  await db`insert into opsvista_action_notification_state(action_id,organization_id,recipient_id,recipient_name,latest_status,sent_at,accept_by,updated_at,auto_escalate)
+    values(${action.id},${action.organizationId},${action.ownerId},${action.ownerName},'Sent',${sentAt.toISOString()},${acceptBy.toISOString()},now(),${!action.meeting})
     on conflict(action_id) do update set recipient_id=excluded.recipient_id,recipient_name=excluded.recipient_name,
-    latest_status='Sent',sent_at=excluded.sent_at,accept_by=excluded.accept_by,delivered_at=null,seen_at=null,accepted_at=null,updated_at=now()`;
-  await appendEvent(action.id, action.ownerId, action.ownerName, 'Sent', actor, `Accept by ${acceptBy.toISOString()}`);
+    auto_escalate=excluded.auto_escalate,latest_status='Sent',sent_at=excluded.sent_at,accept_by=excluded.accept_by,delivered_at=null,seen_at=null,accepted_at=null,updated_at=now()`;
+  await appendEvent(action.id, action.ownerId, action.ownerName, 'Sent', actor, action.meeting?'Aviso solicitado manualmente al responsable; sin escalación automática.':`Accept by ${acceptBy.toISOString()}`);
   const recipientRows = await recipientsFor([action.ownerId],actor);
-  const email = await sendEmail(`action:${action.id}:assigned:${sentAt.toISOString()}`,`${action.location}: ${action.title}`,`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,actor,action.id);
+  const email = await sendEmail(`action:${action.id}:assigned:${sentAt.toISOString()}`,`${action.location}: ${action.title}`,action.meeting?`${action.recommendation} · Fecha compromiso: ${action.dueAt || 'sin fecha'}. · Seguimiento: ${action.meeting.nextReview}`:`${action.recommendation} · Aceptar antes de ${acceptBy.toLocaleString('en-US',{timeZone:'America/New_York'})} ET.`,recipientRows,actor,action.id);
   if (email.accepted) await appendEvent(action.id,action.ownerId,action.ownerName,'Email accepted',actor,`${email.accepted} email sent`);
   const category = notificationCategory(action.category);
   const routing = await routePushRecipients([action.ownerId], actor, { category, location: action.location, actionId: action.id, tag: `action:${action.id}:assigned:${sentAt.toISOString()}`, title: `${action.location} · ${action.title}`, body: action.recommendation || action.signal });
@@ -278,7 +279,7 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id,action.ownerId,action.ownerName,'Push accepted',actor,`${webPush.accepted} web push accepted`);
   }
-  if (!devices.length) return { sent: true, pushAccepted: webPush.accepted > 0, devices: webPush.devices, email, webPush, acceptBy: acceptBy.toISOString() };
+  if (!devices.length) return { sent: true, pushAccepted: webPush.accepted > 0, devices: webPush.devices, email, webPush, pushQueued: routing.queued, acceptBy: acceptBy.toISOString() };
   const messages = devices.map(row => ({
     to: String(row.token), sound: 'default', title: `${action.location}: ${action.title}`,
     body: action.recommendation, priority: 'high', channelId: 'opsvista-actions',
@@ -289,11 +290,23 @@ export async function dispatchActionPush(action: ActionRecord, actor: SessionUse
     if (process.env.EXPO_ACCESS_TOKEN) headers.Authorization = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
     const response = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) });
     if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+    // HTTP 200 can contain only rejected Expo tickets. Meetings must not report
+    // acceptance unless a ticket is accepted, or another transport accepted it.
+    if(action.meeting){
+      const payload=await response.json() as {data?:Array<{status?:unknown;id?:unknown}>};
+      const tickets=Array.isArray(payload.data)?payload.data:[];
+      const accepted=tickets.slice(0,messages.length).filter(ticket=>ticket?.status==='ok'&&typeof ticket.id==='string'&&Boolean(ticket.id.trim())).length;
+      if(accepted){
+        await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
+        await appendEvent(action.id,action.ownerId,action.ownerName,'Push accepted',actor,`${accepted} Expo ticket(s) accepted; delivery not confirmed`);
+      }
+      return {sent:true,pushAccepted:accepted>0||webPush.accepted>0,devices:devices.length+webPush.devices,email,webPush,pushQueued:routing.queued,acceptBy:acceptBy.toISOString(),...(accepted<messages.length?{warning:'Expo did not accept all notification tickets'}:{})};
+    }
     await db`update opsvista_action_notification_state set latest_status='Push accepted',updated_at=now() where action_id=${action.id}`;
     await appendEvent(action.id, action.ownerId, action.ownerName, 'Push accepted', actor, `${devices.length} registered device${devices.length === 1 ? '' : 's'}`);
-    return { sent: true, pushAccepted: true, devices: devices.length + webPush.devices, email, webPush, acceptBy: acceptBy.toISOString() };
+    return { sent: true, pushAccepted: true, devices: devices.length + webPush.devices, email, webPush, pushQueued: routing.queued, acceptBy: acceptBy.toISOString() };
   } catch (error) {
-    return { sent: true, pushAccepted: webPush.accepted > 0, devices: devices.length + webPush.devices, email, webPush, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
+    return { sent: true, pushAccepted: webPush.accepted > 0, devices: devices.length + webPush.devices, email, webPush, pushQueued: routing.queued, acceptBy: acceptBy.toISOString(), warning: error instanceof Error ? error.message : 'Push unavailable' };
   }
 }
 
@@ -322,7 +335,7 @@ export async function getActionNotification(actionId: string, user: SessionUser)
 export async function escalateUnacceptedActions(actor: SessionUser) {
   await ensureSchema();
   const db = sql();
-  const rows = await db`select * from opsvista_action_notification_state where organization_id=${organization(actor)} and accept_by<now() and latest_status not in ('Accepted','In progress','Evidence submitted','Verified','Escalated')`;
+  const rows = await db`select * from opsvista_action_notification_state where organization_id=${organization(actor)} and auto_escalate=true and accept_by<now() and latest_status not in ('Accepted','In progress','Evidence submitted','Verified','Escalated')`;
   for (const row of rows) {
     await db`update opsvista_action_notification_state set latest_status='Escalated',updated_at=now() where action_id=${String(row.action_id)}`;
     await appendEvent(String(row.action_id), String(row.recipient_id), String(row.recipient_name), 'Escalated', actor, 'Acceptance deadline expired; corporate follow-up required');

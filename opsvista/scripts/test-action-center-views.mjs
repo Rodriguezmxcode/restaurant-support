@@ -171,7 +171,7 @@ try {
   assert.deepEqual(rows(), ['current','previous-open','current-closed'], 'Deep link includes all authorized owners and statuses');
   nodes(tree(), node => node.type==='button' && node.props?.children==='+ Nuevo acuerdo')[0].props.onClick();
   assert.equal(seed[17],true);assert.equal(seed[26],true);assert.equal(seed[27].weekStart,'2026-11-04');
-  assert.match(renderToStaticMarkup(tree()), /Guardar acuerdo y avisar al responsable/);
+  assert.match(renderToStaticMarkup(tree()), /Guardar acuerdo sin enviar/);
   assert.equal(JSON.stringify(actions), originalActions, 'Views must not mutate records');
 } finally { globalThis.fetch = originalFetch; }
 
