@@ -37,6 +37,9 @@ jobs:
       - name: Push sign-in regression tests
         working-directory: opsvista
         run: npm run test:push-mfa
+      - name: Agreement workspace and persistence tests
+        working-directory: opsvista
+        run: npm run test:meeting-agreements
       - name: Build
         working-directory: opsvista
         run: npm run build

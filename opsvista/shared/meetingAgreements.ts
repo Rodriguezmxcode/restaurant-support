@@ -4,6 +4,7 @@ export type MeetingAgreement = {
   kpi: string;
   dataQuality: 'confirmed' | 'estimated' | 'not_recorded';
   nextReview: string;
+  blocked?: boolean;
 };
 export const MEETING_KPIS = [
   ['sales','Sales','Ventas'],['sales_change','Sales change','Variación de ventas'],['guests','Guests','Guests'],['average_ticket','Average ticket','Ticket promedio'],
@@ -44,7 +45,8 @@ export function parseMeetingAgreement(input:unknown):MeetingAgreement {
   if(typeof dataQuality!=='string'||!['confirmed','estimated','not_recorded'].includes(dataQuality))throw new Error('Choose the data validation / Selecciona la validación del dato');
   const nextReview=typeof raw.nextReview==='string'?raw.nextReview.trim():'';
   if(!nextReview||nextReview.length>5000)throw new Error('Enter the next review plan (1–5000 characters) / Registra el seguimiento de la próxima semana');
-  return {weekStart,kpi,dataQuality:dataQuality as MeetingAgreement['dataQuality'],nextReview};
+  if(raw.blocked!==undefined&&typeof raw.blocked!=='boolean')throw new Error('Invalid blocked status');
+  return {weekStart,kpi,dataQuality:dataQuality as MeetingAgreement['dataQuality'],nextReview,...(raw.blocked?{blocked:true}:{})};
 }
 export function matchesMeetingWeek(action:{meeting?:MeetingAgreement;status:string},week:string,includePrior:boolean){
   const start=action.meeting?.weekStart;

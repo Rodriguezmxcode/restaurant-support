@@ -46,7 +46,7 @@ const request = async (method = 'GET', body?: any, user = actor, requestHeaders 
   await notificationPreferencesEndpoint({ method, body, headers: requestHeaders }, res, user); return res;
 };
 const update = (patch: any, user = actor) => store.updateNotificationPreferences(patch, user, ['Orange', 'Avon']);
-let webSends: any[] = [], nativeSends: any[] = [], providerFails = false;
+let webSends: any[] = [], nativeSends: any[] = [], providerFails = false, expoTicket:any = {status:'ok',id:'test-ticket'};
 const originalWeb = webpush.sendNotification, originalFetch = globalThis.fetch;
 webpush.sendNotification = async (subscription: any, payload: any) => {
   if (providerFails) throw { statusCode: 503 };
@@ -55,7 +55,7 @@ webpush.sendNotification = async (subscription: any, payload: any) => {
 globalThis.fetch = (async (url: any, options: any) => {
   assert.equal(String(url), 'https://exp.host/--/api/v2/push/send');
   const messages = JSON.parse(options.body); nativeSends.push(...messages);
-  return new Response(JSON.stringify({ data: messages.map(() => ({ status: 'ok' })) }), { status: 200 });
+  return new Response(JSON.stringify({ data: messages.map(() => expoTicket) }), { status: 200 });
 }) as typeof fetch;
 const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
 const subscription = (id: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${id}`, keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') } });
@@ -160,5 +160,25 @@ test('digest leases prevent concurrent claims and provider failures retry withou
   const pending: any=(await pg.query("select status,accepted_at from opsvista_push_digest where event_key='retry'")).rows[0]; assert.equal(pending.status,'pending'); assert.equal(pending.accepted_at,null);
   providerFails=false; await pg.exec("update opsvista_push_digest set lease_until=null where status='pending'"); await flushPushDigests();
   assert.equal((await pg.query("select status from opsvista_push_digest where event_key='retry'")).rows[0].status,'accepted');
+});
+test('meeting notices require accepted Expo tickets and expose queued push without claiming acceptance', async () => {
+  await update({emailEnabled:false,pushEnabled:true,locations:null,categories:{tasks:'instant'}});
+  providerFails=true; // Ensure only native ticket evidence can count in this test.
+  const action:any={id:'ACT-meeting-error',organizationId:'org-a',location:'Orange',category:'Reunión semanal',ownerId:'owner',ownerName:'Owner',title:'Meeting test',recommendation:'Review result',severity:'Medium',dueAt:'2026-11-10',meeting:{weekStart:'2026-11-04',kpi:'other',dataQuality:'not_recorded',nextReview:'Review next week'}};
+  expoTicket={status:'error',message:'DeviceNotRegistered'};
+  const rejected:any=await dispatchActionPush(action,actor);
+  assert.equal(rejected.pushAccepted,false);assert.equal(rejected.email.accepted,0);
+  assert.equal(Number((await pg.query("select count(*) from opsvista_action_notification_events where action_id='ACT-meeting-error' and status='Push accepted'")).rows[0].count),0);
+  expoTicket={status:'ok'};
+  assert.equal((await dispatchActionPush({...action,id:'ACT-meeting-no-id'},actor)).pushAccepted,false);
+  expoTicket={status:'ok',id:'accepted-meeting-ticket'};
+  const accepted:any=await dispatchActionPush({...action,id:'ACT-meeting-ok'},actor);
+  assert.equal(accepted.pushAccepted,true);
+  assert.equal(Number((await pg.query("select count(*) from opsvista_action_notification_events where action_id='ACT-meeting-ok' and status='Push accepted'")).rows[0].count),1);
+  await update({categories:{tasks:'daily'}});nativeSends=[];webSends=[];
+  const queued:any=await dispatchActionPush({...action,id:'ACT-meeting-queue'},actor);
+  assert.equal(queued.pushAccepted,false);assert.equal(queued.pushQueued,1);assert.equal(nativeSends.length,0);assert.equal(webSends.length,0);
+  assert.equal((await pg.query("select auto_escalate from opsvista_action_notification_state where action_id='ACT-meeting-queue'")).rows[0].auto_escalate,false);
+  providerFails=false;
 });
 test.after(async () => { webpush.sendNotification=originalWeb;globalThis.fetch=originalFetch;await pg.close(); });

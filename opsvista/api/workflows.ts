@@ -115,6 +115,25 @@ async function payments(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTy
  res.setHeader?.('Allow','GET, POST, PUT');return res.status(405).json({error:'Method not allowed'});
 }
 
+
+type MeetingDelivery = {status:'not_requested'|'accepted'|'pending'|'unconfirmed';message:string};
+async function sendMeetingNotice(action:NonNullable<Awaited<ReturnType<typeof getAction>>>,user:NonNullable<ReturnType<typeof readSession>>,requested:boolean):Promise<MeetingDelivery>{
+ if(!requested)return{status:'not_requested',message:'Acuerdo guardado sin enviar mensajes.'};
+ try{
+  const result=await dispatchActionPush(action,user) as {pushAccepted?:boolean;pushQueued?:number;email?:{accepted?:number;queued?:number};warning?:string};
+  if(result.pushAccepted||Number(result.email?.accepted)>0)return{status:'accepted',message:'El proveedor aceptó el aviso al responsable. Esto no confirma que lo haya leído.'};
+  if(Number(result.email?.queued)>0||Number(result.pushQueued)>0)return{status:'pending',message:'Acuerdo guardado. El aviso quedó en cola según las preferencias de correo o resumen push del responsable; todavía no se confirma el envío.'};
+  return{status:'unconfirmed',message:'Acuerdo guardado. No se pudo confirmar la entrega del aviso; revisa el historial antes de volver a enviarlo.'};
+ }catch{return{status:'unconfirmed',message:'Acuerdo guardado. El resultado del aviso no pudo confirmarse; revisa el historial antes de volver a enviarlo.'};}
+}
+function invalidMeetingContent(body:Record<string,unknown>|undefined,partial=false){
+ for(const [key,max] of [['title',240],['signal',5000],['cause',5000],['recommendation',5000],['impact',5000]] as const){
+  if(partial&&!has(body,key))continue;
+  const value=body?.[key];if((value!==undefined&&typeof value!=='string')||text(value).length>max||(key!=='impact'&&!text(value)))return `${key}: ingresa texto válido (máximo ${max} caracteres).`;
+ }
+ return '';
+}
+
 async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnType<typeof readSession>>){
  const access=authorize(user,'actions:read');if(!access.ok)return res.status(access.status).json({error:access.error});
  if(!req.method||req.method==='GET'){
@@ -135,7 +154,9 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   let meeting:MeetingAgreement|undefined;
   if(has(req.body,'meeting')){try{meeting=parseMeetingAgreement(req.body?.meeting);}catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Invalid meeting context'});}
    if(!validMeetingDate(dueAt)||!assignee)return res.status(400).json({error:'Meeting agreements require an owner and deadline / El acuerdo necesita responsable y fecha compromiso'});}
+  if(meeting){if(text(req.body?.automationKey)||req.body?.automated===true)return res.status(400).json({error:'Meeting agreements cannot reuse automated source actions'});const invalid=invalidMeetingContent(req.body);if(invalid)return res.status(400).json({error:invalid});if(has(req.body,'notifyOwner')&&typeof req.body?.notifyOwner!=='boolean')return res.status(400).json({error:'notifyOwner must be true or false'});}
   const action=await createAction({location,category,title,severity,signal,cause,recommendation,impact:impact||'Operational impact pending measurement',ownerId:assignee?.id,ownerName:assignee?.name,accountableName:text(req.body?.accountableName)||undefined,accountableRole:text(req.body?.accountableRole)||undefined,dueAt:dueAt||undefined,automationKey:text(req.body?.automationKey)||undefined,automated:Boolean(req.body?.automated),priorityScore,sources:stringList(req.body?.sources),sourceIds:stringList(req.body?.sourceIds),sourceUrl,meeting,detectedAt:text(req.body?.detectedAt)||undefined},user);
+  if(action?.meeting)return res.status(201).json({action,notificationDelivery:await sendMeetingNotice(action,user,req.body?.notifyOwner===true)});
   const notification=action&&assignee?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
   if(action&&assignee)await notifyActionObservers(action,user,'assigned');
   return res.status(201).json({action,notification});
@@ -157,7 +178,22 @@ async function actions(req:ApiRequest,res:ApiResponse,user:NonNullable<ReturnTyp
   if(has(req.body,'meeting')){try{meeting=parseMeetingAgreement(req.body?.meeting);}catch(error){return res.status(400).json({error:error instanceof Error?error.message:'Invalid meeting context'});}
    if(existing.meeting&&existing.meeting.weekStart!==meeting.weekStart)return res.status(400).json({error:'The original meeting week is preserved / Se conserva la semana original del acuerdo'});}
   if(existing.meeting||meeting){const deadline=has(req.body,'dueAt')?text(req.body?.dueAt):existing.dueAt;if(!assignee||!deadline||!validMeetingDate(deadline))return res.status(400).json({error:'Meeting agreements require an owner and deadline / El acuerdo necesita responsable y fecha compromiso'});}
-  const action=await updateActionRecord(id,{...(meeting?{meeting}:{}),...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user);
+  const agreement=Boolean(existing.meeting||meeting);
+  if(agreement){const invalid=invalidMeetingContent(req.body,true);if(invalid)return res.status(400).json({error:invalid});if(has(req.body,'notifyOwner')&&typeof req.body?.notifyOwner!=='boolean')return res.status(400).json({error:'notifyOwner must be true or false'});}
+  if(agreement){
+   if(has(req.body,'verificationNote')&&(typeof req.body?.verificationNote!=='string'||text(req.body?.verificationNote).length>5000))return res.status(400).json({error:'Resultado / evidencia: máximo 5000 caracteres.'});
+   if(status==='Completed'){
+    const verify=authorize(user,'actions:verify',existing.location);if(!verify.ok)return res.status(verify.status).json({error:verify.error});
+    const outcome=has(req.body,'verificationNote')?text(req.body?.verificationNote):text(existing.verificationNote);
+    if(!outcome||outcome.length>5000)return res.status(400).json({error:'Registra el resultado o la evidencia antes de completar el acuerdo (máximo 5000 caracteres).'});
+   }
+  }
+  const expectedUpdatedAt=agreement&&has(req.body,'expectedUpdatedAt')?text(req.body?.expectedUpdatedAt):undefined;
+  if(expectedUpdatedAt!==undefined&&(!expectedUpdatedAt||!Number.isFinite(Date.parse(expectedUpdatedAt))))return res.status(400).json({error:'Invalid agreement revision'});
+  const content=agreement?Object.fromEntries(['title','signal','cause','recommendation','impact'].filter(key=>has(req.body,key)).map(key=>[key,text(req.body?.[key])])):{};
+  let action;
+  try{action=await updateActionRecord(id,{...content,...(meeting?{meeting}:{}),...(status?{status}:{}),...(has(req.body,'ownerId')?{ownerId:assignee?.id,ownerName:assignee?.name}:{}),...(has(req.body,'dueAt')?{dueAt:text(req.body?.dueAt)||undefined}:{}),...(has(req.body,'sourceUrl')?{sourceUrl:safeActionSourceUrl(text(req.body?.sourceUrl))}:{}),...(verificationStatus?{verificationStatus}:{}),...(has(req.body,'verificationNote')?{verificationNote:text(req.body?.verificationNote)||undefined}:{}),...(has(req.body,'verifiedAt')?{verifiedAt:text(req.body?.verifiedAt)||undefined}:{})},text(req.body?.reason)||'Action updated',user,expectedUpdatedAt);}catch(error){if((error as {status?:number}).status===409)return res.status(409).json({error:(error as Error).message});throw error;}
+  if(action?.meeting)return res.status(200).json({action,notificationDelivery:await sendMeetingNotice(action,user,req.body?.notifyOwner===true)});
   const ownerChanged=has(req.body,'ownerId')&&Boolean(action?.ownerId)&&(action?.ownerId!==existing.ownerId||Boolean(req.body?.resendNotification));
   const notification=action&&ownerChanged?await dispatchActionPush(action,user,Math.max(5,Number(req.body?.acceptWithinMinutes)||30)):undefined;
   if(action&&ownerChanged)await notifyActionObservers(action,user,'assigned');

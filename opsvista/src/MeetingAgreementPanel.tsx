@@ -17,12 +17,16 @@ export default function MeetingAgreementPanel({meeting,canEdit,busy,onSave}:{mee
 export function MeetingAuditDetail({value}:{value?:string}) {
  const {t,locale}=useI18n();
  if(!value)return null;
- let entry:{meeting?:MeetingAgreement;ownerName?:string;dueAt?:string;verificationNote?:string;status?:string};
+ let entry:{meeting?:MeetingAgreement;ownerName?:string;dueAt?:string;verificationNote?:string;status?:string;title?:string;cause?:string;recommendation?:string};
  try{entry=JSON.parse(value);}catch{return null;}
  if(!entry.meeting)return null;
  const kpi=MEETING_KPIS.find(item=>item[0]===entry.meeting?.kpi);
  return <details className="meeting-audit-detail"><summary>{t('Recorded follow-up','Seguimiento registrado')}</summary><dl>
-  <dt>{t('Original week','Semana original')}</dt><dd>{meetingWeekLabel(entry.meeting.weekStart,locale)}</dd>
+  {entry.title&&<><dt>{t('Agreement','Acuerdo')}</dt><dd>{entry.title}</dd></>}
+ {entry.cause&&<><dt>{t('Cause','Causa')}</dt><dd>{entry.cause}</dd></>}
+ {entry.recommendation&&<><dt>{t('Corrective action','Acción correctiva')}</dt><dd>{entry.recommendation}</dd></>}
+ {entry.status&&<><dt>{t('Status','Estado')}</dt><dd>{entry.status==='Completed'?t('Completed','Completado'):entry.status==='Dismissed'?t('Archived','Archivado'):entry.meeting.blocked?t('Blocked','Bloqueado'):entry.status==='Investigating'?t('In progress','En curso'):t('Pending','Pendiente')}</dd></>}
+ <dt>{t('Original week','Semana original')}</dt><dd>{meetingWeekLabel(entry.meeting.weekStart,locale)}</dd>
   <dt>{t('KPI','KPI')}</dt><dd>{kpi?t(kpi[1],kpi[2]):entry.meeting.kpi}</dd>
   <dt>{t('Reported data','Dato reportado')}</dt><dd>{entry.meeting.dataQuality==='confirmed'?t('Confirmed by user','Confirmado por el usuario'):entry.meeting.dataQuality==='estimated'?t('Estimated','Estimado'):t('No figure recorded','Sin cifra registrada')}</dd>
   {entry.ownerName&&<><dt>{t('Owner','Responsable')}</dt><dd>{entry.ownerName}</dd></>}
