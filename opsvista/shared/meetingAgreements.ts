@@ -4,12 +4,13 @@ export type MeetingAgreement = {
   kpi: string;
   dataQuality: 'confirmed' | 'estimated' | 'not_recorded';
   nextReview: string;
+  startAt?: string;
 };
 export const MEETING_KPIS = [
-  ['sales','Sales','Ventas'],['sales_change','Sales change','Variación de ventas'],['guests','Guests','Guests'],['average_ticket','Average ticket','Ticket promedio'],
-  ['discounts','Discounts','Descuentos'],['voids','Voids','Voids'],['labor','Labor','Labor'],['overtime','Overtime','Overtime'],['bonus','Bonus','Bono'],
-  ['service','Service times','Tiempos de servicio'],['staffing','Staffing','Staffing'],['maintenance','Maintenance','Mantenimiento'],
-  ['food','Food purchases','Compras de comida'],['liquor','Liquor purchases','Compras de licor'],['marketing','Marketing','Marketing'],['schedule','Schedules','Horarios'],['tasks','Tasks','Tareas'],['other','Other','Otro'],
+  ['sales','Net sales','Ventas netas'],['orders','Orders','Órdenes'],['sales_change','Change vs. previous week','Cambio vs. semana anterior'],['guests','Guests','Guests'],['average_ticket','Average ticket','Ticket promedio'],
+  ['discounts','Discounts','Descuentos'],['voids','Voids','Voids'],['labor','Total labor','Labor total'],['overtime','Overtime','Overtime'],['overtime_cost','Overtime cost','Costo de overtime'],['bonus','Bonus','Bono'],['bonus_rank','Bonus ranking','Ranking del bono'],['bonus_points','Bonus points','Puntos del bono'],
+  ['service','Service times','Tiempo de servicio'],['staffing','Open positions','Vacantes por cubrir'],['maintenance','Maintenance','Mantenimiento'],
+  ['food','Food purchases','Compras de comida'],['liquor','Liquor purchases','Compras de licor'],['marketing','Marketing investment','Inversión en marketing'],['schedule','Schedule coverage','Cobertura de horarios'],['tasks','Task completion','Cumplimiento de tareas'],['other','Other','Otro'],
 ] as const;
 export function validMeetingDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -43,8 +44,10 @@ export function parseMeetingAgreement(input:unknown):MeetingAgreement {
   const dataQuality=raw.dataQuality;
   if(typeof dataQuality!=='string'||!['confirmed','estimated','not_recorded'].includes(dataQuality))throw new Error('Choose the data validation / Selecciona la validación del dato');
   const nextReview=typeof raw.nextReview==='string'?raw.nextReview.trim():'';
-  if(!nextReview||nextReview.length>5000)throw new Error('Enter the next review plan (1–5000 characters) / Registra el seguimiento de la próxima semana');
-  return {weekStart,kpi,dataQuality:dataQuality as MeetingAgreement['dataQuality'],nextReview};
+  if(nextReview.length>5000)throw new Error('Review plan is too long / El seguimiento admite hasta 5000 caracteres');
+  const startAt=typeof raw.startAt==='string'?raw.startAt.trim():'';
+  if(raw.startAt!==undefined&&!validMeetingDate(startAt))throw new Error('Choose a valid start date / Selecciona una fecha de inicio válida');
+  return {weekStart,kpi,dataQuality:dataQuality as MeetingAgreement['dataQuality'],nextReview,...(startAt?{startAt}:{})};
 }
 export function matchesMeetingWeek(action:{meeting?:MeetingAgreement;status:string},week:string,includePrior:boolean){
   const start=action.meeting?.weekStart;

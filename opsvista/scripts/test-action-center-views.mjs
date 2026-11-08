@@ -161,6 +161,8 @@ try {
   start({2:weekly,24:'2026-11-04'});
   tab('meetings').props.onClick();
   assert.deepEqual(rows(), ['current','previous-open','current-closed']);
+  assert.match(renderToStaticMarkup(tree()),/Guardar y enviar al responsable/);
+  assert.match(renderToStaticMarkup(tree()),/Descartar/);
   const weeklyMarkup = renderToStaticMarkup(tree());
   assert.match(weeklyMarkup, /Acuerdos de reunión/);
   assert.match(weeklyMarkup, /Incluir pendientes/);
@@ -172,6 +174,9 @@ try {
   nodes(tree(), node => node.type==='button' && node.props?.children==='+ Nuevo acuerdo')[0].props.onClick();
   assert.equal(seed[17],true);assert.equal(seed[26],true);assert.equal(seed[27].weekStart,'2026-11-04');
   assert.match(renderToStaticMarkup(tree()), /Guardar acuerdo y avisar al responsable/);
+  const Board=load(resolve(root,'src/ActionBoard.tsx')).default;
+  const boardMarkup=renderToStaticMarkup(React.createElement(Board,{actions:weekly,today:'2026-11-08',onSelect(){}}));
+  for(const label of ['Pendiente','En progreso','Completado','Abrir seguimiento'])assert.ok(boardMarkup.includes(label),label);
   assert.equal(JSON.stringify(actions), originalActions, 'Views must not mutate records');
 } finally { globalThis.fetch = originalFetch; }
 
