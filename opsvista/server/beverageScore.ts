@@ -18,10 +18,10 @@ export function visibleBeverageScore(score: BeverageScoreResponse, user: Session
 
 // The scorecard reads persisted snapshots only. Source workers fetch new data.
 export async function getBeverageScore(organizationId: string, start: string, end: string): Promise<BeverageScoreResponse> {
-  const correction = reportedBeverageCorrection(organizationId, start, end);
-  if (correction) return correction;
   const approved = await getApprovedBeverageCut(organizationId, start, end);
   if (approved) return approved;
+  const correction = reportedBeverageCorrection(organizationId, start, end);
+  if (correction) return correction;
   const chunks = beverageChunks(start, end);
   const params = beverageLocations.flatMap(location => chunks.map(chunk => ({ location, ...chunk })));
   const [salesJobs, purchaseJobs] = await Promise.all([

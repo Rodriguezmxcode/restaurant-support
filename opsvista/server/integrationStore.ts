@@ -95,6 +95,19 @@ export async function getIntegrationSnapshot<T>(organizationId:string,provider:s
   return {payload:payload as T,updatedAt:new Date(row.updated_at as string|number|Date).toISOString()};
 }
 
+// Approved reporting cuts use their real reporting end, not the selected UI week.
+export async function getLatestIntegrationSnapshot<T>(organizationId: string, provider: string): Promise<{ payload: T; updatedAt: string } | null> {
+  if (!databaseUrl()) return null;
+  await ensureSchema();
+  const rows = await sql()`select payload,updated_at from opsvista_integration_snapshots
+    where organization_id=${organizationId} and provider=${provider}
+    order by payload->>'reportEnd' desc nulls last, updated_at desc limit 1`;
+  const row = rows[0];
+  if (!row) return null;
+  return { payload: (typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload) as T,
+    updatedAt: new Date(row.updated_at as string | number | Date).toISOString() };
+}
+
 export async function saveIntegrationSnapshot<T>(organizationId:string,provider:string,snapshotKey:string,payload:T) {
   if (!databaseUrl()) return;
   await ensureSchema();

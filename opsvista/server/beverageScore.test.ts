@@ -270,19 +270,26 @@ test('approved private cuts persist once and survive removal of deployment seed'
   approvedBeverageSeeds.push(cut);
   try {
     assert.equal(approvedCutScore(cut, 'other-tenant', '2026-09-17', '2026-11-11'), undefined);
-    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-16', '2026-11-10'), undefined);
-    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-24', '2026-11-18'), undefined);
+    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-16', '2026-11-10')?.reportingPeriod?.end, '2026-11-11');
+    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-24', '2026-11-18')?.rows.length, 6);
     assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-12', '2026-11-11'), undefined);
     const first = await getApprovedBeverageCut(cut.organizationId, '2026-09-17', '2026-11-11');
     assert.deepEqual(first?.rows.map(r => r.points), [5, 4, 3, 2, 1, 0]);
     approvedBeverageSeeds.splice(approvedBeverageSeeds.indexOf(cut), 1);
     const later = await getApprovedBeverageCut(cut.organizationId, '2026-09-23', '2026-11-17');
     assert.deepEqual(later?.rows, first?.rows);
+    const closed = await getBeverageScore(cut.organizationId, '2026-09-16', '2026-11-10');
+    assert.deepEqual(closed.rows, first?.rows);
+    assert.equal(closed.reportingPeriod?.end, '2026-11-11');
+    assert.equal(closed.end, '2026-11-10');
+    const { saveIntegrationSnapshot } = await import('./integrationStore.js');
+    await saveIntegrationSnapshot(cut.organizationId, 'bonus-beverage-approved', 'older', { ...cut, reportEnd: '2026-11-03' });
+    assert.deepEqual((await getBeverageScore(cut.organizationId, '2026-09-16', '2026-11-10')).rows, first?.rows);
     const again = await getBeverageScore(cut.organizationId, '2026-09-17', '2026-11-11');
     assert.deepEqual(again.rows, first?.rows);
     assert.equal(again.reportingPeriod?.start, '2026-09-12');
     const records = await pg.query('select * from opsvista_integration_snapshots where organization_id=$1 and provider=$2', [cut.organizationId, 'bonus-beverage-approved']);
-    assert.equal(records.rows.length, 1);
+    assert.equal(records.rows.length, 2);
     assert.throws(() => approvedCutScore({ ...cut, rows: cut.rows.slice(1) }, cut.organizationId, '2026-09-17', '2026-11-11'));
   } finally {
     const index = approvedBeverageSeeds.indexOf(cut);
