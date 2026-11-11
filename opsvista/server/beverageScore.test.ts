@@ -261,3 +261,31 @@ test('Nov 3 approved cut counts each restaurant once, uses matching dates and pr
   const prior = await getBeverageScore('org-puerto-vallarta', '2026-09-02', '2026-10-27');
   assert.equal(prior.rows.reduce((n, row) => n + Math.round(row.purchases! * 100), 0), 13247000);
 });
+
+test('approved private cuts persist once and survive removal of deployment seed', async () => {
+  const { approvedBeverageSeeds } = await import('./approvedBeverageSeeds.js');
+  const { getApprovedBeverageCut, approvedCutScore } = await import('./approvedBeverageCuts.js');
+  const cut = { organizationId: 'synthetic-approved', weekStart: '2026-11-11', reportStart: '2026-09-12', reportEnd: '2026-11-11',
+    rows: beverageLocations.map((location, index) => ({ location, salesCents: 100000, purchasesCents: (index + 1) * 1000 })) };
+  approvedBeverageSeeds.push(cut);
+  try {
+    assert.equal(approvedCutScore(cut, 'other-tenant', '2026-09-17', '2026-11-11'), undefined);
+    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-16', '2026-11-10'), undefined);
+    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-24', '2026-11-18'), undefined);
+    assert.equal(approvedCutScore(cut, cut.organizationId, '2026-09-12', '2026-11-11'), undefined);
+    const first = await getApprovedBeverageCut(cut.organizationId, '2026-09-17', '2026-11-11');
+    assert.deepEqual(first?.rows.map(r => r.points), [5, 4, 3, 2, 1, 0]);
+    approvedBeverageSeeds.splice(approvedBeverageSeeds.indexOf(cut), 1);
+    const later = await getApprovedBeverageCut(cut.organizationId, '2026-09-23', '2026-11-17');
+    assert.deepEqual(later?.rows, first?.rows);
+    const again = await getBeverageScore(cut.organizationId, '2026-09-17', '2026-11-11');
+    assert.deepEqual(again.rows, first?.rows);
+    assert.equal(again.reportingPeriod?.start, '2026-09-12');
+    const records = await pg.query('select * from opsvista_integration_snapshots where organization_id=$1 and provider=$2', [cut.organizationId, 'bonus-beverage-approved']);
+    assert.equal(records.rows.length, 1);
+    assert.throws(() => approvedCutScore({ ...cut, rows: cut.rows.slice(1) }, cut.organizationId, '2026-09-17', '2026-11-11'));
+  } finally {
+    const index = approvedBeverageSeeds.indexOf(cut);
+    if (index >= 0) approvedBeverageSeeds.splice(index, 1);
+  }
+});
