@@ -100,7 +100,7 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
     await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{recoveryV2}','true'::jsonb) where organization_id=${org} and state='error' and view_name in ('TransactionDetail','Item','SalesDetail') and coalesce(cursor->>'recoveryV2','')<>'true'`;
     // One complete page per request. Checkpoints and raw rows commit together.
     const candidates=await db()`select * from opsvista_r365_archive_views where organization_id=${org} and state<>'complete' and next_attempt<=now() order by case when state='pending' then 0 else 1 end,coalesce(updated_at,'1970-01-01'::timestamptz),view_name`;
-    const chosen=candidates.sort((a,b)=>{const rank=(name:string)=>{const n=priority.indexOf(name);return n<0?999:n;};return (a.updated_at?1:0)-(b.updated_at?1:0)||rank(a.view_name)-rank(b.view_name);})[0];
+    const chosen=candidates.sort((a,b)=>{const rank=(name:string)=>{const n=priority.indexOf(name);return n<0?999:n;};return (a.updated_at?1:0)-(b.updated_at?1:0)||(a.updated_at&&b.updated_at?new Date(a.updated_at).getTime()-new Date(b.updated_at).getTime():0)||rank(a.view_name)-rank(b.view_name);})[0];
     if(chosen){
       current=chosen.view_name;const view=chosen.definition as ArchiveView;let cursor=chosen.cursor as Cursor;
       if(view.daily&&!cursor.day){
