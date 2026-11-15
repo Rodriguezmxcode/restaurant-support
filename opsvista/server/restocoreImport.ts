@@ -62,9 +62,20 @@ export function advanceArchiveCursor(view:ArchiveView,cursor:Cursor,rows:Row[]){
   const signature=createHash('sha256').update(JSON.stringify(rows.map(row=>archiveRecord(view,row).source_id))).digest('hex');
   if(rows.length&&cursor.lastPage===signature)throw new Error(`${view.name}: Restaurant365 repitió una página; la carga no se marca completa.`);
   // Stop only on an empty page; some providers cap page sizes below $top.
-  if(rows.length){next.offset+=rows.length;next.lastPage=signature;return {cursor:next,complete:false};}
+  if(rows.length){next.offset+=rows.length;next.lastPage=signature;if(rows.length===cursor.pageSize)next.pageSize=Math.min(500,cursor.pageSize*2);return {cursor:next,complete:false};}
   if(view.daily&&cursor.day&&cursor.until&&dayAfter(cursor.day)<cursor.until){next.day=dayAfter(cursor.day);next.offset=0;delete next.lastPage;return {cursor:next,complete:false};}
   return {cursor:next,complete:true};
+}
+function diagnostic(message:string|null){
+  if(!message)return '';
+  const http=/HTTP \d{3}/.exec(message);if(http)return http[0];
+  if(/timeout|aborted/i.test(message))return 'timeout';
+  if(/identificadores repetidos/.test(message))return 'duplicate_source_keys';
+  if(/no tiene su identificador/.test(message))return 'missing_source_key';
+  if(/repitió una página/.test(message))return 'repeated_source_page';
+  if(/fecha|histórico/.test(message))return 'history_date_unavailable';
+  if(/respuesta|lista/.test(message))return 'invalid_source_response';
+  return 'import_error';
 }
 async function ensureViews(org:string){
   const [existing]=await db()`select count(*)::int as n from opsvista_r365_archive_views where organization_id=${org}`;
@@ -122,6 +133,8 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
   }finally{await db()`delete from opsvista_r365_archive_leases where organization_id=${org} and token=${token}`;}
   const views=await archiveSummary(org);
   const [pending]=await db()`select count(*)::int as n from opsvista_r365_archive_views where organization_id=${org} and state<>'complete' and next_attempt<=now()`;
+  // Operational telemetry contains no business rows or credentials.
+  console.info('restocore-import-progress',JSON.stringify({records:views.reduce((sum,v)=>sum+v.records,0),views:views.map(v=>({name:v.name,state:v.state,records:v.records,errorCode:diagnostic(v.error)}))}));
   // Only progress metadata is returned to the scheduler, never business records.
   return {ok:!views.some(v=>v.state==='error'),processed,remaining:pending.n,errors:views.filter(v=>v.state==='error').length,records:views.reduce((sum,v)=>sum+v.records,0),completedViews:views.filter(v=>v.state==='complete').length,totalViews:views.length,views:views.map(v=>({name:v.name,state:v.state,records:v.records,error:v.error}))};
 }
