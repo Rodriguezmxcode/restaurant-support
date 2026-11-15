@@ -41,16 +41,17 @@ export function field(row:Row,...names:string[]){for(const name of names){const 
 export function archiveRecord(view:ArchiveView,row:Row){
   // Retain every declared key and the line's parent identifiers. An auto ID
   // alone can repeat across transactions or locations in the live source.
-  const keys=view.name==='TransactionDetail'?[...new Set([...view.keys,...['transactionDetailAutoId','transactionId','locationId'].filter(key=>field(row,key))])]:view.keys;
+  const keys=view.name==='TransactionDetail'?[...new Set([...view.keys,...['transactionDetailAutoId','transactionId','locationId','glAccountId','itemId'].filter(key=>field(row,key))])]:view.keys;
   const values=keys.map(k=>field(row,k));
   if(values.some(v=>!v))throw new Error(`${view.name}: un registro no tiene su identificador original; se conserva el punto de carga.`);
-  const source_id=JSON.stringify(values);
+  const source_id=JSON.stringify(view.name==='TransactionDetail'?keys.map((key,index)=>[key.toLowerCase(),values[index]]):values);
   const date=field(row,'date','dateWorked','businessDate','salesDate','modifiedOn','createdOn','deletedOn');
   return {source_id,payload:row,location_id:field(row,'locationId','location_Id','primaryLocation_id','location'),record_date:/^\d{4}-\d{2}-\d{2}/.test(date)?date.slice(0,10):'',record_type:field(row,'type','glType','category1'),label:field(row,'name','fullName','labor','comment','itemNumber','transactionNumber')};
 }
 function dayAfter(day:string){return new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10);}
 export function archiveQuery(view:ArchiveView,cursor:Cursor){
-  const params:Record<string,string>={'$top':String(cursor.pageSize),'$skip':String(cursor.offset),'$orderby':view.keys.join(',')};
+  const ordering=view.name==='TransactionDetail'?[...new Set([...view.keys,...view.fields.filter(key=>/^(transactionDetailAutoId|transactionId|locationId|glAccountId|itemId)$/i.test(key))])]:view.keys;
+  const params:Record<string,string>={'$top':String(cursor.pageSize),'$skip':String(cursor.offset),'$orderby':ordering.join(',')};
   if(view.daily){
     const dateField=view.fields.find(f=>f.toLowerCase()==='modifiedon');
     if(!dateField||!cursor.day||!cursor.until)throw new Error(`${view.name}: rango histórico aún sin verificar.`);
@@ -98,6 +99,7 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
     await ensureViews(org);
     // One-time recovery for the corrected composite line identity and longer source timeout.
     await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{recoveryV2}','true'::jsonb) where organization_id=${org} and state='error' and view_name in ('TransactionDetail','Item','SalesDetail') and coalesce(cursor->>'recoveryV2','')<>'true'`;
+    await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{lineIdentityV3}','true'::jsonb) where organization_id=${org} and state='error' and view_name='TransactionDetail' and coalesce(cursor->>'lineIdentityV3','')<>'true'`;
     // One complete page per request. Checkpoints and raw rows commit together.
     const candidates=await db()`select * from opsvista_r365_archive_views where organization_id=${org} and state<>'complete' and next_attempt<=now() order by case when state='pending' then 0 else 1 end,coalesce(updated_at,'1970-01-01'::timestamptz),view_name`;
     const chosen=candidates.sort((a,b)=>{const rank=(name:string)=>{const n=priority.indexOf(name);return n<0?999:n;};return (a.updated_at?1:0)-(b.updated_at?1:0)||(a.updated_at&&b.updated_at?new Date(a.updated_at).getTime()-new Date(b.updated_at).getTime():0)||rank(a.view_name)-rank(b.view_name);})[0];
