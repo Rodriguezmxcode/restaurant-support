@@ -9,11 +9,11 @@ on:
 permissions:
   id-token: write
   contents: read
-concurrency:
-  group: opsvista-source-sync
-  cancel-in-progress: false
 jobs:
   sync:
+    concurrency:
+      group: opsvista-source-sync
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 28
     steps:
@@ -47,6 +47,9 @@ jobs:
           JS
 
   restocore_import:
+    concurrency:
+      group: restocore-history-import
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 28
     steps:
@@ -56,7 +59,7 @@ jobs:
           node --input-type=module <<'JS'
           // Existing workflow identity; no credentials or source records leave the server.
           const deadline = Date.now() + 25 * 60 * 1000;
-          const maxPasses = process.env.GITHUB_EVENT_NAME === 'push' ? 30 : 900;
+          const maxPasses = 900;
           let result;
           for (let pass = 0; pass < maxPasses && Date.now() < deadline; pass++) {
             const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
