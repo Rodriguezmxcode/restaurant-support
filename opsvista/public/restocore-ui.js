@@ -66,7 +66,7 @@ for(const sel of ['rc-location','rc-bank-loc']){document.getElementById(sel).inn
 document.getElementById('rc-vendor').innerHTML='<option value="">Todos los proveedores</option>'+[...new Set(RD.invoices.map(i=>i.vendor))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
 for(const id of ['rc-location','rc-vendor','rc-search','rc-status','rc-sort','rc-bank-loc','rc-bank-kind','rc-bank-query'])document.getElementById(id).addEventListener('input',rcRender);
 document.querySelectorAll('[data-rc-view]').forEach(b=>b.onclick=()=>{rcView=b.dataset.rcView;rcRender();});
-document.getElementById('rc-export').onclick=()=>downloadJSON({app:'RestoCore',exportedAt:new Date().toISOString(),data:RD,opsvistaCache:ovCache,historical:RH,tracking:RS},'RestoCore_respaldo.json');
+document.getElementById('rc-export').onclick=()=>downloadJSON({app:'RestoCore',exportedAt:new Date().toISOString(),data:RD,opsvistaCache:ovCache,historical:RH,tracking:RS,paymentRuns:typeof rcRuns==='undefined'?[]:rcRuns},'RestoCore_respaldo.json');
 
 function rcSetSource(mode){
  RD=ovData;

@@ -29,8 +29,11 @@ let debounce;
 for (const id of ['rc-ov-start', 'rc-ov-end']) el(id).addEventListener('change', () => { clearTimeout(debounce); debounce = setTimeout(refresh, 60); });
 el('rc-connect').addEventListener('click', refresh);
 el('rc-retry').addEventListener('click', refresh);
-const interval = setInterval(() => { if (!document.hidden) void refresh(); }, 5 * 60000);
+let interval;
+function startTimer() { clearInterval(interval); interval = setInterval(() => { if (!document.hidden) void refresh(); }, 5 * 60000); }
+startTimer();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
 window.addEventListener('focus', () => { if (!document.hidden) void refresh(); });
 window.addEventListener('pagehide', () => { clearInterval(interval); sync.cancel(); });
+window.addEventListener('pageshow', event => { if (event.persisted) { startTimer(); void refresh(); } });
 void refresh();
