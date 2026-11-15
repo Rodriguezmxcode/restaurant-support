@@ -50,7 +50,8 @@ export function archiveRecord(view:ArchiveView,row:Row){
 }
 function dayAfter(day:string){return new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10);}
 export function archiveQuery(view:ArchiveView,cursor:Cursor){
-  const ordering=view.name==='TransactionDetail'?[...new Set([...view.keys,...view.fields.filter(key=>/^(transactionDetailAutoId|transactionId|locationId|glAccountId|itemId)$/i.test(key))])]:view.keys;
+  // The live detail endpoint rejects ordering by nullable joined identifiers.
+  const ordering=view.keys;
   const params:Record<string,string>={'$top':String(cursor.pageSize),'$skip':String(cursor.offset),'$orderby':ordering.join(',')};
   if(view.daily){
     const dateField=view.fields.find(f=>f.toLowerCase()==='modifiedon');
@@ -99,7 +100,7 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
     await ensureViews(org);
     // One-time recovery for the corrected composite line identity and longer source timeout.
     await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{recoveryV2}','true'::jsonb) where organization_id=${org} and state='error' and view_name in ('TransactionDetail','Item','SalesDetail') and coalesce(cursor->>'recoveryV2','')<>'true'`;
-    await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{lineIdentityV3}','true'::jsonb) where organization_id=${org} and state='error' and view_name='TransactionDetail' and coalesce(cursor->>'lineIdentityV3','')<>'true'`;
+    await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{lineIdentityV4}','true'::jsonb) where organization_id=${org} and state='error' and view_name='TransactionDetail' and coalesce(cursor->>'lineIdentityV4','')<>'true'`;
     // One complete page per request. Checkpoints and raw rows commit together.
     const candidates=await db()`select * from opsvista_r365_archive_views where organization_id=${org} and state<>'complete' and next_attempt<=now() order by case when state='pending' then 0 else 1 end,coalesce(updated_at,'1970-01-01'::timestamptz),view_name`;
     const chosen=candidates.sort((a,b)=>{const rank=(name:string)=>{const n=priority.indexOf(name);return n<0?999:n;};return (a.updated_at?1:0)-(b.updated_at?1:0)||(a.updated_at&&b.updated_at?new Date(a.updated_at).getTime()-new Date(b.updated_at).getTime():0)||rank(a.view_name)-rank(b.view_name);})[0];
