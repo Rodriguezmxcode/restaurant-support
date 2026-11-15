@@ -45,3 +45,40 @@ jobs:
           }
           if (failed) throw new Error('Some sources could not be refreshed; saved data was retained for the next retry');
           JS
+
+  restocore_import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - name: Import Restaurant365 history into RestoCore
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          // Existing workflow identity; no credentials or source records leave the server.
+          const deadline = Date.now() + 25 * 60 * 1000;
+          const maxPasses = process.env.GITHUB_EVENT_NAME === 'push' ? 30 : 900;
+          let result;
+          for (let pass = 0; pass < maxPasses && Date.now() < deadline; pass++) {
+            const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            tokenUrl.searchParams.set('audience', 'opsvista-source-sync');
+            const identity = await fetch(tokenUrl, { headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` } });
+            if (!identity.ok) throw new Error(`Identity request failed: ${identity.status}`);
+            const { value: token } = await identity.json();
+            if (!token) throw new Error('Missing workflow identity');
+            console.log(`::add-mask::${token}`);
+            const response = await fetch('https://restaurant-support.vercel.app/api/restaurant365?view=restocore-sync', {
+              method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(125000),
+            });
+            if (!response.ok) throw new Error(`RestoCore import failed: HTTP ${response.status}`);
+            result = await response.json();
+            if (!Number.isInteger(result.remaining)) throw new Error('Invalid import response');
+            console.log(`Import batch ${pass + 1}: processed=${result.processed || 0}; completed=${result.completedViews || 0}/${result.totalViews || 0}; saved=${result.records || 0}; errors=${result.errors || 0}`);
+            if (result.busy || !result.remaining) break;
+          }
+          for (const view of result?.views || []) {
+            const code = /HTTP \d{3}/.exec(view.error || '')?.[0] || (view.error ? 'source validation pending' : '');
+            console.log(`Import status: ${view.name}; ${view.state}; saved=${view.records}; ${code}`);
+          }
+          if (result?.remaining) console.log('History import checkpoint saved; next cycle resumes automatically.');
+          if (result?.errors) throw new Error('Some source tables need a retry; saved records and checkpoints are retained.');
+          JS
