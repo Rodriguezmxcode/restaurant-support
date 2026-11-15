@@ -1,4 +1,6 @@
 import { collectInvoices } from './pv-control-sync.js';
+import { mountCalendar } from './pv-control-calendar.js';
+import { formatUSDate } from './pv-control-date.js';
 const el = id => document.getElementById(id);
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 let locations = [], batch = null;
@@ -19,13 +21,14 @@ if (window.opener && /^[a-f0-9]{32}$/.test(connectionChannel || '')) {
     };
     localPort.start();
     const dates = event.data.dates;
-    if (dates && /^\d{4}-\d{2}-\d{2}$/.test(dates.start) && /^\d{4}-\d{2}-\d{2}$/.test(dates.end)) { el('start').value = dates.start; el('end').value = dates.end; }
+    if (dates && /^\d{4}-\d{2}-\d{2}$/.test(dates.start) && /^\d{4}-\d{2}-\d{2}$/.test(dates.end)) { el('start').value = dates.start; el('end').value = dates.end; syncCalendarLabel(); }
     el('local-transfer').hidden = false;
   });
   window.opener.postMessage({ type: 'pv-control-ready', channel: connectionChannel }, '*');
 }
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 el('start').value = today.slice(0, 8) + '01'; el('end').value = today;
+const syncCalendarLabel = mountCalendar();
 
 function status(message, kind = '') { el('status').textContent = message; el('status').className = kind; }
 function lock(message) {
@@ -68,7 +71,7 @@ async function connect() {
   finally { el('retry').disabled = false; }
 }
 function invoiceCells(row) {
-  return [row.transaction_date, locations.find(loc => loc.id === row.location_id)?.name || row.location_id, row.vendor_name, row.number, currency.format(row.amount), row.lane === 'receiving' ? 'Recepción' : 'Proveedor'];
+  return [formatUSDate(row.transaction_date), locations.find(loc => loc.id === row.location_id)?.name || row.location_id, row.vendor_name, row.number, currency.format(row.amount), row.lane === 'receiving' ? 'Recepción' : 'Proveedor'];
 }
 function textRow(values) {
   const tr = document.createElement('tr');
@@ -125,13 +128,13 @@ function render() {
   const fragment = document.createDocumentFragment();
   for (const row of rows) {
     const tr = document.createElement('tr');
-    const values = [row.transaction_date, locations.find(location => location.id === row.location_id)?.name || row.location_id, row.vendor_name || 'No disponible', row.number || row.id, row.amount === null ? 'No disponible' : currency.format(row.amount), { approved: 'Aprobada', unapproved: 'Sin aprobar', unknown: 'No disponible' }[row.approval_status] || 'No disponible'];
+    const values = [formatUSDate(row.transaction_date), locations.find(location => location.id === row.location_id)?.name || row.location_id, row.vendor_name || 'No disponible', row.number || row.id, row.amount === null ? 'No disponible' : currency.format(row.amount), { approved: 'Aprobada', unapproved: 'Sin aprobar', unknown: 'No disponible' }[row.approval_status] || 'No disponible'];
     values.forEach((value, index) => { const td = document.createElement('td'); td.textContent = value; if (index === 4) td.className = 'numeric'; tr.append(td); });
     fragment.append(tr);
   }
   if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.className = 'empty'; td.textContent = 'Sin facturas para este período y filtro.'; tr.append(td); fragment.append(tr); }
   el('rows').replaceChildren(fragment);
-  el('freshness').textContent = `${batch.start} a ${batch.end} · Copia de ${new Date(batch.snapshot).toLocaleString('es-MX', { timeZone: 'America/New_York' })} (hora de Connecticut)`;
+  el('freshness').textContent = `${formatUSDate(batch.start)} a ${formatUSDate(batch.end)} · Copia de ${new Date(batch.snapshot).toLocaleString('en-US', { timeZone: 'America/New_York' })} (hora de Connecticut)`;
 }
 el('sync-form').addEventListener('submit', async event => {
   event.preventDefault(); el('sync').disabled = true;
@@ -141,7 +144,7 @@ el('sync-form').addEventListener('submit', async event => {
     if (complete.rows.some(row => !locations.some(location => location.id === row.location_id))) throw new Error('La respuesta contiene una sucursal no reconocida.');
     batch = complete; render();
     el('send-local').disabled = !localPort;
-    el('transfer-status').textContent = `${batch.rows.length} facturas del ${batch.start} al ${batch.end}. El envío incluye todas las sucursales del período, aunque apliques un filtro en la tabla.`;
+    el('transfer-status').textContent = `${batch.rows.length} facturas del ${formatUSDate(batch.start)} al ${formatUSDate(batch.end)}. El envío incluye todas las sucursales del período, aunque apliques un filtro en la tabla.`;
     status(`${batch.rows.length} facturas consultadas.${batch.pending ? ' OpsVista está actualizando esta copia; vuelve a sincronizar más tarde.' : ''}`, 'success');
   } catch (error) { status(`${error.message}${batch ? ' Se conserva la consulta anterior.' : ''}`, 'error'); }
   finally { el('sync').disabled = false; }
@@ -161,3 +164,4 @@ el('send-local').addEventListener('click', async () => {
 });
 window.addEventListener('pageshow', event => { if (event.persisted) { lock('Verifica tu sesión para continuar.'); void connect(); } });
 void connect();
+

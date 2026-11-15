@@ -8,6 +8,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <title>PV Control · OpsVista</title>
   <link rel="stylesheet" href="/pv-control.css">
+  <link rel="stylesheet" href="/pv-control-calendar.css">
 </head>
 <body>
   <header><div class="brand"><span class="mark">PV</span><div><h1>PV Control</h1><span>Conectado con OpsVista</span></div></div><a href="/" target="_blank" rel="noopener">Abrir OpsVista ↗</a></header>
@@ -28,7 +29,7 @@
         <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Proveedor</th><th>Factura</th><th>Importe</th><th>Carril</th><th>Estado</th></tr></thead><tbody id="pv-inbox"></tbody></table></div>
         <p class="note">Esta bandeja conserva las facturas recibidas de PV Control. Su recepción todavía no alimenta el P&amp;L, Price Watch ni los saldos por pagar.</p>
       </section>
-      <form id="sync-form" class="panel filters"><label>Desde<input id="start" type="date" required></label><label>Hasta<input id="end" type="date" required></label><button id="sync" type="submit">Sincronizar OpsVista</button><p class="muted">Hasta 31 días por consulta · seis restaurantes y oficina corporativa</p></form>
+      <form id="sync-form" class="panel filters"><div class="rc-period-field"><label>Período de consulta · mes/día/año</label><input id="start" type="hidden"><input id="end" type="hidden"><button type="button" class="custom-range-trigger" id="rc-period-trigger" aria-haspopup="dialog" aria-expanded="false" aria-controls="rc-calendar"><span>CALENDARIO · MM/DD/YYYY</span><strong id="rc-period-label">Seleccionar período</strong><em aria-hidden="true">▣</em></button></div><button id="sync" type="submit">Sincronizar OpsVista</button><p class="muted">Hasta 31 días por consulta · seis restaurantes y oficina corporativa</p></form>
       <p id="status" role="status" aria-live="polite">Selecciona las fechas y sincroniza para consultar datos.</p>
       <section id="local-transfer" class="panel" hidden><h3>Enviar la consulta a tu PV Control local</h3><p>Este archivo abrió la conexión. Al confirmar, las facturas del período consultado se enviarán a ese archivo para guardarlas en su navegador. No se envían claves ni contraseñas.</p><p id="transfer-status" class="muted">Primero sincroniza las facturas.</p><button id="send-local" type="button" disabled>Enviar facturas a PV Control</button></section>
       <div class="metrics"><article><span>Facturas consultadas</span><strong id="count">—</strong></article><article><span>Importe conocido de facturas</span><strong id="amount">—</strong></article><article><span>Importes no disponibles</span><strong id="missing">—</strong></article></div>
@@ -37,6 +38,22 @@
     </section>
     <footer>OpsVista guarda las facturas de PV Control que confirmes. Tu archivo local conserva sus propios registros.</footer>
   </main>
+<div class="range-calendar-backdrop" id="rc-calendar" hidden>
+ <div class="range-calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="rc-calendar-title" aria-describedby="rc-calendar-description">
+  <div class="range-calendar-head"><div><span>OPSVISTA · CALENDARIO</span><h2 id="rc-calendar-title">Selecciona el período</h2><p id="rc-calendar-description">Mes / día / año (MM/DD/YYYY). Elige tus fechas o usa un rango rápido.</p></div><button type="button" class="range-calendar-close" id="rc-calendar-close" aria-label="Cerrar calendario">×</button></div>
+  <aside class="range-calendar-presets" id="rc-calendar-presets"></aside>
+  <section class="range-calendar-workspace">
+   <div class="range-calendar-navigation"><button type="button" id="rc-calendar-prev" aria-label="Mes anterior">‹</button><strong id="rc-calendar-instruction" aria-live="polite">Selecciona una fecha o rango</strong><button type="button" id="rc-calendar-next" aria-label="Mes siguiente">›</button></div>
+   <div class="range-calendar-months" id="rc-calendar-months"></div>
+   <div class="range-calendar-selection" aria-live="polite"><div><span>DESDE</span><strong id="rc-calendar-from"></strong></div><i aria-hidden="true">→</i><div><span>HASTA</span><strong id="rc-calendar-to"></strong></div></div>
+   <p class="range-calendar-hint">Hasta 31 días por consulta · Semana operativa: miércoles–martes.</p>
+   <p class="range-calendar-error" id="rc-calendar-error" role="status"></p>
+   <div class="range-calendar-actions"><button type="button" class="range-calendar-cancel" id="rc-calendar-cancel">Cancelar</button><button type="button" class="range-calendar-apply" id="rc-calendar-apply">Aplicar período</button></div>
+  </section>
+ </div>
+</div>
+
   <script type="module" src="/pv-control.js"></script>
 </body>
 </html>
+
