@@ -13,7 +13,7 @@
  function syncLabel(){el('rc-period-label').textContent=valid(from.value)&&valid(to.value)?`${format(from.value)} → ${format(to.value)}`:'Seleccionar fechas';}
  function buildPresets(){const t=today(),week=add(t,-((date(t).getDay()-3+7)%7));return [
   ['Hoy',t,t],['Ayer',add(t,-1),add(t,-1)],['Esta semana',week,t],['Semana anterior',add(week,-7),add(week,-1)],
-  ['Últimos 7 días',add(t,-6),t],['Últimos 30 días',add(t,-29),t],['Este mes',iso(month(t)),t],['Mes anterior',iso(month(t,-1)),add(iso(month(t)),-1)]
+  ['Últimos 7 días',add(t,-6),t],['Últimos 30 días',add(t,-29),t],['Este año',t.slice(0,4)+'-01-01',t],['Este mes',iso(month(t)),t],['Mes anterior',iso(month(t,-1)),add(iso(month(t)),-1)]
  ];}
  function calendar(m,index){
   const title=new Intl.DateTimeFormat('es-MX',{month:'long',year:'numeric'}).format(m),first=new Date(m),cells=[];first.setDate(1-first.getDay());
@@ -27,7 +27,7 @@
   el('rc-calendar-months').innerHTML=calendar(visible,0)+calendar(new Date(visible.getFullYear(),visible.getMonth()+1,1,12),1);
   el('rc-calendar-presets').innerHTML='<div><span>RANGOS RÁPIDOS</span><strong>Semana operativa<br>miércoles–martes</strong></div>'+presets.map((p,i)=>`<button type="button" data-calendar-preset="${i}" class="${p[1]===start&&p[2]===end?'active':''}"><strong>${p[0]}</strong><span>${format(p[1])} – ${format(p[2])}</span></button>`).join('');
   el('rc-calendar-from').textContent=format(start);el('rc-calendar-to').textContent=format(end);
-  let error='';if(start&&end){try{RCOv.period(start,end);}catch(e){error=e.message;}}
+  let error='';if(start&&end){try{RCOv.range(start,end);}catch(e){error=e.message;}}
   el('rc-calendar-error').textContent=error;
   el('rc-calendar-apply').disabled=!start||!end||!!error;
   el('rc-calendar-instruction').textContent=start&&!end?'Ahora selecciona la fecha final':start&&end?`${Math.round((Date.parse(end)-Date.parse(start))/86400000)+1} día(s) seleccionados`:'Selecciona la fecha inicial';
@@ -41,7 +41,7 @@
  el('rc-calendar-months').addEventListener('click',event=>{const b=event.target.closest('[data-calendar-day]');if(!b)return;const value=b.dataset.calendarDay;if(!start||end||value<start){start=value;end='';}else end=value;render(value);});
  el('rc-calendar-presets').addEventListener('click',event=>{const b=event.target.closest('[data-calendar-preset]');if(!b)return;const p=presets[Number(b.dataset.calendarPreset)];start=p[1];end=p[2];visible=month(start);render();el('rc-calendar-apply').focus();});
  for(const [id,n] of [['rc-calendar-prev',-1],['rc-calendar-next',1]])el(id).addEventListener('click',()=>{visible=new Date(visible.getFullYear(),visible.getMonth()+n,1,12);render();});
- el('rc-calendar-apply').addEventListener('click',()=>{try{RCOv.period(start,end);}catch(e){el('rc-calendar-error').textContent=e.message;return;}from.value=start;to.value=end;from.dispatchEvent(new Event('change',{bubbles:true}));to.dispatchEvent(new Event('change',{bubbles:true}));syncLabel();close();});
+ el('rc-calendar-apply').addEventListener('click',()=>{try{RCOv.range(start,end);}catch(e){el('rc-calendar-error').textContent=e.message;return;}from.value=start;to.value=end;from.dispatchEvent(new Event('change',{bubbles:true}));to.dispatchEvent(new Event('change',{bubbles:true}));syncLabel();close();});
  modal.addEventListener('keydown',event=>{
   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return;}
   if(event.key==='Tab'){const buttons=[...modal.querySelectorAll('button:not(:disabled)')].filter(b=>b.getClientRects().length),first=buttons[0],last=buttons.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}

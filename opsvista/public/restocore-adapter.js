@@ -1,7 +1,7 @@
 (function(root){
  'use strict';
  const origin='https://restaurant-support.vercel.app';
- const names=['Stamford','Orange','Fairfield','Danbury','Avon','Southington','Corporate Office'];
+ const names=['Stamford','Orange','Fairfield','Danbury','Avon','Southington','Corporate Office','Middletown'];
  const validDate=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v;
  function period(start,end){if(!validDate(start)||!validDate(end)||start>end||Date.parse(end)-Date.parse(start)>=31*86400000)throw Error('Selecciona un período de hasta 31 días.');}
  function empty(){return {kind:'opsvista',locations:[],sources:[],invoices:[],bank:[],accounts:[],sync:null};}
@@ -20,6 +20,26 @@
   });
   return {...empty(),locations:[...locMap.values()],invoices,sources:[{id:'opsvista-r365',name:'Restaurant365 vía OpsVista',url:origin+'/pv-control.html',version:'API v1'}],sync:{start:batch.start,end:batch.end,snapshot:batch.snapshot,refreshPending:batch.pending,count:invoices.length,receivedAt:new Date().toISOString()}};
  }
- root.RCOv={origin,period,empty,dataset};
+ function range(start,end){if(!validDate(start)||!validDate(end)||start>end||Date.parse(end)-Date.parse(start)>=366*86400000)throw Error('Selecciona un período de hasta un año. Los meses se consultan por separado automáticamente.');}
+ function splitMonths(start,end){range(start,end);const parts=[];let cursor=start;while(cursor<=end){const d=new Date(cursor+'T12:00:00Z'),last=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).toISOString().slice(0,10),until=last<end?last:end;parts.push({start:cursor,end:until});cursor=new Date(Date.parse(until)+86400000).toISOString().slice(0,10);}return parts;}
+ function merge(payloads){
+  if(!payloads.length)return empty();
+  const latest=new Map();for(const p of payloads){const d=dataset(p),key=d.sync.start+':'+d.sync.end+':'+[...d.locations].sort().join('|'),prior=latest.get(key);if(!prior||Date.parse(prior.d.sync.snapshot)<=Date.parse(d.sync.snapshot))latest.set(key,{p,d});}
+  const batches=[...latest.values()].sort((a,b)=>Date.parse(a.d.sync.snapshot)-Date.parse(b.d.sync.snapshot));
+  const rows=new Map(),locations=new Set(),ranges=[];
+  for(const {d} of batches){const locs=new Set(d.locations);for(const [id,i]of rows)if(i.date>=d.sync.start&&i.date<=d.sync.end&&locs.has(i.location))rows.delete(id);for(const i of d.invoices)rows.set(i.id,i);d.locations.forEach(l=>locations.add(l));ranges.push({...d.sync,locations:d.locations});}
+  const last=batches.at(-1).d;
+  return {...last,locations:[...locations],invoices:[...rows.values()],sync:{...last.sync,start:ranges.map(r=>r.start).sort()[0],end:ranges.map(r=>r.end).sort().at(-1),ranges,multi:ranges.length>1,refreshPending:ranges.some(r=>r.refreshPending),count:rows.size}};
+ }
+ const scopeMatches=(location,scope)=>!scope||scope==='__restaurants__'?(!scope||location!=='Corporate Office'):location===scope;
+ function coverage(data,year,scope='',today=new Date().toISOString().slice(0,10)){
+  const ranges=data.sync?.ranges||(data.sync?[{...data.sync,locations:data.locations}]:[]),locs=data.locations.filter(l=>scopeMatches(l,scope));
+  return Array.from({length:12},(_,m)=>{const start=`${year}-${String(m+1).padStart(2,'0')}-01`,end=new Date(Date.UTC(year,m+1,0)).toISOString().slice(0,10),days=new Date(Date.UTC(year,m+1,0)).getUTCDate();
+   let covered=0;for(let day=1;day<=days;day++){const d=`${start.slice(0,8)}${String(day).padStart(2,'0')}`;if(locs.length&&locs.every(l=>ranges.some(r=>r.locations.includes(l)&&r.start<=d&&r.end>=d)))covered++;}
+   const count=data.invoices.filter(i=>i.date>=start&&i.date<=end&&scopeMatches(i.location,scope)).length;
+   return {month:start.slice(0,7),start,end,count,covered,days,status:covered===days?'complete':covered?'partial':start>today?'future':'unknown'};
+  });
+ }
+ root.RCOv={origin,period,range,splitMonths,merge,coverage,scopeMatches,empty,dataset};
  if(typeof module!=='undefined')module.exports=root.RCOv;
 })(typeof globalThis==='undefined'?this:globalThis);

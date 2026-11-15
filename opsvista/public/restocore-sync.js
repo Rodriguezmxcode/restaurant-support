@@ -1,7 +1,7 @@
 import { collectInvoices } from './pv-control-sync.js';
 
 // Only a fully validated, consistent query may replace the visible invoice set.
-export function createAutoSync({ request, refreshSource, publish, status, lock, now = Date.now }) {
+export function createAutoSync({ request, refreshSource, publish, status, lock, authorize = () => {}, now = Date.now }) {
   let generation = 0, current = null;
   const attempts = new Map();
   const isAuth = error => error.status === 401 || error.status === 403;
@@ -22,22 +22,37 @@ export function createAutoSync({ request, refreshSource, publish, status, lock, 
         const result = await get('locations');
         if (!active()) return;
         if (result.api_version !== '1' || result.organization_id !== 'org-puerto-vallarta' || !Array.isArray(result.data)) throw Error('No se pudieron verificar las sucursales.');
-        let batch = await collectInvoices(get, period);
-        if (!active()) return;
-        publish({ batch, locations: result.data });
-        const stale = batch.pending || now() - Date.parse(batch.snapshot) >= 30 * 60000;
-        if (stale && now() - (attempts.get(key) || 0) >= 30 * 60000) {
-          attempts.set(key, now());
-          status('Consultando cambios en Restaurant365. Se conserva la última consulta completa…');
-          // The existing authenticated source endpoint updates the durable OpsVista snapshot.
-          const source = await refreshSource(period, controller.signal);
+        authorize();
+        const parts = splitMonthPeriods(period), failures = [];
+        let completed = 0;
+        for (const part of parts) {
           if (!active()) return;
-          if (source.memory?.error) throw Error('Restaurant365 no pudo actualizarse. Se conserva la última consulta completa.');
-          batch = await collectInvoices(get, period);
-          if (!active()) return;
-          publish({ batch, locations: result.data });
+          const partKey = part.start + ':' + part.end;
+          try {
+            status(`Consultando ${part.start.slice(0,7)} · ${completed} de ${parts.length} períodos completos…`);
+            let batch = await collectInvoices(get, part);
+            if (!active()) return;
+            publish({ batch, locations: result.data });
+            const stale = batch.pending || now() - Date.parse(batch.snapshot) >= 30 * 60000;
+            if (stale && now() - (attempts.get(partKey) || 0) >= 30 * 60000) {
+              attempts.set(partKey, now());
+              status(`Actualizando ${part.start.slice(0,7)} desde Restaurant365. Se conservan los demás meses…`);
+              const source = await refreshSource(part, controller.signal);
+              if (!active()) return;
+              if (source.memory?.error) throw Error('Restaurant365 no pudo actualizarse. Se conserva la última consulta completa.');
+              batch = await collectInvoices(get, part);
+              if (!active()) return;
+              publish({ batch, locations: result.data });
+            }
+            if(batch.pending)failures.push(part.start.slice(0,7)+' (actualización pendiente)');
+            completed++;
+          } catch (error) {
+            if (!active()) return;
+            if (isAuth(error)) throw error;
+            failures.push(part.start.slice(0,7)+': '+error.message);
+          }
         }
-        status(`${batch.rows.length} facturas cargadas automáticamente. ${batch.pending ? 'Actualización de la fuente pendiente; se muestra la última copia completa.' : 'Consulta completa.'} El próximo control es automático.`);
+        status(failures.length?`${completed} de ${parts.length} períodos consultados. Pendientes: ${failures.join(' · ')}. Los meses ya cargados se conservan.`:`${completed} períodos consultados automáticamente. Puedes ver todos los meses cargados o seleccionar uno.`,failures.length>0);
       } catch (error) {
         if (!active()) return;
         if (isAuth(error)) lock(error.message);
@@ -49,4 +64,12 @@ export function createAutoSync({ request, refreshSource, publish, status, lock, 
     return current.promise;
   }
   return { run, cancel };
+}
+
+export function splitMonthPeriods({start,end}) {
+ const valid = v => /^\d{4}-\d{2}-\d{2}$/.test(v||'') && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0,10)===v;
+ if(!valid(start)||!valid(end)||start>end||Date.parse(end)-Date.parse(start)>=366*86400000)throw Error('Selecciona un período válido de hasta un año.');
+ const parts=[];let cursor=start;
+ while(cursor<=end){const d=new Date(cursor),last=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).toISOString().slice(0,10),until=last<end?last:end;parts.push({start:cursor,end:until});cursor=new Date(Date.parse(until)+86400000).toISOString().slice(0,10);}
+ return parts;
 }

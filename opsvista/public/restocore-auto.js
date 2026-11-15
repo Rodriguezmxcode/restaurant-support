@@ -8,6 +8,7 @@ async function requestURL(url, signal) {
   return body;
 }
 const sync = createAutoSync({
+  authorize() { el('rc-access').hidden = true; el('rc-control').hidden = false; },
   request: (path, signal) => requestURL('/api/pv-control/' + path, signal),
   refreshSource: (period, signal) => requestURL('/api/restaurant365?' + new URLSearchParams({ view: 'ap', start: period.start, end: period.end, refresh: '1' }), signal),
   publish(payload) {
@@ -29,6 +30,13 @@ let debounce;
 for (const id of ['rc-ov-start', 'rc-ov-end']) el(id).addEventListener('change', () => { clearTimeout(debounce); debounce = setTimeout(refresh, 60); });
 el('rc-connect').addEventListener('click', refresh);
 el('rc-retry').addEventListener('click', refresh);
+el('rc-load-year').hidden = false;
+el('rc-load-year').addEventListener('click', () => {
+  const year=Number(el('rc-coverage-year').value),today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  if(!Number.isInteger(year)||year<2000||year>Number(today.slice(0,4)))return view.status('Selecciona el año actual o uno anterior.',true);
+  el('rc-ov-start').value=`${year}-01-01`;el('rc-ov-end').value=year===Number(today.slice(0,4))?today:`${year}-12-31`;
+  el('rc-month-filter').value='';el('rc-ov-start').dispatchEvent(new Event('change',{bubbles:true}));el('rc-ov-end').dispatchEvent(new Event('change',{bubbles:true}));
+});
 let interval;
 function startTimer() { clearInterval(interval); interval = setInterval(() => { if (!document.hidden) void refresh(); }, 5 * 60000); }
 startTimer();
