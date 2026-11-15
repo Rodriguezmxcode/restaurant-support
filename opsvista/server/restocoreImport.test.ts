@@ -10,7 +10,12 @@ mock.module('postgres',{defaultExport:()=>adapter(pg)});
 let sourceCalls:any[]=[],failure=false;
 const xml=`<edmx:Edmx><Schema><EntityType Name="Locations"><Key><PropertyRef Name="locationId"/></Key><Property Name="locationId"/><Property Name="name"/></EntityType><EntityType Name="Transactions"><Key><PropertyRef Name="transactionId"/></Key><Property Name="transactionId"/><Property Name="date"/><Property Name="locationId"/></EntityType><EntityContainer><EntitySet Name="Location" EntityType="R365.Locations"/><EntitySet Name="Transaction" EntityType="R365.Transactions"/></EntityContainer></Schema></edmx:Edmx>`;
 mock.module('./restaurant365OData.js',{namedExports:{readRestaurant365ArchiveSource:async(org:string,view:string,params:any)=>{
- sourceCalls.push({org,view,params});if(failure&&view==='Transaction')throw Error('Temporary upstream failure');if(view==='$metadata')return xml;
+ sourceCalls.push({org,view,params});
+ if(org==='synthetic-line-collision'){
+  if(view==='$metadata')return '<Schema><EntityType Name="Details"><Key><PropertyRef Name="transactionDetailId"/></Key><Property Name="transactionDetailId"/></EntityType><EntityContainer><EntitySet Name="TransactionDetail" EntityType="R365.Details"/></EntityContainer></Schema>';
+  return params.$skip==='0'?[{transactionDetailId:'shared',glAccountId:'gl',quantity:1},{transactionDetailId:'first'}]:[{transactionDetailId:'shared',glAccountId:'gl',quantity:2},{transactionDetailId:'second'}];
+ }
+ if(failure&&view==='Transaction')throw Error('Temporary upstream failure');if(view==='$metadata')return xml;
  if(view==='Location')return params.$skip==='0'?[{locationId:'loc-a',name:'Southington'}]:[];
  if(view==='Transaction')return params.$skip==='0'?[{transactionId:'invoice-a',date:'2026-11-10T00:00:00Z',locationId:'loc-a',transactionNumber:'SYNTHETIC',type:'AP Invoice',name:org+' test'}]:[];
  throw Error('Unexpected source');
@@ -45,5 +50,12 @@ test('source failure preserves imported data and cursor, then resumes the same p
  await archive.runRestocoreImport('synthetic-retry');await archive.runRestocoreImport('synthetic-retry');await archive.runRestocoreImport('synthetic-retry');failure=true;
  const bad=await archive.runRestocoreImport('synthetic-retry');assert.equal(bad.errors,1);const saved:any=await archive.readRestocoreArchive('synthetic-retry',{view:'Transaction'});assert.equal(saved.rows.length,1);assert.equal(saved.views.find((v:any)=>v.name==='Transaction').state,'error');failure=false;
  await pg.query("update opsvista_r365_archive_views set next_attempt=now() where organization_id='synthetic-retry'");const resumed=await archive.runRestocoreImport('synthetic-retry');assert.equal(resumed.errors,0);assert.equal(resumed.remaining,0);assert.equal(resumed.records,2);
+});
+test('conflicting line identities across pages cannot overwrite saved quantities',async()=>{
+ await archive.runRestocoreImport('synthetic-line-collision');
+ const result=await archive.runRestocoreImport('synthetic-line-collision');assert.equal(result.errors,1);assert.equal(result.records,2);
+ const saved:any=await archive.readRestocoreArchive('synthetic-line-collision',{view:'TransactionDetail'});
+ assert.equal(saved.rows.find((r:any)=>r.data.transactionDetailId==='shared').data.quantity,1);
+ assert.equal(saved.rows.some((r:any)=>r.data.transactionDetailId==='second'),false);
 });
 test.after(async()=>{await pg.close();});

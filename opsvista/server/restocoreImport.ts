@@ -126,6 +126,10 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
         const unique=new Map(records.map(row=>[row.source_id,row]));
         if(unique.size!==records.length){console.warn('restocore-source-key-diagnostic',JSON.stringify({view:current,declaredKeys:view.keys,rows:rows.length,identifiers:Object.keys(rows[0]||{}).filter(k=>/id$|number$/i.test(k)).map(key=>({key,distinct:new Set(rows.map(row=>field(row,key))).size,missing:rows.filter(row=>!field(row,key)).length}))}));throw new Error(`${current}: identificadores repetidos dentro de una página. Se requiere verificar la clave.`);}
         await db().begin(async tx=>{
+          if(current==='TransactionDetail'&&records.length){
+            const conflicts=await tx`select r.source_id from opsvista_r365_archive_records r join jsonb_to_recordset(${tx.json(records as never)}) as x(source_id text,payload jsonb) on x.source_id=r.source_id where r.organization_id=${org} and r.view_name=${current} and r.payload<>x.payload limit 1`;
+            if(conflicts.length)throw new Error(`${current}: identificadores repetidos entre páginas con contenido distinto; se conservan las partidas ya guardadas.`);
+          }
           if(records.length)await tx`insert into opsvista_r365_archive_records(organization_id,view_name,source_id,payload,location_id,record_date,record_type,label) select ${org},${current},x.source_id,x.payload,x.location_id,x.record_date,x.record_type,x.label from jsonb_to_recordset(${tx.json(records as never)}) as x(source_id text,payload jsonb,location_id text,record_date text,record_type text,label text) on conflict(organization_id,view_name,source_id) do update set payload=excluded.payload,location_id=excluded.location_id,record_date=excluded.record_date,record_type=excluded.record_type,label=excluded.label,observed_at=now()`;
           await tx`update opsvista_r365_archive_views set cursor=${tx.json(next.cursor)},state=${next.complete?'complete':'loading'},last_error=null,updated_at=now(),next_attempt=now(),completed_at=${next.complete?new Date().toISOString():null} where organization_id=${org} and view_name=${current}`;
         });processed=1;
