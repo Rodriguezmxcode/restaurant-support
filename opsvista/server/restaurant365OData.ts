@@ -350,7 +350,7 @@ export async function readRestaurant365ArchiveSource(organizationId:string, view
   const base=(process.env.RESTAURANT365_ODATA_BASE_URL?.trim()||DEFAULT_BASE_URL).replace(/\/$/,'');
   const url=new URL(`${base}/${view}`);
   for(const [key,entry] of Object.entries(params))url.searchParams.set(key,entry);
-  const response=await fetch(url,{headers:{Accept:view==='$metadata'?'application/xml':'application/json',Authorization:`Basic ${Buffer.from(`${credentials.domain}\\${credentials.username}:${credentials.password}`,'utf8').toString('base64')}`},signal:AbortSignal.timeout(20000),redirect:'error'});
+  const response=await fetch(url,{headers:{Accept:view==='$metadata'?'application/xml':'application/json',Authorization:`Basic ${Buffer.from(`${credentials.domain}\\${credentials.username}:${credentials.password}`,'utf8').toString('base64')}`},signal:AbortSignal.timeout(45000),redirect:'error'});
   if(!response.ok)throw new Error(`${view}: Restaurant365 respondió HTTP ${response.status}.`);
   if(view==='$metadata')return await response.text();
   const payload=await response.json();

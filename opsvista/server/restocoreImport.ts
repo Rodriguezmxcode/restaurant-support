@@ -5,7 +5,7 @@ import { readRestaurant365ArchiveSource } from './restaurant365OData.js';
 type Row=Record<string,unknown>;
 export type ArchiveView={name:string;keys:string[];fields:string[];label:string;daily:boolean};
 type Cursor={offset:number;pageSize:number;day?:string;until?:string;lastPage?:string;verifiedFrom?:string};
-const knownLabels:Record<string,string>={Location:'Sucursales y oficina corporativa',Company:'Proveedores',GlAccount:'Cuentas contables',GLAccount:'Cuentas contables',Item:'Productos e inventario',Transaction:'Facturas, créditos y movimientos contables',TransactionDetail:'Productos y partidas de las transacciones',Employee:'Empleados',JobTitle:'Puestos de trabajo',POSEmployee:'Empleados del POS',LaborDetail:'Horas y turnos trabajados',PayrollSummary:'Resumen de nómina',SalesEmployee:'Tickets de venta',SalesDetail:'Productos vendidos',SalesPayment:'Cobros de las ventas',EntityDeleted:'Registros eliminados en Restaurant365'};
+const knownLabels:Record<string,string>={Location:'Sucursales y oficina corporativa',Company:'Proveedores y empresas',GlAccount:'Cuentas contables',GLAccount:'Cuentas contables',Item:'Productos e inventario',Transaction:'Facturas, créditos y movimientos contables',TransactionDetail:'Productos y partidas de las transacciones',Employee:'Empleados',JobTitle:'Puestos de trabajo',POSEmployee:'Empleados del POS',PosEmployee:'Empleados del POS',EmployeeLite:'Directorio de empleados',EmployeeLiteDto:'Directorio adicional de empleados',MenuItemCategory:'Categorías del menú',SalesEmployeeTax:'Impuestos de las ventas',LaborDetail:'Horas y turnos trabajados',PayrollSummary:'Resumen de nómina',SalesEmployee:'Tickets de venta',SalesDetail:'Productos vendidos',SalesPayment:'Cobros de las ventas',EntityDeleted:'Registros eliminados en Restaurant365'};
 const priority=['Location','Company','GlAccount','GLAccount','Item','Transaction','TransactionDetail','JobTitle','Employee','POSEmployee','PayrollSummary','LaborDetail','SalesEmployee','SalesDetail','SalesPayment','EntityDeleted'];
 let client:ReturnType<typeof postgres>|undefined,ready:Promise<void>|undefined;
 function db(){const url=process.env.OPSVISTA_DATABASE_URL||process.env.OPSVISTA_DATABASE_DATABASE_URL;if(!url)throw new Error('No está disponible el guardado permanente de RestoCore.');return client||=postgres(url,{max:4,idle_timeout:20,connect_timeout:10});}
@@ -39,8 +39,9 @@ export function parseArchiveMetadata(xml:string):ArchiveView[]{
 }
 export function field(row:Row,...names:string[]){for(const name of names){const key=Object.keys(row).find(k=>k.toLowerCase()===name.toLowerCase());if(key&&row[key]!==null&&row[key]!==undefined&&String(row[key]).trim()!=='')return String(row[key]);}return '';}
 export function archiveRecord(view:ArchiveView,row:Row){
-  // R365's transactionDetailId can identify a group. The auto ID is the line key.
-  const keys=view.name==='TransactionDetail'&&field(row,'transactionDetailAutoId')?['transactionDetailAutoId']:view.keys;
+  // Retain every declared key and the line's parent identifiers. An auto ID
+  // alone can repeat across transactions or locations in the live source.
+  const keys=view.name==='TransactionDetail'?[...new Set([...view.keys,...['transactionDetailAutoId','transactionId','locationId'].filter(key=>field(row,key))])]:view.keys;
   const values=keys.map(k=>field(row,k));
   if(values.some(v=>!v))throw new Error(`${view.name}: un registro no tiene su identificador original; se conserva el punto de carga.`);
   const source_id=JSON.stringify(values);
@@ -86,7 +87,7 @@ async function ensureViews(org:string){
 }
 async function archiveSummary(org:string){
   const rows=await db()`select v.view_name,v.definition,v.state,v.last_error,v.updated_at,v.completed_at,v.cursor,count(r.source_id)::int as records,min(nullif(r.record_date,'')) as first_date,max(nullif(r.record_date,'')) as last_date from opsvista_r365_archive_views v left join opsvista_r365_archive_records r on r.organization_id=v.organization_id and r.view_name=v.view_name where v.organization_id=${org} group by v.organization_id,v.view_name order by v.view_name`;
-  return rows.map(r=>({name:r.view_name,label:r.definition.label,state:r.state,error:r.last_error,records:r.records,firstDate:r.first_date,lastDate:r.last_date,updatedAt:r.updated_at,completedAt:r.completed_at,historyFrom:r.cursor.verifiedFrom||null,historyThrough:r.cursor.until||null}));
+  return rows.map(r=>({name:r.view_name,label:knownLabels[r.view_name]||r.definition.label,state:r.state,error:r.last_error,records:r.records,firstDate:r.first_date,lastDate:r.last_date,updatedAt:r.updated_at,completedAt:r.completed_at,historyFrom:r.cursor.verifiedFrom||null,historyThrough:r.cursor.until||null}));
 }
 export async function runRestocoreImport(org='org-puerto-vallarta'){
   await schema();const token=randomUUID();
@@ -95,6 +96,8 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
   let processed=0,current='';
   try{
     await ensureViews(org);
+    // One-time recovery for the corrected composite line identity and longer source timeout.
+    await db()`update opsvista_r365_archive_views set next_attempt=now(),cursor=jsonb_set(cursor,'{recoveryV2}','true'::jsonb) where organization_id=${org} and state='error' and view_name in ('TransactionDetail','Item','SalesDetail') and coalesce(cursor->>'recoveryV2','')<>'true'`;
     // One complete page per request. Checkpoints and raw rows commit together.
     const candidates=await db()`select * from opsvista_r365_archive_views where organization_id=${org} and state<>'complete' and next_attempt<=now() order by case when state='pending' then 0 else 1 end,coalesce(updated_at,'1970-01-01'::timestamptz),view_name`;
     const chosen=candidates.sort((a,b)=>{const rank=(name:string)=>{const n=priority.indexOf(name);return n<0?999:n;};return (a.updated_at?1:0)-(b.updated_at?1:0)||rank(a.view_name)-rank(b.view_name);})[0];
@@ -118,7 +121,7 @@ export async function runRestocoreImport(org='org-puerto-vallarta'){
         const records=rows.map(row=>archiveRecord(view,row));
         const next=advanceArchiveCursor(view,cursor,rows);
         const unique=new Map(records.map(row=>[row.source_id,row]));
-        if(unique.size!==records.length)throw new Error(`${current}: identificadores repetidos dentro de una página. Se requiere verificar la clave.`);
+        if(unique.size!==records.length){console.warn('restocore-source-key-diagnostic',JSON.stringify({view:current,declaredKeys:view.keys,rows:rows.length,identifiers:Object.keys(rows[0]||{}).filter(k=>/id$|number$/i.test(k)).map(key=>({key,distinct:new Set(rows.map(row=>field(row,key))).size,missing:rows.filter(row=>!field(row,key)).length}))}));throw new Error(`${current}: identificadores repetidos dentro de una página. Se requiere verificar la clave.`);}
         await db().begin(async tx=>{
           if(records.length)await tx`insert into opsvista_r365_archive_records(organization_id,view_name,source_id,payload,location_id,record_date,record_type,label) select ${org},${current},x.source_id,x.payload,x.location_id,x.record_date,x.record_type,x.label from jsonb_to_recordset(${tx.json(records as never)}) as x(source_id text,payload jsonb,location_id text,record_date text,record_type text,label text) on conflict(organization_id,view_name,source_id) do update set payload=excluded.payload,location_id=excluded.location_id,record_date=excluded.record_date,record_type=excluded.record_type,label=excluded.label,observed_at=now()`;
           await tx`update opsvista_r365_archive_views set cursor=${tx.json(next.cursor)},state=${next.complete?'complete':'loading'},last_error=null,updated_at=now(),next_attempt=now(),completed_at=${next.complete?new Date().toISOString():null} where organization_id=${org} and view_name=${current}`;

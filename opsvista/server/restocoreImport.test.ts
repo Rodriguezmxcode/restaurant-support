@@ -23,7 +23,7 @@ test('metadata retains real keys and discovers views without guessing endpoint n
 });
 test('line keys retain distinct rows even when transactionDetailId is shared',()=>{
  const view={name:'TransactionDetail',keys:['transactionDetailId'],fields:[],label:'Details',daily:false};
- const a=archive.archiveRecord(view,{transactionDetailId:'group',transactionDetailAutoId:1,quantity:2,unitOfMeasureName:'CS'}),b=archive.archiveRecord(view,{transactionDetailId:'group',transactionDetailAutoId:2});assert.notEqual(a.source_id,b.source_id);assert.equal(a.payload.quantity,2);assert.throws(()=>archive.archiveRecord(view,{quantity:3}));
+ const a=archive.archiveRecord(view,{transactionDetailId:'group',transactionDetailAutoId:1,quantity:2,unitOfMeasureName:'CS'}),b=archive.archiveRecord(view,{transactionDetailId:'group',transactionDetailAutoId:2});assert.notEqual(a.source_id,b.source_id);assert.equal(a.payload.quantity,2);const reusedA=archive.archiveRecord(view,{transactionDetailId:'line-a',transactionDetailAutoId:0,transactionId:'t'}),reusedB=archive.archiveRecord(view,{transactionDetailId:'line-b',transactionDetailAutoId:0,transactionId:'t'});assert.notEqual(reusedA.source_id,reusedB.source_id);assert.throws(()=>archive.archiveRecord(view,{quantity:3}));
 });
 test('partial pages do not claim completeness and repeated pages halt without advancing',()=>{
  const view=archive.parseArchiveMetadata(xml)[1],cursor={offset:0,pageSize:100},rows=[{transactionId:'a'}];
