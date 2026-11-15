@@ -14,6 +14,7 @@ import { getProviReports, saveProviReports } from '../server/proviReports.js';
 import { extractProviEvidence } from '../server/proviDocumentExtraction.js';
 import { getProviEvidence, saveProviEvidence } from '../server/proviEvidence.js';
 import { getPriceWatch } from '../server/priceWatch.js';
+import { runRestocoreImport, readRestocoreArchive } from '../server/restocoreImport.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -29,6 +30,10 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
   res.setHeader?.('X-OpsVista-Request-Id',requestId);
   res.setHeader?.('Cache-Control','private, no-store');
   try{
+    if(query(req,'view')==='restocore-sync'&&req.method==='POST'){
+      if(!await authorizedSourceSync(req.headers?.authorization))return res.status(401).json({error:'Unauthorized'});
+      return res.status(200).json(await runRestocoreImport('org-puerto-vallarta'));
+    }
     if (query(req,'view') === 'sync' && req.method === 'POST') {
       if (!await authorizedSourceSync(req.headers?.authorization)) return res.status(401).json({ error:'Unauthorized' });
       const result = await runSourceSync('org-puerto-vallarta', true);
@@ -57,6 +62,10 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'restaurant365:read');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const view=query(req,'view');
+      if(view==='restocore-data'){
+        if(user.role!=='Founder')return res.status(403).json({error:'Esta importación completa está disponible para Founder.',requestId});
+        return res.status(200).json(await readRestocoreArchive(organizationId,{view:query(req,'table'),offset:Number(query(req,'offset')||0),location:query(req,'location'),search:query(req,'search'),start:query(req,'from'),end:query(req,'to'),transaction:query(req,'transaction')}));
+      }
       if(view==='provi')return res.status(200).json({
         reports:await getProviReports(organizationId),
         evidence:await getProviEvidence(organizationId),

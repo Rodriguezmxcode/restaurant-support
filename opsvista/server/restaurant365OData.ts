@@ -342,6 +342,23 @@ async function requiredCredentials(organizationId: string) {
   return resolved.credentials;
 }
 
+// Read-only transport for the durable RestoCore import. Credentials stay on the
+// server, using the same organization-bound connection as the existing reports.
+export async function readRestaurant365ArchiveSource(organizationId:string, view:string, params:Record<string,string>={}) {
+  if(view!=='$metadata'&&!/^[A-Za-z][A-Za-z0-9_]{0,80}$/.test(view))throw new Error('Vista de Restaurant365 no válida.');
+  const credentials=await requiredCredentials(organizationId);
+  const base=(process.env.RESTAURANT365_ODATA_BASE_URL?.trim()||DEFAULT_BASE_URL).replace(/\/$/,'');
+  const url=new URL(`${base}/${view}`);
+  for(const [key,entry] of Object.entries(params))url.searchParams.set(key,entry);
+  const response=await fetch(url,{headers:{Accept:view==='$metadata'?'application/xml':'application/json',Authorization:`Basic ${Buffer.from(`${credentials.domain}\\${credentials.username}:${credentials.password}`,'utf8').toString('base64')}`},signal:AbortSignal.timeout(20000),redirect:'error'});
+  if(!response.ok)throw new Error(`${view}: Restaurant365 respondió HTTP ${response.status}.`);
+  if(view==='$metadata')return await response.text();
+  const payload=await response.json();
+  const rows=Array.isArray(payload)?payload:payload?.value;
+  if(!Array.isArray(rows)||rows.some(row=>!row||typeof row!=='object'||Array.isArray(row)))throw new Error(`${view}: respuesta de datos no válida.`);
+  return rows as Record<string,unknown>[];
+}
+
 function locationFromRow(row: ODataRow): Restaurant365Location {
   const name = stringValue(row,['name','locationName']);
   const opsVistaLocation = mappedLocation(name);
