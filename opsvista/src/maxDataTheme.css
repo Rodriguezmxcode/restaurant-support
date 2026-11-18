@@ -1,0 +1,32 @@
+:root{
+  --mmd-primary:#2368cf;--mmd-primary-strong:#1854a5;--mmd-primary-soft:#edf4ff;--mmd-blue:#2b6fd5;
+  --mmd-black:#10213a;--mmd-ink:#14233b;--mmd-white:#fff;--mmd-surface:#eef4fb;--mmd-muted:#60728a;
+  --mmd-border:#ccd9e8;--mmd-warning:#e7a32b;--mmd-danger:#d94949;--mmd-success:#23a36d;
+  --radius-sm:9px;--radius-md:14px;--radius-xl:20px;--shadow-sm:0 3px 12px rgba(25,55,96,.055);--shadow-lg:0 18px 50px rgba(25,55,96,.13)
+}
+body{background:var(--mmd-surface);color:var(--mmd-ink)}
+.sidebar{background:var(--mmd-black);color:#dfe8f5;border-right:1px solid #2b3c55}
+.brand-mark{background:linear-gradient(145deg,#f29f3f,#d84a35);color:#fff;border-radius:11px;box-shadow:0 8px 22px #0003}
+.brand span,.brand small,.user-card span{color:#8ea0b8}
+.sidebar nav button{color:#d4dfed;border:1px solid transparent}
+.sidebar nav button:hover{background:#223956;color:#fff;border-color:#2b456e}
+.sidebar nav button.active{background:#2b456e;color:#fff;border-color:#2b456e}
+.sidebar nav button.active .nav-icon{color:#fff}.nav-icon{color:#b8c8dc}
+.user-card{border-color:#2b3c55}.avatar{background:var(--mmd-blue);color:#fff}
+.topbar{background:#fff;border-color:var(--mmd-border)}
+.search-wrap{background:#f7faff;border-color:#cfdbea}
+.page-heading h1{letter-spacing:-.045em;color:var(--mmd-black)}.page-heading p{color:var(--mmd-muted)}
+.eyebrow{color:#4b6d99}
+.primary{background:var(--mmd-primary)!important;color:#fff!important;border-color:var(--mmd-primary)!important}.primary:hover{background:#1854a5!important}
+.count-pill{background:var(--mmd-primary-soft);color:#235ca9}
+.metric-card,.panel,.score-banner,.location-dashboard-controls,.location-summary-kpi,.location-performance-card,.labor-card,.labor-panel,.schedule-panel,.ramp-panel,.ramp-group-panel,.evidence-panel,.provider-card,.local-location-card{border-color:var(--mmd-border)!important;border-radius:var(--radius-md)!important;box-shadow:var(--shadow-sm)!important}
+.metric-card,.location-summary-kpi,.labor-card{border-top:3px solid var(--mmd-primary)!important}
+.metric-value,.location-summary-kpi strong,.labor-card strong{color:var(--mmd-black)}
+.panel-header,.labor-panel-head,.schedule-panel-head,.ramp-group-head{border-color:var(--mmd-border)!important}
+table th{background:#f7faff!important;color:#526985!important;font-size:10px!important;letter-spacing:.08em!important;text-transform:uppercase}
+table td{font-variant-numeric:tabular-nums}tbody tr{transition:background .15s ease}tbody tr:hover{background:var(--mmd-primary-soft)!important}
+select,input,textarea{border-color:#c7d5e6!important;border-radius:var(--radius-sm)!important}select:focus,input:focus,textarea:focus{outline:3px solid #2368cf30!important;border-color:var(--mmd-primary-strong)!important}
+.detail-block.recommendation,.labor-recommendation,.local-recommendation,.schedule-recommendation{border-color:#a9c8f8!important;background:#f5f9ff!important;color:#354a66!important}
+.impact-box{background:var(--mmd-black)}
+.good,.healthy,.live{--status-color:var(--mmd-success)}.warn,.watch{--status-color:var(--mmd-warning)}.bad,.action,.error{--status-color:var(--mmd-danger)}
+@media(max-width:850px){.sidebar{border-right:0;border-top:1px solid #29405f}}

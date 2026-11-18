@@ -1,0 +1,13 @@
+.notification-email-panel{margin:0 0 18px;padding:18px 20px;border:1px solid #dbe4ee;border-radius:14px;background:#fff;color:#172033}
+.notification-email-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.notification-email-heading h3{margin:0 0 6px;font-size:16px}
+.notification-email-heading p{margin:0;font-size:13px;color:#536379;overflow-wrap:anywhere}
+.notification-email-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.notification-email-controls label{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
+.notification-email-controls button{border:0;border-radius:9px;padding:11px 15px;background:#1769ff;color:white;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.notification-email-controls button:disabled{opacity:.5;cursor:not-allowed}
+.notification-email-controls input{accent-color:#1769ff}
+.notification-email-success,.notification-email-warning{margin:14px 0 0;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.5}
+.notification-email-success{background:#eaf7ef;color:#186139}
+.notification-email-warning{background:#fff5df;color:#79520e}
+@media(max-width:600px){.notification-email-panel{padding:16px}.notification-email-controls{width:100%;justify-content:space-between}.notification-email-controls button{width:100%}}
