@@ -34,6 +34,20 @@ export default function WeeklyBonusLivePanel({allowedLocations,canReadRestaurant
   const range=useMemo(()=>selectedRange(period,customStart,customEnd),[period,customStart,customEnd]);
   const rangeDays=Math.floor((Date.parse(`${range.end}T00:00:00Z`)-Date.parse(`${range.start}T00:00:00Z`))/86400000)+1;
   const rangeError=!range.start||!range.end||rangeDays<1?'Selecciona una fecha inicial y final válidas.':rangeDays>31?'El rango personalizado puede incluir hasta 31 días.':undefined;
+  const [approved, setApproved] = useState<{start:string; end:string; rows:{location:string; rank:number|null; metrics:number[]; reason:string}[]} | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setApproved(null);
+    if (rangeDays === 7) {
+      const params = new URLSearchParams({view:'approved-weekly-bonus', ...range});
+      fetch('/api/restaurant365?' + params, {credentials:'include', cache:'no-store', signal:controller.signal})
+        .then(response => response.ok ? response.json() : null)
+        .then(report => { if (!controller.signal.aborted) setApproved(report); })
+        .catch(() => {});
+    }
+    return () => controller.abort();
+  }, [range.start, range.end, rangeDays]);
+  const official = approved?.start === range.start && approved.end === range.end ? approved : null;
   const alcoholRange=useMemo(()=>rangeError?range:beverageBonusRange(range.end),[range.start,range.end,rangeError]);
   const alcohol=useBeverageScore(alcoholRange.start,alcoholRange.end,!rangeError);
   const [tasks,setTasks]=useState<TaskResponse>({});const [toast,setToast]=useState<ToastResponse>({});const [reviews,setReviews]=useState<ReviewsResponse>({});const [loading,setLoading]=useState(true);
@@ -67,7 +81,14 @@ export default function WeeklyBonusLivePanel({allowedLocations,canReadRestaurant
     const result=calculateWeeklyBonus({periodStart:range.start,liquorCostScorePct:alcoholRow?.points==null?undefined:alcoholRow.points*20,tasksPct:t??undefined,discountsPct:bonusDiscountPct,voidsPct:s?.voidPct,overtimeLaborPct:s?.overtimeLaborPct,reviewAverage,reviewCount,leadershipScorePct:leadershipPct,logbookComplete:leadershipPct===undefined?undefined:logbookCount>=logbookTarget});
     const ready=result.metrics.filter(m=>m.ready);return{location,alcohol:alcoholRow,netSales:s?.netSales,totalDiscounts:s?.discountAmount,bonusDiscountAmount:s?.bonusDiscountAmount,tasks:t??undefined,discounts:bonusDiscountPct,discountPoints:result.metrics.find(m=>m.key==='discounts')?.points,voidPoints:result.metrics.find(m=>m.key==='voids')?.points,uberEatsExcluded:s?.uberEatsDiscountAmount,employeeMealsExcluded:s?.employeeMealDiscountAmount,voids:s?.voidPct,ot:s?.overtimeLaborPct,otPoints:result.metrics.find(m=>m.key==='overtime')?.points,reviews:review,reviewAverage,reviewCount,leadershipPct,logbookCount,logbookTarget,points:ready.reduce((n,m)=>n+(m.points??0),0),availableMax:ready.reduce((n,m)=>n+m.weight,0),eligible:result.eligible,failed:result.eligibilityReasons};
   }).sort((a,b)=>{const aScore=a.availableMax?a.points/a.availableMax:-1;const bScore=b.availableMax?b.points/b.availableMax:-1;return bScore-aScore||b.points-a.points||a.location.localeCompare(b.location)}).map((row,index)=>({...row,rank:index+1})).filter(row=>visibleScope.includes(row.location)),[scope.join('|'),visibleScope.join('|'),tasks,toast,reviews,rangeDays,range.start,alcohol.data]);
-  return <section className="panel" style={{marginBottom:16}}><div className="panel-header"><div><h2>Bono semanal · Ranking de managers</h2><p>{range.start} → {range.end} · Corte semanal: miércoles a martes. Preparación automática cada miércoles de madrugada (Connecticut).</p></div><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><span className="count-pill">{loading?'SYNCING':reviews.source==='Vista Social CSV'?'VISTA SOCIAL':'LIVE SOURCES'}</span><select aria-label="Período del bono" value={period} onChange={e=>setPeriod(e.target.value as Period)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="this-week">Semana en curso</option><option value="previous-week">Última semana cerrada</option><option value="this-month">Este mes</option><option value="last-30-days">Últimos 30 días</option><option value="custom">Personalizado</option></select><CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo de Bono semanal"/><select aria-label="Locación del bono" value={selected} onChange={e=>setSelected(e.target.value)}><option>All locations</option>{scope.map(location=><option key={location}>{location}</option>)}</select></div></div><div style={{padding:18,display:'grid',gap:12}}>
+  return <section className="panel" style={{marginBottom:16}}><div className="panel-header"><div><h2>Bono semanal · Ranking de managers</h2><p>{range.start} → {range.end} · Corte semanal: miércoles a martes. Preparación automática cada miércoles de madrugada (Connecticut).</p></div><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><span className="count-pill">{official?'APPROVED':loading?'SYNCING':reviews.source==='Vista Social CSV'?'VISTA SOCIAL':'LIVE SOURCES'}</span><select aria-label="Período del bono" value={period} onChange={e=>setPeriod(e.target.value as Period)}><option value="today">Hoy</option><option value="yesterday">Ayer</option><option value="this-week">Semana en curso</option><option value="previous-week">Última semana cerrada</option><option value="this-month">Este mes</option><option value="last-30-days">Últimos 30 días</option><option value="custom">Personalizado</option></select><CustomDateRangePicker active={period==='custom'} start={customStart} end={customEnd} maxDate={today} maxRangeDays={31} onApply={(start,end)=>{setCustomStart(start);setCustomEnd(end);}} ariaLabel="Seleccionar periodo de Bono semanal"/><select aria-label="Locación del bono" value={selected} onChange={e=>setSelected(e.target.value)}><option>All locations</option>{scope.map(location=><option key={location}>{location}</option>)}</select></div></div><div style={{padding:18,display:'grid',gap:12}}>
+    {official ? <div style={{overflowX:'auto'}}><table style={{width:'100%', borderSpacing:10}}><thead><tr>
+      {['Rank','Location','Tasks /35','Alcohol margin','Alcohol /5','Discounts /20','Voids /15','OT /15','Reviews /5','Logbook /5','Total /100','Eligibility'].map(label => <th key={label}>{label}</th>)}
+    </tr></thead><tbody>{official.rows.filter(row => visibleScope.includes(row.location)).map(row => <tr key={row.location}>
+      <td>{row.rank ?? '—'}</td><th scope="row">{row.location}</th>
+      {row.metrics.map((value,index) => <td key={index}>{value.toFixed(2)}{index === 1 ? '%' : ''}</td>)}
+      <td>{row.reason || (row.rank === 1 ? 'Winner' : 'Eligible')}</td>
+    </tr>)}</tbody></table></div> : <>
     <details style={{padding:12,border:'1px solid #cbd5e1',borderRadius:10}}><summary style={{cursor:'pointer'}}>Comparar descuentos · empleados y Uber Eats</summary>
       <div style={{display:'flex',gap:18,flexWrap:'wrap'}}>
         <label style={{display:'flex',gap:8,alignItems:'center',cursor:'pointer'}}><input type="checkbox" role="switch" checked={includeEmployeeMeals} onChange={e=>setIncludeEmployeeMeals(e.target.checked)}/> Incluir descuentos de empleados</label>
@@ -109,5 +130,6 @@ export default function WeeklyBonusLivePanel({allowedLocations,canReadRestaurant
       {alcohol.error&&<p role="status">{alcohol.error} {alcohol.data?'Se conserva la última evaluación guardada; la revisión está pendiente.':''}</p>}
       {alcohol.data?.updatedAt&&<p>Última copia de alcohol: {new Date(alcohol.data.updatedAt).toLocaleString('es-MX',{timeZone:'America/New_York'})} (Connecticut).</p>}
     </details>
+    </>}
   </div></section>;
 }

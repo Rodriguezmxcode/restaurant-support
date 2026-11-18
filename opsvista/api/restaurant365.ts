@@ -2,7 +2,7 @@ import { beverageLocations, validBeverageRange } from '../shared/beverageMetrics
 import { getBeverageSource } from '../server/beverageSource.js';
 import { getBeverageScore, visibleBeverageScore } from '../server/beverageScore.js';
 import { readSession } from '../server/authSession.js';
-import { authorize } from '../server/authorization.js';
+import { authorize, serverLocationAllowed } from '../server/authorization.js';
 import { disconnectRestaurant365, saveRestaurant365Credentials, getIntegrationSnapshot } from '../server/integrationStore.js';
 import { cachedSource } from '../server/sourceCache.js';
 import { loadSource } from '../server/sourceLoaders.js';
@@ -50,6 +50,18 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
         const start=query(req,'start'),end=query(req,'end');
         if(Boolean(start)!==Boolean(end)||!start||!end)return res.status(400).json({error:'Selecciona una fecha inicial y final para Price Watch.',requestId});
         return res.status(200).json(await getPriceWatch(organizationId,start,end,query(req,'refresh')==='1'));
+      }
+      if (query(req, 'view') === 'approved-weekly-bonus') {
+        const access = authorize(user, 'bonus:read');
+        if (!access.ok) return res.status(access.status).json({error: access.error});
+        res.setHeader?.('Cache-Control', 'private, no-store');
+        const start = query(req, 'start'), end = query(req, 'end');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return res.status(400).json({error: 'Invalid week'});
+        const record = process.env['OPSVISTA_WEEKLY_BONUS_' + start.replace(/-/g, '')];
+        if (!record) return res.status(200).json(null);
+        const report = JSON.parse(record);
+        if (report.organizationId !== organizationId || report.start !== start || report.end !== end) return res.status(200).json(null);
+        return res.status(200).json({start, end, rows: report.rows.filter((row: {location:string}) => serverLocationAllowed(user, row.location))});
       }
       if(query(req,'view')==='beverage-score') {
         const access=authorize(user,'bonus:read');
