@@ -14,7 +14,7 @@ toggle.onclick = () => {
 };
 function selectModule() {
   const archive = location.pathname.endsWith('restocore-datos.html');
-  const key = archive ? 'datos' : location.hash.slice(1) || 'invoices';
+  const key = archive ? 'datos' : location.hash.slice(1) || 'inbox';
   const button = Array.from(document.querySelectorAll('[data-rc-view]')).find(b => b.dataset.rcView === key);
   if (button) button.click();
   for (const link of rail.querySelectorAll('a')) {

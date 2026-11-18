@@ -14,7 +14,7 @@ import { getProviReports, saveProviReports } from '../server/proviReports.js';
 import { extractProviEvidence } from '../server/proviDocumentExtraction.js';
 import { getProviEvidence, saveProviEvidence } from '../server/proviEvidence.js';
 import { getPriceWatch } from '../server/priceWatch.js';
-import { runRestocoreImport, readRestocoreArchive } from '../server/restocoreImport.js';
+import { runRestocoreImport, readRestocoreArchive, readPurchaseModules } from '../server/restocoreImport.js';
 
 type ApiRequest={method?:string;headers?:Record<string,string|string[]|undefined>&{cookie?:string};query?:Record<string,string|string[]>;body?:Record<string,unknown>};
 type ApiResponse={status:(code:number)=>ApiResponse;json:(body:unknown)=>void;setHeader?:(name:string,value:string)=>void};
@@ -62,6 +62,10 @@ export default async function handler(req:ApiRequest,res:ApiResponse){
       const permission=authorize(user,'restaurant365:read');
       if(!permission.ok)return res.status(permission.status).json({error:permission.error,requestId});
       const view=query(req,'view');
+      if(view==='purchase-modules'){
+        if(user.role!=='Founder')return res.status(403).json({error:'Acceso restringido'});
+        return res.status(200).json(await readPurchaseModules(organizationId));
+      }
       if(view==='restocore-data'){
         if(user.role!=='Founder')return res.status(403).json({error:'Esta importación completa está disponible para Founder.',requestId});
         return res.status(200).json(await readRestocoreArchive(organizationId,{view:query(req,'table'),offset:Number(query(req,'offset')||0),location:query(req,'location'),search:query(req,'search'),start:query(req,'from'),end:query(req,'to'),transaction:query(req,'transaction')}));

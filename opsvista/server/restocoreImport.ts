@@ -163,3 +163,32 @@ export async function readRestocoreArchive(org:string,query:{view?:string;offset
   const rows=await db()`select r.source_id,r.payload,r.location_id,r.record_date,r.record_type,r.label,r.observed_at,count(*) over()::int as total from opsvista_r365_archive_records r where r.organization_id=${org} and r.view_name=${query.view} and (${location}='' or r.location_id=${location}) and (${start}='' or r.record_date>=${start}) and (${end}='' or r.record_date<=${end}) and (${search}='' or r.payload::text ilike ${pattern}) and (${transaction}='' or lower(coalesce(r.payload->>'transactionId',''))=lower(${transaction})) order by r.record_date desc,r.source_id limit 50 offset ${offset}`;
   return {...base,view:query.view,rows:rows.map(r=>({id:r.source_id,data:r.payload,date:r.record_date,location:locationRows.find(l=>l.id.toLowerCase()===r.location_id.toLowerCase())?.name||field(r.payload,'locationName','location')||'',type:r.record_type,label:r.label,observedAt:r.observed_at})),pagination:{offset,limit:50,total:rows[0]?.total||0,nextOffset:offset+50<(rows[0]?.total||0)?offset+50:null}};
 }
+
+export async function readPurchaseModules(org:string) {
+  await schema();
+  const invoices = await db()`select payload from opsvista_r365_archive_records where organization_id=${org} and view_name='Transaction' and lower(record_type)='ap invoice'`;
+  const catalogs = await db()`select view_name,payload from opsvista_r365_archive_records where organization_id=${org} and view_name in ('Location','Company','Item')`;
+  const dictionary = (view:string,key:string) => new Map(catalogs.filter(r=>r.view_name===view).map(r=>[field(r.payload,key).toLowerCase(),field(r.payload,'name','itemName')]));
+  const locations=dictionary('Location','locationId'), vendors=dictionary('Company','companyId'), items=dictionary('Item','itemId');
+  const headers=new Map<string,{location:string,date:string,number:string}>();
+  const coverage:Record<string,Record<string,number>>={};
+  for(const {payload} of invoices){
+    const location=locations.get(field(payload,'locationId').toLowerCase())||field(payload,'locationName')||'Sucursal sin identificar';
+    const date=field(payload,'date').slice(0,10), month=date.slice(0,7);
+    coverage[location]??={};
+    coverage[location][month]=(coverage[location][month]||0)+1;
+    const vendor=vendors.get(field(payload,'companyId').toLowerCase())||field(payload,'vendorName');
+    if(/\bpfg\b|performance food/i.test(vendor)) headers.set(field(payload,'transactionId').toLowerCase(),{location,date,number:field(payload,'transactionNumber')});
+  }
+  const lines=headers.size?await db()`select payload from opsvista_r365_archive_records where organization_id=${org} and view_name='TransactionDetail' and lower(payload->>'transactionId')=any(${Array.from(headers.keys())}::text[]) and coalesce(payload->>'itemId','')<>''`:[];
+  const prices=lines.flatMap(({payload})=>{
+    const invoice=headers.get(field(payload,'transactionId').toLowerCase());
+    if(!invoice)return [];
+    const id=field(payload,'itemId').toLowerCase(),quantity=Number(field(payload,'quantity')), amount=Number(field(payload,'debit')||field(payload,'amount'));
+    const direct=Number(field(payload,'unitCost','pricePerUnit')),unit=field(payload,'unitOfMeasureName');
+    const cost=direct>0?direct:quantity>0&&amount>0?amount/quantity:null;
+    return [{...invoice,id,item:items.get(id)||field(payload,'comment')||id,unit,cost}];
+  });
+  const [status]=await db()`select state from opsvista_r365_archive_views where organization_id=${org} and view_name='Transaction'`;
+  return {coverage,locations:Array.from(locations.values()),prices,state:status?.state||'pending'};
+}
