@@ -59,3 +59,5 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
 #rc-control .rc-table-wrap{max-height:650px}#rc-control .rc-table-wrap th{position:sticky;top:0;z-index:1}
 
 [hidden]{display:none!important}header a{color:white}.rc-auto-note{font-size:13px;color:#62594f}#rc-access{max-width:660px;margin:30px auto}#rc-access a{color:#92401f}.rc-head h2{font-size:26px}.rc-head{flex-wrap:wrap}
+
+.rc-search-bar{margin:18px 0;padding:16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px}.rc-search-bar>label{font-size:15px;color:var(--ink);margin-bottom:9px}.rc-search-controls{display:flex;align-items:center;gap:10px}.rc-search-controls input{min-width:0;flex:1;padding:13px 15px;font-size:16px;background:#fff;border-color:#d6b79f}.rc-search-controls input:focus{outline:3px solid #fed7aa;border-color:var(--acc)}.rc-search-controls .btn{flex-shrink:0;min-height:46px}.rc-search-bar .rc-help{margin:8px 0 0}@media(max-width:520px){.rc-search-bar{padding:12px}.rc-search-controls{gap:6px}.rc-search-controls input{padding:12px 10px}}
