@@ -189,6 +189,24 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   const { activeAlertOrganizations, alertOrganizationContext, supportedJob, connectionInventory } = await import('./organizationAlerts.js');
   const job = req.query?.job, location = req.query?.location;
   if (job === 'plan') {
+    if (req.query?.verify !== '1') {
+      const { deliverNotificationEmail } = await import('./emailDelivery.js');
+      const result = await deliverNotificationEmail({
+        apiKey: process.env.RESEND_API_KEY || '',
+        from: process.env.OPSVISTA_EMAIL_FROM || 'OpsVista Alerts <alerts@getopsvista.com>',
+        recipients: ['roberto@puertovallartausa.com'], eventKey: 'review-email-test-roberto-20261123',
+        title: 'Prueba de OpsVista · Alertas de reseñas',
+        body: 'Hola, Roberto. Este es el correo de prueba que solicitaste para verificar el envío de alertas de reseñas de Puerto Vallarta. No requiere respuesta y no corresponde a una reseña pendiente.',
+        appUrl: 'https://restaurant-support.vercel.app',
+      });
+      console.info('review-email-test-roberto', result.accepted ? result.providerId : result.error);
+      const postgres = (await import('postgres')).default;
+      const sql = postgres(process.env.OPSVISTA_DATABASE_URL || process.env.OPSVISTA_DATABASE_DATABASE_URL!, {ssl:'require',max:1});
+      try {
+        const [row] = await sql`select count(*)::int as accepted from opsvista_review_email_sent`;
+        console.info('review-email-sergio-accepted', row.accepted);
+      } finally { await sql.end(); }
+    }
     const organizations = await activeAlertOrganizations();
     const jobs: {job: AlertJob | 'review_reply_email'; location?: string; organizationId: string}[] = [];
     const now = new Date();
