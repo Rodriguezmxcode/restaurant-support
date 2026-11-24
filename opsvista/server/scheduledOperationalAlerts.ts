@@ -190,7 +190,7 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   const job = req.query?.job, location = req.query?.location;
   if (job === 'plan') {
     const organizations = await activeAlertOrganizations();
-    const jobs: {job: AlertJob; location?: string; organizationId: string}[] = [];
+    const jobs: {job: AlertJob | 'review_reply_email'; location?: string; organizationId: string}[] = [];
     const now = new Date();
     let configurationFailures = 0;
     for (const org of organizations) {
@@ -198,6 +198,9 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
       if (token) await finishAlertJob('heartbeat', token, 'ok', 'Scheduler authenticated.', now, org.id);
       let connections;
       try { connections = await connectionInventory(org.id); } catch { configurationFailures++; continue; }
+      if (org.id === alertOrganization && org.policy.enabled.reviews && connections.some(c => c.id === 'google' && c.configured)) {
+        for (const location of org.locations) jobs.push({job: 'review_reply_email', location, organizationId: org.id});
+      }
       const { jobProviders } = await import('../shared/connectionHealth.js');
       for (const kind of alertJobs) {
         if (!supportedJob(org.id, kind) || !org.policy.enabled[kind] || !jobProviders[kind].every(provider => connections.some(connection => connection.id === provider && connection.configured))) continue;
@@ -216,6 +219,12 @@ export async function scheduledAlertsEndpoint(req: Request, res: Response) {
   const id = req.query?.organizationId;
   if (id !== undefined && (typeof id !== 'string' || !id || id.length > 160)) return res.status(400).json({error:'Invalid organization'});
   const org = await alertOrganizationContext(typeof id === 'string' ? id : alertOrganization);
+  if (job === 'review_reply_email') {
+    if (org.id !== alertOrganization || !org.policy.enabled.reviews || typeof location !== 'string' || !org.locations.includes(location)) return res.status(400).json({error:'Invalid review email scope'});
+    const { checkReviewReplyEmail } = await import('./reviewReplyEmail.js');
+    const result = await checkReviewReplyEmail(location, req.query?.verify === '1');
+    return res.status(200).json(result);
+  }
   if (typeof job !== 'string' || !alertJobs.includes(job as AlertJob) || (location !== undefined && (typeof location !== 'string' || !org.locations.includes(location)))) return res.status(400).json({error:'Invalid alert job'});
   if (['performance','overtime','tasks'].includes(job) && !location) return res.status(400).json({error:'Location required'});
   if (!supportedJob(org.id, job as AlertJob)) return res.status(400).json({error:'Connection setup required'});

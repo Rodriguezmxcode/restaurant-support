@@ -8,6 +8,7 @@ type EmailInput = {
   title: string;
   body: string;
   appUrl: string;
+  linkLabel?: string;
 };
 
 export type EmailDeliveryResult =
@@ -37,8 +38,8 @@ export async function deliverNotificationEmail(input: EmailInput, request: typeo
       signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         from: input.from, to: recipientList, subject: input.title,
-        text: `${input.body}\n\nAbrir OpsVista: ${appUrl.href}`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#172033"><p style="font-size:13px;font-weight:800;letter-spacing:1px;color:#1769ff">OPSVISTA</p><h1 style="font-size:24px">${escapeHtml(input.title)}</h1><p style="font-size:17px;line-height:1.55">${escapeHtml(input.body)}</p><p style="margin:28px 0"><a href="${escapeHtml(appUrl.href)}" style="background:#1769ff;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700">Abrir OpsVista</a></p><p style="font-size:12px;color:#738096">Restaurant operating intelligence · Mensaje automático</p></div>`,
+        text: `${input.body}\n\n${input.linkLabel || 'Abrir OpsVista'}: ${appUrl.href}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#172033"><p style="font-size:13px;font-weight:800;letter-spacing:1px;color:#1769ff">OPSVISTA</p><h1 style="font-size:24px">${escapeHtml(input.title)}</h1><p style="font-size:17px;line-height:1.55">${escapeHtml(input.body)}</p><p style="margin:28px 0"><a href="${escapeHtml(appUrl.href)}" style="background:#1769ff;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:700">${escapeHtml(input.linkLabel || 'Abrir OpsVista')}</a></p><p style="font-size:12px;color:#738096">Restaurant operating intelligence · Mensaje automático</p></div>`,
       }),
     });
     if (!response.ok) return { accepted: false, error: `Email provider returned ${response.status}` };
