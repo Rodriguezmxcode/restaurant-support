@@ -42,12 +42,29 @@ export async function checkReviewReplyEmail(location: string, verify: boolean) {
     if (!stage || created + stage * hour < last || verify) continue;
     const eventKey = JSON.stringify(['pv-review-email', location, review.id, stage]);
     if ((await sql`select 1 from opsvista_review_email_sent where event_key = ${eventKey}`).length) continue;
-    const when = new Intl.DateTimeFormat('es-US', {timeZone:'America/New_York',dateStyle:'short',timeStyle:'short'}).format(created);
+    const stars = review.rating === 1 ? '1 estrella' : `${review.rating} estrellas`;
+    const intro = `Hola, Sergio. La reseña de ${review.reviewer} para Puerto Vallarta ${location} sigue sin respuesta.`;
+    let title: string;
+    let body: string;
+    if (stage === 3) {
+      const deadline = new Intl.DateTimeFormat('es-US', {
+        timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+      }).format(created + 6 * hour);
+      title = `${location} · ${stars} · Responder antes de ${deadline} (hora de Connecticut)`;
+      body = `${intro} El plazo vence el ${deadline}, hora de Connecticut. Por favor, responde antes de esa hora.`;
+      if (review.comment.trim()) body += ' Menciona un detalle del comentario para que el cliente sepa que lo leímos.';
+    } else if (stage === 6) {
+      title = `Prioridad alta · ${location} · Reseña de ${stars} vencida`;
+      body = `${intro} Ya venció el plazo de 6 horas. Por favor, atiende esta reseña con prioridad.`;
+    } else {
+      title = `${location} · Reseña de ${stars} pendiente de respuesta`;
+      body = `${intro} Ya pasaron 48 horas. Por favor, agradece al cliente su visita.`;
+      if (review.comment.trim()) body += ' Menciona algo específico de su experiencia.';
+    }
     const result = await deliverNotificationEmail({
       apiKey, from: process.env.OPSVISTA_EMAIL_FROM || 'OpsVista Alerts <alerts@getopsvista.com>',
       recipients: [recipient], eventKey,
-      title: `${location} · Reseña de ${review.rating} ★ · ${stage === 3 ? 'Recordatorio' : 'Plazo vencido'}`,
-      body: `Sergio, la reseña de ${review.reviewer} publicada el ${when} (hora de Connecticut) sigue sin respuesta. ${stage === 3 ? 'El plazo para responder es de 6 horas desde la publicación.' : 'Ya pasó el plazo de ' + stage + ' horas. Por favor responde en Google Business Profile.'}`,
+      title, body,
       appUrl: 'https://business.google.com/locations', linkLabel: 'Abrir Google Business Profile',
     });
     if (!result.accepted) throw new Error(result.error);
