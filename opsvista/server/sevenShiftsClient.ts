@@ -479,7 +479,7 @@ export function applyToastLaborToScheduleRisk(risk:SevenShiftsScheduleRisk,input
     const workedOvertimeCost=reportedCost(worked),additionalProjectedOvertimeCost=forecastAvailable?sumCosts(hourly.map(row=>row.additionalProjectedOvertimeCost)):null;
     return {...location,forecastAvailable,workedOvertimeCostSource:costSource(worked),monitoredEmployees:rows.length,riskEmployees:hourly.filter(row=>row.overtimeHours>0).length,
       actualOvertimeHours,additionalProjectedOvertimeHours,projectedOvertimeHours:roundHours(actualOvertimeHours+additionalProjectedOvertimeHours),
-      calculatedOvertimeDifferenceHours:roundHours(hourly.reduce((sum,row)=>sum+(row.calculatedOvertimeDifferenceHours??0),0)),
+      calculatedOvertimeDifferenceHours:roundHours(worked.reduce((sum,row)=>sum+Math.max(0,row.totalHours-risk.thresholdHours),0)-actualOvertimeHours),
       salaryOver40Hours:roundHours(salaries.reduce((sum,row)=>sum+Math.max(row.overtimeHours,row.totalHours-risk.thresholdHours,0),0)),
       unclassifiedToastOvertimeHours:roundHours(unclassified.reduce((sum,row)=>sum+row.overtimeHours,0)),unclassifiedToastEmployees:unclassified.length,
       workedOvertimeCost,additionalProjectedOvertimeCost,
