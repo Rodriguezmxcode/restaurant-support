@@ -262,6 +262,35 @@ test('Nov 3 approved cut counts each restaurant once, uses matching dates and pr
   assert.equal(prior.rows.reduce((n, row) => n + Math.round(row.purchases! * 100), 0), 13247000);
 });
 
+test('a private weekly cut replaces alcohol only for its bonus week and tenant', async () => {
+  const key = 'OPSVISTA_BEVERAGE_BONUS_20261118';
+  const { getApprovedBeverageCut } = await import('./approvedBeverageCuts.js');
+  const cut = { organizationId: 'synthetic-weekly', weekStart: '2026-11-18', reportStart: '2026-09-26', reportEnd: '2026-11-25',
+    rows: beverageLocations.map((location, index) => ({ location, salesCents: 100000, purchasesCents: (index + 1) * 1000 })) };
+  const previous = process.env[key];
+  process.env[key] = JSON.stringify(cut);
+  try {
+    const range = beverageBonusRange('2026-11-24');
+    const score = await getBeverageScore(cut.organizationId, range.start, range.end);
+    assert.deepEqual(score.rows.map(row => row.points), [5, 4, 3, 2, 1, 0]);
+    assert.equal(score.reportingPeriod?.start, cut.reportStart);
+    assert.equal(score.reportingPeriod?.end, cut.reportEnd);
+    assert.match(score.reportingPeriod!.label, /2026-11-18–2026-11-24/);
+    assert.equal(score.provisional, false);
+    assert.equal(await getApprovedBeverageCut('other-tenant', range.start, range.end), undefined);
+    const prior = beverageBonusRange('2026-11-17');
+    assert.equal(await getApprovedBeverageCut(cut.organizationId, prior.start, prior.end), undefined);
+    const next = beverageBonusRange('2026-12-01');
+    assert.equal(await getApprovedBeverageCut(cut.organizationId, next.start, next.end), undefined);
+    process.env[key] = JSON.stringify({ ...cut, weekStart: '2026-11-11' });
+    await assert.rejects(getApprovedBeverageCut(cut.organizationId, range.start, range.end), /Semana/);
+    process.env[key] = JSON.stringify({ ...cut, rows: cut.rows.slice(1) });
+    await assert.rejects(getApprovedBeverageCut(cut.organizationId, range.start, range.end), /Corte aprobado/);
+  } finally {
+    if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+  }
+});
+
 test('approved private cuts persist once and survive removal of deployment seed', async () => {
   const { approvedBeverageSeeds } = await import('./approvedBeverageSeeds.js');
   const { getApprovedBeverageCut, approvedCutScore } = await import('./approvedBeverageCuts.js');
