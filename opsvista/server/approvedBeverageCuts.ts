@@ -30,6 +30,19 @@ export function approvedCutScore(cut: ApprovedBeverageCut, organizationId: strin
 // can include a private seed; the first authorized score read persists it, so
 // subsequent ordinary Git deployments continue to read the same approved cut.
 export async function getApprovedBeverageCut(organizationId: string, start: string, end: string): Promise<BeverageScoreResponse | undefined> {
+  // An operator can lock a private cut to one bonus week through deployment
+  // configuration. Keep its report dates and avoid changing other bonus weeks.
+  const weekStart = addDays(end, -6);
+  const weeklyRecord = process.env['OPSVISTA_BEVERAGE_BONUS_' + weekStart.replace(/-/g, '')];
+  if (weeklyRecord && start === addDays(end, -55)) {
+    const cut = JSON.parse(weeklyRecord) as ApprovedBeverageCut;
+    if (cut.organizationId === organizationId) {
+      if (cut.weekStart !== weekStart) throw new Error('Semana del corte aprobado inválida');
+      const score = approvedCutScore(cut, organizationId, start, end);
+      if (score?.reportingPeriod) score.reportingPeriod.label = `Bebidas · corte aprobado para el bono ${weekStart}–${end}`;
+      return score;
+    }
+  }
   const stored = await getLatestIntegrationSnapshot<ApprovedBeverageCut>(organizationId, 'bonus-beverage-approved');
   const seed = approvedBeverageSeeds.filter(cut => cut.organizationId === organizationId)
     .sort((a, b) => b.reportEnd.localeCompare(a.reportEnd))[0];
