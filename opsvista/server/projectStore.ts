@@ -1,0 +1,40 @@
+import postgres from 'postgres';
+import type { SessionUser } from './authSession.js';
+
+export type ProjectStatus='Planning'|'In Progress'|'Blocked'|'Completed'|'Cancelled';
+export type ProjectPriority='High'|'Medium'|'Low';
+export type ProjectMilestone={id:string;title:string;owner?:string;dueDate?:string;status:'Pending'|'In Progress'|'Completed'};
+export type ProjectRecord={
+  id:string;organizationId:string;name:string;description:string;objective:string;locations:string[];ownerId?:string;ownerName:string;
+  collaborators:string[];status:ProjectStatus;priority:ProjectPriority;startDate:string;dueDate:string;completedAt?:string;
+  budget:number;actualSpend:number;progress:number;milestones:ProjectMilestone[];attachments:Array<{name:string;url:string}>;
+  createdById:string;createdByName:string;createdAt:string;updatedAt:string;
+};
+export type ProjectCreateInput=Pick<ProjectRecord,'name'|'description'|'objective'|'locations'|'ownerName'|'status'|'priority'|'startDate'|'dueDate'|'budget'>&Partial<Pick<ProjectRecord,'ownerId'|'collaborators'|'actualSpend'|'progress'|'milestones'|'attachments'>>;
+export type ProjectUpdateInput=Partial<Pick<ProjectRecord,'description'|'objective'|'locations'|'ownerId'|'ownerName'|'collaborators'|'status'|'priority'|'startDate'|'dueDate'|'completedAt'|'budget'|'actualSpend'|'progress'|'milestones'|'attachments'>>;
+
+let client:ReturnType<typeof postgres>|undefined;let initialized=false;
+function databaseUrl(){return process.env.OPSVISTA_DATABASE_URL||process.env.OPSVISTA_DATABASE_DATABASE_URL||'';}
+function sql(){const url=databaseUrl();if(!url)throw new Error('OpsVista database URL is not configured');if(!client)client=postgres(url,{max:4,idle_timeout:20,connect_timeout:10});return client;}
+async function ensureSchema(){if(initialized)return;const db=sql();await db`create table if not exists opsvista_projects (
+  id text primary key, organization_id text not null, name text not null, description text not null, objective text not null,
+  locations jsonb not null default '[]'::jsonb, owner_id text, owner_name text not null, collaborators jsonb not null default '[]'::jsonb,
+  status text not null default 'Planning', priority text not null default 'Medium', start_date date not null, due_date date not null, completed_at timestamptz,
+  budget numeric(14,2) not null default 0, actual_spend numeric(14,2) not null default 0, progress integer not null default 0,
+  milestones jsonb not null default '[]'::jsonb, attachments jsonb not null default '[]'::jsonb,
+  created_by_id text not null, created_by_name text not null, created_at timestamptz not null, updated_at timestamptz not null default now()
+)`;await db`create table if not exists opsvista_project_audit (
+  id text primary key, project_id text not null, at timestamptz not null, actor_id text not null, actor_name text not null,
+  event text not null, before_value text, after_value text, reason text not null
+)`;await db`create index if not exists opsvista_projects_org_status_idx on opsvista_projects(organization_id,status,due_date)`;await db`create index if not exists opsvista_project_audit_idx on opsvista_project_audit(project_id,at desc)`;initialized=true;}
+const arr=<T>(value:unknown)=>Array.isArray(value)?value as T[]:[];
+function norm(row:Record<string,unknown>):ProjectRecord{return{id:String(row.id),organizationId:String(row.organization_id),name:String(row.name),description:String(row.description),objective:String(row.objective),locations:arr<string>(row.locations),ownerId:row.owner_id?String(row.owner_id):undefined,ownerName:String(row.owner_name),collaborators:arr<string>(row.collaborators),status:String(row.status) as ProjectStatus,priority:String(row.priority) as ProjectPriority,startDate:String(row.start_date).slice(0,10),dueDate:String(row.due_date).slice(0,10),completedAt:row.completed_at?new Date(String(row.completed_at)).toISOString():undefined,budget:Number(row.budget)||0,actualSpend:Number(row.actual_spend)||0,progress:Number(row.progress)||0,milestones:arr<ProjectMilestone>(row.milestones),attachments:arr<{name:string;url:string}>(row.attachments),createdById:String(row.created_by_id),createdByName:String(row.created_by_name),createdAt:new Date(String(row.created_at)).toISOString(),updatedAt:new Date(String(row.updated_at)).toISOString()};}
+const organization=(user:SessionUser)=>user.organizationId||'org-puerto-vallarta';
+const global=(user:SessionUser)=>['Founder','Corporate','HR','Administration','Maintenance'].includes(user.role);
+const canSee=(user:SessionUser,row:ProjectRecord)=>global(user)||row.locations.every(location=>user.locations.includes(location));
+const auditId=()=>`pra-${Date.now()}-${Math.random().toString(36).slice(2,9)}`;
+export async function listProjects(user:SessionUser){await ensureSchema();const rows=await sql()`select * from opsvista_projects where organization_id=${organization(user)} order by case status when 'Blocked' then 0 when 'In Progress' then 1 when 'Planning' then 2 else 3 end,due_date asc`;return rows.map(row=>norm(row)).filter(row=>canSee(user,row));}
+export async function getProject(id:string){await ensureSchema();const rows=await sql()`select * from opsvista_projects where id=${id} limit 1`;return rows[0]?norm(rows[0]):null;}
+export async function listProjectAudit(id:string){await ensureSchema();return await sql()`select * from opsvista_project_audit where project_id=${id} order by at desc`;}
+export async function createProject(input:ProjectCreateInput,actor:SessionUser){await ensureSchema();const id=`PRJ-${Date.now().toString(36).toUpperCase()}`;const at=new Date().toISOString();await sql().begin(async tx=>{await tx`insert into opsvista_projects(id,organization_id,name,description,objective,locations,owner_id,owner_name,collaborators,status,priority,start_date,due_date,budget,actual_spend,progress,milestones,attachments,created_by_id,created_by_name,created_at) values(${id},${organization(actor)},${input.name},${input.description},${input.objective},${tx.json(input.locations)},${input.ownerId??null},${input.ownerName},${tx.json(input.collaborators??[])},${input.status},${input.priority},${input.startDate},${input.dueDate},${input.budget},${input.actualSpend??0},${input.progress??0},${tx.json(input.milestones??[])},${tx.json(input.attachments??[])},${actor.id},${actor.name},${at})`;await tx`insert into opsvista_project_audit(id,project_id,at,actor_id,actor_name,event,after_value,reason) values(${auditId()},${id},${at},${actor.id},${actor.name},'Project created',${input.status},${input.objective})`;});return getProject(id);}
+export async function updateProjectRecord(id:string,patch:ProjectUpdateInput,reason:string,actor:SessionUser){await ensureSchema();const existing=await getProject(id);if(!existing||existing.organizationId!==organization(actor))throw new Error('Project not found');const next={...existing,...patch,progress:Math.max(0,Math.min(100,Number(patch.progress??existing.progress)))};const completedAt=next.status==='Completed'?(next.completedAt||new Date().toISOString()):undefined;await sql().begin(async tx=>{await tx`update opsvista_projects set description=${next.description},objective=${next.objective},locations=${tx.json(next.locations)},owner_id=${next.ownerId??null},owner_name=${next.ownerName},collaborators=${tx.json(next.collaborators)},status=${next.status},priority=${next.priority},start_date=${next.startDate},due_date=${next.dueDate},completed_at=${completedAt??null},budget=${next.budget},actual_spend=${next.actualSpend},progress=${next.status==='Completed'?100:next.progress},milestones=${tx.json(next.milestones)},attachments=${tx.json(next.attachments)},updated_at=now() where id=${id}`;await tx`insert into opsvista_project_audit(id,project_id,at,actor_id,actor_name,event,before_value,after_value,reason) values(${auditId()},${id},${new Date().toISOString()},${actor.id},${actor.name},'Project updated',${`${existing.status} · ${existing.progress}%`},${`${next.status} · ${next.status==='Completed'?100:next.progress}%`},${reason||'Project updated'})`;});return getProject(id);}
