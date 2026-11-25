@@ -93,6 +93,12 @@ export default async function handler(req:Req,res:Res){
     const salaryTiming=candidateTiming&&(start===easternDate||candidateTiming.rows.some(row=>row.status==='open'))?candidateTiming:null;
     const timingByLocation=new Map(salaryTiming?.rows.map(row=>[row.location,row])??[]);
     const round=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
+    const closedOperatingWeek = start === defaultSchedule.start && end === defaultSchedule.end
+      && scheduleStart === start && scheduleEnd === end && overtimeEnd === end && end < easternDate;
+    const weeklyHoursByLocation = new Map(scheduleRisk?.locations.map(location => [
+      location.location.toLowerCase(),
+      round(location.actualOvertimeHours + (location.calculatedOvertimeDifferenceHours ?? 0)),
+    ] as const));
     const locations=toastLocations.map(row=>{
       const {employeeLabor:_,...publicRow}=row;
       const salaryRow=salaryByLocation.get(row.location);
@@ -100,6 +106,10 @@ export default async function handler(req:Req,res:Res){
       const totalLaborCost=row.hourlyLaborCost+salaryLaborCost;
       return {
         ...publicRow,
+        ...(closedOperatingWeek && weeklyHoursByLocation.has(row.location.toLowerCase()) ? {
+          overtimeHours: weeklyHoursByLocation.get(row.location.toLowerCase())!,
+          overtimeLaborPct: row.hourlyHours ? round(weeklyHoursByLocation.get(row.location.toLowerCase())! / row.hourlyHours * 100) : 0,
+        } : {}),
         salaryLaborCost,
         totalLaborCost:round(totalLaborCost),
         hourlyLaborPct:row.netSales?round(row.hourlyLaborCost/row.netSales*100):0,
