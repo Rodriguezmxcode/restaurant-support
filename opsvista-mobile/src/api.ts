@@ -12,7 +12,12 @@ async function request<T>(path:string,init?:RequestInit):Promise<T>{
 }
 
 export const authApi={
-  login:(email:string,password:string)=>request<{user:OpsVistaUser}>('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})}),
+  security:<T>(accessToken: string, action: string, fields: {challengeId?: string; code?: string} = {}) =>
+    request<T>('/api/auth/session', {
+      method: 'POST',
+      headers: {Origin: new URL(API_BASE_URL).origin},
+      body: JSON.stringify({accessToken, action, ...fields}),
+    }),
   session:()=>request<{authenticated:boolean;user:OpsVistaUser}>('/api/auth/session'),
   logout:()=>request<{ok:boolean}>('/api/auth/logout',{method:'POST'}),
 };

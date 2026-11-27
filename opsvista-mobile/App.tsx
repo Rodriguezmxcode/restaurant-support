@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View} from 'react-native';
 import {actionApi, authApi, performanceApi} from './src/api';
+import {beginSignIn, clearSignIn, completeSignIn} from './src/signIn';
 import {listenForActionPush, registerPushDevice} from './src/push';
 import type {ActionNotificationDetail, ActionRecord, OpsVistaUser, PerformanceResponse, SuggestedAssignee} from './src/types';
 import {colors, shadow} from './src/theme';
@@ -22,13 +23,41 @@ function Login({onLogin}: {onLogin: (user: OpsVistaUser) => void}) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [verification, setVerification] = useState<Parameters<typeof completeSignIn>[0]>();
+  const [code, setCode] = useState('');
   const submit = async () => {
     if (busy) return;
-    if (!email.trim() || !password) {setError('Escribe tu correo y contraseña.'); return;}
-    setBusy(true); setError('');
-    try {onLogin((await authApi.login(email.trim(), password)).user);}
-    catch (reason) {setError(message(reason));} finally {setBusy(false);}
+    if (verification ? !/^\d{6}$/.test(code) : !email.trim() || !password) {
+      setError(verification ? 'Escribe el código de seis dígitos.' : 'Escribe tu correo y contraseña.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (verification) {
+        onLogin(await completeSignIn(verification, code));
+      } else {
+        const result = await beginSignIn(email.trim(), password);
+        setPassword('');
+        if ('user' in result) onLogin(result.user);
+        else setVerification(result.verification);
+      }
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const resetVerification = async () => {
+    setBusy(true);
+    await clearSignIn();
+    setCode('');
+    setError('');
+    setVerification(undefined);
+    setBusy(false);
+  };
+
   return <SafeAreaView style={styles.loginSafe}>
     <StatusBar barStyle="light-content"/>
     <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -41,14 +70,22 @@ function Login({onLogin}: {onLogin: (user: OpsVistaUser) => void}) {
         </View>
         <View style={styles.loginCard}>
           <Text style={styles.loginHeading}>Bienvenido de nuevo</Text>
+          {verification ? <>
+            <Text style={styles.inputLabel}>{verification.method === 'push' ? 'Código de la notificación de OpsVista' : 'Código del Authenticator'}</Text>
+            <TextInput accessibilityLabel="Código de verificación" style={styles.input} value={code} onChangeText={setCode} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6}/>
+          </> : <>
           <Text style={styles.inputLabel}>Correo de trabajo</Text>
           <TextInput accessibilityLabel="Correo de trabajo" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} autoComplete="email" textContentType="username" keyboardType="email-address" placeholder="tu@restaurante.com" placeholderTextColor={colors.muted}/>
           <Text style={styles.inputLabel}>Contraseña</Text>
           <TextInput accessibilityLabel="Contraseña" style={styles.input} value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" textContentType="password" placeholder="Tu contraseña" placeholderTextColor={colors.muted} returnKeyType="go" onSubmitEditing={() => void submit()}/>
+          </>}
           {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
           <Pressable accessibilityRole="button" accessibilityState={{disabled: busy, busy}} style={[styles.button, busy && styles.disabled]} disabled={busy} onPress={() => void submit()}>
-            {busy ? <ActivityIndicator color={colors.navy}/> : <Text style={styles.buttonText}>Entrar a OpsVista →</Text>}
+            {busy ? <ActivityIndicator color={colors.navy}/> : <Text style={styles.buttonText}>{verification ? 'Verificar código' : 'Entrar a OpsVista →'}</Text>}
           </Pressable>
+          {verification ? <Pressable accessibilityRole="button" disabled={busy} onPress={() => void resetVerification()}>
+            <Text style={styles.security}>Volver al inicio de sesión</Text>
+          </Pressable> : null}
           <Text style={styles.security}>Usa la cuenta de tu organización. Si necesitas acceso, contacta a tu administrador.</Text>
         </View>
       </ScrollView>
