@@ -22,8 +22,18 @@ export const authApi={
   logout:()=>request<{ok:boolean}>('/api/auth/logout',{method:'POST'}),
 };
 
-export function easternToday(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
-export const performanceApi={today:()=>{const day=easternToday();return request<PerformanceResponse>(`/api/operations/performance?start=${day}&end=${day}&include_tasks=false`);}};
+export function easternToday() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find(item => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export const performanceApi = {
+  range: (start: string, end: string) =>
+    request<PerformanceResponse>(`/api/operations/performance?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&include_tasks=false`),
+};
 export const actionApi={
   list:()=>request<{actions:ActionRecord[];assignees:Assignee[]}>('/api/workflows?resource=actions'),
   detail:(id:string)=>request<{action:ActionRecord;notification:ActionNotificationDetail}>(`/api/workflows?resource=actions&id=${encodeURIComponent(id)}`),

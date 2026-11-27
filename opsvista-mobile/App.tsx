@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View} from 'react-native';
-import {actionApi, authApi, performanceApi} from './src/api';
+import {actionApi, authApi, easternToday, performanceApi} from './src/api';
 import {beginSignIn, clearSignIn, completeSignIn} from './src/signIn';
 import {listenForActionPush, registerPushDevice} from './src/push';
 import type {ActionNotificationDetail, ActionRecord, OpsVistaUser, PerformanceResponse, SuggestedAssignee} from './src/types';
@@ -121,10 +121,27 @@ function ActionDetail({item,user,onClose,onChanged}:{item:ActionRecord;user:OpsV
 }
 
 
+function shiftDay(day: string, offset: number) {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function validDay(day: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const timestamp = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === day;
+}
+
 export default function App() {
   const [user, setUser] = useState<OpsVistaUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>('home');
+  const [period, setPeriod] = useState<'today' | 'yesterday' | 'week' | 'custom'>('today');
+  const [customRange, setCustomRange] = useState({start: '', end: ''});
+  const [showDates, setShowDates] = useState(false);
+  const [draft, setDraft] = useState({start: '', end: ''});
+  const [dateError, setDateError] = useState('');
   const [performance, setPerformance] = useState<PerformanceResponse | null>(null);
   const [actions, setActions] = useState<ActionRecord[]>([]);
   const [actionsReady, setActionsReady] = useState(false);
@@ -143,7 +160,11 @@ export default function App() {
   const load = useCallback(async () => {
     if (!user) return;
     const sequence = ++requestSequence.current;
-    const [daily, actionList] = await Promise.allSettled([performanceApi.today(), actionApi.list()]);
+    const today = easternToday();
+    const end = period === 'custom' ? customRange.end : period === 'today' ? today : shiftDay(today, -1);
+    const daysSinceWednesday = (new Date(`${end}T00:00:00Z`).getUTCDay() + 4) % 7;
+    const start = period === 'custom' ? customRange.start : period === 'week' ? shiftDay(end, -daysSinceWednesday) : end;
+    const [daily, actionList] = await Promise.allSettled([performanceApi.range(start, end), actionApi.list()]);
     if (sessionId.current !== user.id || sequence !== requestSequence.current) return;
     const errors: string[] = [];
     if (daily.status === 'fulfilled') setPerformance(daily.value);
@@ -152,7 +173,7 @@ export default function App() {
     else errors.push(`Acciones: ${message(actionList.reason)}`);
     setError(errors.join('\n'));
     if (!errors.length) setUpdated(new Date().toISOString());
-  }, [user?.id]);
+  }, [user?.id, period, customRange]);
   useEffect(() => {authApi.session().then(result => setUser(result.authenticated ? result.user : null)).catch(() => setUser(null)).finally(() => setChecking(false));}, []);
   useEffect(() => {if (user) void load();}, [load]);
   useEffect(() => {
@@ -178,6 +199,7 @@ export default function App() {
     try {
       await authApi.logout(); sessionId.current = undefined; ++requestSequence.current;
       setUser(null); setPerformance(null); setActions([]); setActionsReady(false); setSelected(null);
+      setPeriod('today'); setCustomRange({start: '', end: ''}); setShowDates(false);
       setLocation(''); setQuery(''); setError(''); setUpdated(''); setPushEnabled(false);
       setPushStatus('Recibe avisos de las acciones asignadas a ti.');
     } catch (reason) {setError(`No se pudo cerrar la sesión: ${message(reason)}`);}
@@ -194,8 +216,32 @@ export default function App() {
   if (selected) return <ActionDetail item={actions.find(item => item.id === selected.id) || selected} user={user} onClose={() => setSelected(null)} onChanged={load}/>;
   const initials = user.name.split(' ').slice(0, 2).map(value => value[0]).join('');
   const maxSales = Math.max(0, ...rows.map(row => row.netSales));
+  const periodLabel = period === 'today' ? 'Hoy' : period === 'yesterday' ? 'Ayer' : period === 'week' ? 'Semana hasta ayer' :
+    customRange.start === customRange.end ? customRange.start : `${customRange.start} a ${customRange.end}`;
+  const choosePeriod = (next: typeof period) => {
+    if (next !== period || next === 'custom') {
+      ++requestSequence.current;
+      setPerformance(null);
+      setUpdated('');
+      setError('');
+      setPeriod(next);
+    }
+    setShowDates(false);
+  };
+  const applyDates = () => {
+    if (!validDay(draft.start) || !validDay(draft.end) || draft.start > draft.end || draft.end > easternToday()) {
+      setDateError('Usa AAAA-MM-DD y elige un rango válido hasta hoy.');
+      return;
+    }
+    if (draft.end > shiftDay(draft.start, 30)) {
+      setDateError('Elige un rango de hasta 31 días.');
+      return;
+    }
+    setCustomRange({...draft});
+    choosePeriod('custom');
+  };
   const changeTab = (next: Tab) => {setTab(next); setQuery('');};
-  const title = {home: 'Tu operación, hoy', actions: 'Centro de acciones', mine: 'Mis tareas', alerts: 'Alertas', profile: 'Mi cuenta'}[tab];
+  const title = {home: 'Tu operación', actions: 'Centro de acciones', mine: 'Mis tareas', alerts: 'Alertas', profile: 'Mi cuenta'}[tab];
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="light-content"/>
     <View style={styles.header}><View style={{flex: 1}}><Text style={styles.brand}>OPSVISTA</Text><Text style={styles.pageTitle}>{title}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Abrir mi cuenta" style={[styles.avatar, {minWidth: 44, minHeight: 44}]} onPress={() => changeTab('profile')}><Text style={styles.avatarText}>{initials}</Text></Pressable></View>
@@ -205,20 +251,41 @@ export default function App() {
     <ScrollView style={styles.content} contentContainerStyle={styles.contentPad} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.green}/>}>
       {error ? <View accessibilityRole="alert"><Text style={styles.errorBanner}>{error}{updated ? '\nSe muestran los últimos datos recibidos.' : ''}</Text><Pressable accessibilityRole="button" onPress={() => void refresh()} style={styles.textButton}><Text style={styles.textButtonLabel}>Reintentar actualización</Text></Pressable></View> : null}
       {tab === 'home' && <>
+        <Text style={styles.sectionLabel}>Fecha de ventas</Text>
+        <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8}}>
+          {([{key: 'today', label: 'Hoy'}, {key: 'yesterday', label: 'Ayer'}, {key: 'week', label: 'Semana hasta ayer'}] as const).map(item =>
+            <Pressable key={item.key} accessibilityRole="button" accessibilityState={{selected: period === item.key}}
+              style={[styles.scopeChip, {minHeight: 44, justifyContent: 'center'}, period === item.key && styles.scopeActive]} onPress={() => choosePeriod(item.key)}>
+              <Text style={[styles.scopeText, period === item.key && styles.scopeTextActive]}>{item.label}</Text>
+            </Pressable>)}
+          <Pressable accessibilityRole="button" accessibilityState={{expanded: showDates}}
+            style={[styles.scopeChip, {minHeight: 44, justifyContent: 'center'}, period === 'custom' && styles.scopeActive]}
+            onPress={() => {setShowDates(!showDates); setDateError(''); const today = easternToday(); setDraft(customRange.start ? customRange : {start: today, end: today});}}>
+            <Text style={[styles.scopeText, period === 'custom' && styles.scopeTextActive]}>Elegir fechas</Text>
+          </Pressable>
+        </View>
+        {showDates && <View>
+          <Text style={styles.inputLabel}>Desde (AAAA-MM-DD)</Text>
+          <TextInput accessibilityLabel="Fecha desde" style={styles.input} value={draft.start} onChangeText={start => setDraft({...draft, start})}/>
+          <Text style={styles.inputLabel}>Hasta (AAAA-MM-DD)</Text>
+          <TextInput accessibilityLabel="Fecha hasta" style={styles.input} value={draft.end} onChangeText={end => setDraft({...draft, end})}/>
+          {dateError ? <Text accessibilityRole="alert" style={styles.errorText}>{dateError}</Text> : null}
+          <Pressable accessibilityRole="button" style={styles.button} onPress={applyDates}><Text style={styles.buttonText}>Aplicar fechas</Text></Pressable>
+        </View>}
         <Text style={styles.sync}>{updated ? `Última actualización · ${dateTime(updated)} · ET` : 'Esperando datos de tu operación'}</Text>
         <View style={styles.hero}><Image source={restaurantScene} style={styles.dashboardScene} resizeMode="cover" accessibilityLabel="Ambiente ilustrativo de restaurante y bar"/><Text style={styles.heroEyebrow}>CADA DECISIÓN CUENTA</Text><Text style={styles.heroTitle}>Hola, {user.name.split(' ')[0]}</Text><Text style={styles.heroCopy}>{actionsReady ? `${open.length} acciones abiertas${location ? ` en ${location}` : ''}. ${mine.length} necesitan tu seguimiento.` : 'Estamos consultando tus acciones e indicadores.'}</Text><Pressable accessibilityRole="button" style={styles.button} onPress={() => changeTab('mine')}><Text style={styles.buttonText}>Ver mis tareas →</Text></Pressable></View>
         <View style={styles.metrics}>
-          <Metric label="Ventas netas" value={money(total?.netSales)} note="Hoy · USD · hora del Este" tone={colors.green}/>
+          <Metric label="Ventas netas" value={money(total?.netSales)} note={`${periodLabel} · USD · ET`} tone={colors.green}/>
           <Metric label="Costo de labor" value={number(total?.totalLaborPct, '%')} note={`${money(total?.totalLaborCost)} de las ventas`} tone={colors.blue}/>
           <Metric label="Horas trabajadas" value={number(total?.hourlyHours)} note={`${number(total?.overtimeHours)} h extra`} tone={colors.blue}/>
           <Metric label="Prioridad alta" value={actionsReady ? String(open.filter(item => item.severity === 'High').length) : '—'} note="Acciones abiertas" tone={colors.amber}/>
         </View>
-        <View style={styles.sectionHead}><Text style={styles.sectionLabel}>Ventas por restaurante</Text><Badge text="Hoy · USD"/></View>
+        <View style={styles.sectionHead}><Text style={styles.sectionLabel}>Ventas por restaurante</Text><Badge text={`${periodLabel} · USD`}/></View>
         {rows.length ? <View style={styles.chart}>{rows.map(row => <View key={row.location} style={styles.chartRow} accessible accessibilityLabel={`${row.location}: ventas netas ${money(row.netSales)}, labor ${number(row.totalLaborPct, '%')}`}>
           <View style={styles.chartLabels}><Text style={styles.chartName}>{row.location}</Text><Text style={styles.chartValue}>{money(row.netSales)}</Text></View>
           <View style={styles.barTrack}><View style={[styles.bar, {width: `${maxSales > 0 ? Math.max(0, row.netSales) / maxSales * 100 : 0}%`}]}/></View>
           <Text style={styles.chartMeta}>Labor {number(row.totalLaborPct, '%')} · {money(row.totalLaborCost)}</Text>
-        </View>)}<Text style={[styles.chartMeta, {marginTop: 18}]}>Ventas netas reportadas; no representan utilidad neta.</Text></View> : <Empty title={performance ? 'Sin ventas disponibles' : 'Indicadores pendientes'} copy="Actualiza para consultar los datos de hoy."/>}
+        </View>)}<Text style={[styles.chartMeta, {marginTop: 18}]}>Ventas netas reportadas; no representan utilidad neta.</Text></View> : <Empty title={performance ? 'Sin ventas disponibles' : 'Indicadores pendientes'} copy={performance ? "Cambia la fecha o la locación." : "Consultando ventas del periodo seleccionado."}/>}
         <View style={styles.sectionHead}><Text style={styles.sectionLabel}>Primero lo importante</Text><Pressable accessibilityRole="button" style={styles.textButton} onPress={() => changeTab('actions')}><Text style={styles.textButtonLabel}>Ver todo →</Text></Pressable></View>
         {open.slice(0, 3).map(item => <ActionCard key={item.id} item={item} onOpen={setSelected}/>)}
         {actionsReady && !open.length && <Empty title="Todo al día" copy="No hay acciones abiertas en esta selección."/>}
