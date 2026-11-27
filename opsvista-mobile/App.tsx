@@ -96,8 +96,16 @@ function Badge({text, tone = 'blue'}: {text: string; tone?: 'red' | 'amber' | 'b
   const palette = {red: [colors.softRed, colors.red], amber: [colors.softAmber, colors.amber], blue: [colors.softBlue, colors.blue], green: [colors.softGreen, colors.green]};
   return <View style={[styles.badge, {backgroundColor: palette[tone][0]}]}><Text style={[styles.badgeText, {color: palette[tone][1]}]}>{text}</Text></View>;
 }
-function Metric({label, value, note, tone}: {label: string; value: string; note: string; tone: string}) {
-  return <View style={styles.metric}><View style={[styles.metricLine, {backgroundColor: tone}]}/><Text style={styles.metricLabel}>{label}</Text><Text style={[styles.metricValue, {color: tone}]}>{value}</Text><Text style={styles.metricNote}>{note}</Text></View>;
+function Metric({label, value, note, tone, onPress}: {label: string; value: string; note: string; tone: string; onPress?: () => void}) {
+  const content = <>
+    <View style={[styles.metricLine, {backgroundColor: tone}]}/>
+    <Text style={styles.metricLabel}>{label}{onPress ? '  ›' : ''}</Text>
+    <Text style={styles.metricValue}>{value}</Text>
+    <Text style={styles.metricNote}>{note}</Text>
+  </>;
+  return onPress
+    ? <Pressable accessibilityRole="button" accessibilityLabel={`Ver ${label}, ${value}`} style={styles.metric} onPress={onPress}>{content}</Pressable>
+    : <View style={styles.metric}>{content}</View>;
 }
 function Empty({title, copy}: {title: string; copy: string}) {
   return <View style={styles.empty}><Text style={styles.emptyMark}>○</Text><Text style={styles.emptyTitle}>{title}</Text><Text style={styles.emptyCopy}>{copy}</Text></View>;
@@ -137,6 +145,12 @@ export default function App() {
   const [user, setUser] = useState<OpsVistaUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>('home');
+  const [metricDetail, setMetricDetail] = useState<'sales' | 'labor'>();
+  const dashboardScroll = useRef<ScrollView>(null);
+  const openMetric = (metric: 'sales' | 'labor') => {
+    setMetricDetail(metric);
+    dashboardScroll.current?.scrollTo({y: 0, animated: false});
+  };
   const [period, setPeriod] = useState<'today' | 'yesterday' | 'week' | 'custom'>('today');
   const [customRange, setCustomRange] = useState({start: '', end: ''});
   const [showDates, setShowDates] = useState(false);
@@ -198,7 +212,7 @@ export default function App() {
   const logout = async () => {
     try {
       await authApi.logout(); sessionId.current = undefined; ++requestSequence.current;
-      setUser(null); setPerformance(null); setActions([]); setActionsReady(false); setSelected(null);
+      setUser(null); setMetricDetail(undefined); setPerformance(null); setActions([]); setActionsReady(false); setSelected(null);
       setPeriod('today'); setCustomRange({start: '', end: ''}); setShowDates(false);
       setLocation(''); setQuery(''); setError(''); setUpdated(''); setPushEnabled(false);
       setPushStatus('Recibe avisos de las acciones asignadas a ti.');
@@ -240,18 +254,21 @@ export default function App() {
     setCustomRange({...draft});
     choosePeriod('custom');
   };
-  const changeTab = (next: Tab) => {setTab(next); setQuery('');};
-  const title = {home: 'Tu operación', actions: 'Centro de acciones', mine: 'Mis tareas', alerts: 'Alertas', profile: 'Mi cuenta'}[tab];
+  const changeTab = (next: Tab) => {setTab(next); setMetricDetail(undefined); setQuery('');};
+  const title = {home: metricDetail === 'sales' ? 'Ventas' : metricDetail === 'labor' ? 'Labor' : 'Tu operación', actions: 'Centro de acciones', mine: 'Mis tareas', alerts: 'Alertas', profile: 'Mi cuenta'}[tab];
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="light-content"/>
     <View style={styles.header}><View style={{flex: 1}}><Text style={styles.brand}>OPSVISTA</Text><Text style={styles.pageTitle}>{title}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Abrir mi cuenta" style={[styles.avatar, {minWidth: 44, minHeight: 44}]} onPress={() => changeTab('profile')}><Text style={styles.avatarText}>{initials}</Text></Pressable></View>
     {tab !== 'profile' && <View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scopeRow}>
       {['', ...locations].map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{selected: value === location}} style={[styles.scopeChip, location === value && styles.scopeActive]} onPress={() => setLocation(value)}><Text style={[styles.scopeText, location === value && styles.scopeTextActive]}>{value || 'Todas las locaciones'}</Text></Pressable>)}
     </ScrollView></View>}
-    <ScrollView style={styles.content} contentContainerStyle={styles.contentPad} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.green}/>}>
+    <ScrollView ref={dashboardScroll} style={styles.content} contentContainerStyle={styles.contentPad} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.green}/>}>
       {error ? <View accessibilityRole="alert"><Text style={styles.errorBanner}>{error}{updated ? '\nSe muestran los últimos datos recibidos.' : ''}</Text><Pressable accessibilityRole="button" onPress={() => void refresh()} style={styles.textButton}><Text style={styles.textButtonLabel}>Reintentar actualización</Text></Pressable></View> : null}
       {tab === 'home' && <>
-        <Text style={styles.sectionLabel}>Fecha de ventas</Text>
+        {metricDetail && <Pressable accessibilityRole="button" style={[styles.textButton, {alignSelf: 'flex-start'}]} onPress={() => setMetricDetail(undefined)}>
+          <Text style={styles.textButtonLabel}>‹ Volver al tablero</Text>
+        </Pressable>}
+        <Text style={styles.sectionLabel}>{metricDetail === 'labor' ? 'Fecha de labor' : 'Fecha de ventas'}</Text>
         <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8}}>
           {([{key: 'today', label: 'Hoy'}, {key: 'yesterday', label: 'Ayer'}, {key: 'week', label: 'Semana hasta ayer'}] as const).map(item =>
             <Pressable key={item.key} accessibilityRole="button" accessibilityState={{selected: period === item.key}}
@@ -273,22 +290,27 @@ export default function App() {
           <Pressable accessibilityRole="button" style={styles.button} onPress={applyDates}><Text style={styles.buttonText}>Aplicar fechas</Text></Pressable>
         </View>}
         <Text style={styles.sync}>{updated ? `Última actualización · ${dateTime(updated)} · ET` : 'Esperando datos de tu operación'}</Text>
-        <View style={styles.hero}><Image source={restaurantScene} style={styles.dashboardScene} resizeMode="cover" accessibilityLabel="Ambiente ilustrativo de restaurante y bar"/><Text style={styles.heroEyebrow}>CADA DECISIÓN CUENTA</Text><Text style={styles.heroTitle}>Hola, {user.name.split(' ')[0]}</Text><Text style={styles.heroCopy}>{actionsReady ? `${open.length} acciones abiertas${location ? ` en ${location}` : ''}. ${mine.length} necesitan tu seguimiento.` : 'Estamos consultando tus acciones e indicadores.'}</Text><Pressable accessibilityRole="button" style={styles.button} onPress={() => changeTab('mine')}><Text style={styles.buttonText}>Ver mis tareas →</Text></Pressable></View>
+        {!metricDetail && <><View style={styles.hero}><Image source={restaurantScene} style={styles.dashboardScene} resizeMode="cover" accessibilityLabel="Ambiente ilustrativo de restaurante y bar"/><Text style={styles.heroEyebrow}>CADA DECISIÓN CUENTA</Text><Text style={styles.heroTitle}>Hola, {user.name.split(' ')[0]}</Text><Text style={styles.heroCopy}>{actionsReady ? `${open.length} acciones abiertas${location ? ` en ${location}` : ''}. ${mine.length} necesitan tu seguimiento.` : 'Estamos consultando tus acciones e indicadores.'}</Text><Pressable accessibilityRole="button" style={styles.button} onPress={() => changeTab('mine')}><Text style={styles.buttonText}>Ver mis tareas →</Text></Pressable></View>
         <View style={styles.metrics}>
-          <Metric label="Ventas netas" value={money(total?.netSales)} note={`${periodLabel} · USD · ET`} tone={colors.green}/>
-          <Metric label="Costo de labor" value={number(total?.totalLaborPct, '%')} note={`${money(total?.totalLaborCost)} de las ventas`} tone={colors.blue}/>
+          <Metric label="Ventas netas" value={money(total?.netSales)} note={`${periodLabel} · USD · ET`} tone={colors.green} onPress={() => openMetric('sales')}/>
+          <Metric label="Costo de labor" value={number(total?.totalLaborPct, '%')} note={`${money(total?.totalLaborCost)} de las ventas`} tone={colors.blue} onPress={() => openMetric('labor')}/>
           <Metric label="Horas trabajadas" value={number(total?.hourlyHours)} note={`${number(total?.overtimeHours)} h extra`} tone={colors.blue}/>
           <Metric label="Prioridad alta" value={actionsReady ? String(open.filter(item => item.severity === 'High').length) : '—'} note="Acciones abiertas" tone={colors.amber}/>
         </View>
-        <View style={styles.sectionHead}><Text style={styles.sectionLabel}>Ventas por restaurante</Text><Badge text={`${periodLabel} · USD`}/></View>
+        </>}
+        {metricDetail === 'labor' && <View style={styles.metrics}>
+          <Metric label="Costo de labor" value={number(total?.totalLaborPct, '%')} note={money(total?.totalLaborCost)} tone={colors.blue}/>
+          <Metric label="Horas trabajadas" value={number(total?.hourlyHours)} note={`${number(total?.overtimeHours)} h extra`} tone={colors.blue}/>
+        </View>}
+        <View style={styles.sectionHead}><Text style={styles.sectionLabel}>{metricDetail === 'labor' ? 'Labor por restaurante' : 'Ventas por restaurante'}</Text><Badge text={`${periodLabel} · USD`}/></View>
         {rows.length ? <View style={styles.chart}>{rows.map(row => <View key={row.location} style={styles.chartRow} accessible accessibilityLabel={`${row.location}: ventas netas ${money(row.netSales)}, labor ${number(row.totalLaborPct, '%')}`}>
-          <View style={styles.chartLabels}><Text style={styles.chartName}>{row.location}</Text><Text style={styles.chartValue}>{money(row.netSales)}</Text></View>
-          <View style={styles.barTrack}><View style={[styles.bar, {width: `${maxSales > 0 ? Math.max(0, row.netSales) / maxSales * 100 : 0}%`}]}/></View>
+          <View style={styles.chartLabels}><Text style={styles.chartName}>{row.location}</Text><Text style={styles.chartValue}>{metricDetail === 'labor' ? number(row.totalLaborPct, '%') : money(row.netSales)}</Text></View>
+          {metricDetail !== 'labor' && <View style={styles.barTrack}><View style={[styles.bar, {width: `${maxSales > 0 ? Math.max(0, row.netSales) / maxSales * 100 : 0}%`}]}/></View>}
           <Text style={styles.chartMeta}>Labor {number(row.totalLaborPct, '%')} · {money(row.totalLaborCost)}</Text>
-        </View>)}<Text style={[styles.chartMeta, {marginTop: 18}]}>Ventas netas reportadas; no representan utilidad neta.</Text></View> : <Empty title={performance ? 'Sin ventas disponibles' : 'Indicadores pendientes'} copy={performance ? "Cambia la fecha o la locación." : "Consultando ventas del periodo seleccionado."}/>}
-        <View style={styles.sectionHead}><Text style={styles.sectionLabel}>Primero lo importante</Text><Pressable accessibilityRole="button" style={styles.textButton} onPress={() => changeTab('actions')}><Text style={styles.textButtonLabel}>Ver todo →</Text></Pressable></View>
+        </View>)}<Text style={[styles.chartMeta, {marginTop: 18}]}>{metricDetail === 'labor' ? 'Costo de labor y porcentaje de las ventas.' : 'Ventas netas reportadas; no representan utilidad neta.'}</Text></View> : <Empty title={performance ? 'Sin datos para este periodo' : 'Indicadores pendientes'} copy={performance ? "Cambia la fecha o la locación." : "Consultando datos del periodo seleccionado."}/>}
+        {!metricDetail && <><View style={styles.sectionHead}><Text style={styles.sectionLabel}>Primero lo importante</Text><Pressable accessibilityRole="button" style={styles.textButton} onPress={() => changeTab('actions')}><Text style={styles.textButtonLabel}>Ver todo →</Text></Pressable></View>
         {open.slice(0, 3).map(item => <ActionCard key={item.id} item={item} onOpen={setSelected}/>)}
-        {actionsReady && !open.length && <Empty title="Todo al día" copy="No hay acciones abiertas en esta selección."/>}
+        {actionsReady && !open.length && <Empty title="Todo al día" copy="No hay acciones abiertas en esta selección."/>}</>}
       </>}
       {(tab === 'actions' || tab === 'mine' || tab === 'alerts') && <>
         {tab === 'alerts' ? <View style={styles.pushCard}><Text style={styles.pushTitle}>Tu equipo, conectado</Text><Text style={styles.pushStatus}>{pushStatus}</Text>{!pushEnabled && <Pressable accessibilityRole="button" disabled={pushBusy} style={[styles.button, pushBusy && styles.disabled]} onPress={() => void enablePush()}><Text style={styles.buttonText}>{pushBusy ? 'Activando…' : 'Activar notificaciones'}</Text></Pressable>}</View> : <Text style={styles.helper}>{tab === 'mine' ? 'Tus responsabilidades, ordenadas por prioridad.' : 'De la señal a la solución. Asigna y da seguimiento.'}</Text>}
